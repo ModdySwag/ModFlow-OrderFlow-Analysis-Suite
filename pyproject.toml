@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "orderflow-system"
+version = "0.1.0"
+description = "Semi-automated orderflow trading alert system based on Fabio's methodology"
+requires-python = ">=3.10"
+dependencies = [
+    "websockets>=12.0",
+    "aiohttp>=3.9",
+    "pandas>=2.1",
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "python-telegram-bot>=21.0",
+    "plotly>=5.18",
+    "kaleido>=0.2.1",
+    "aiosqlite>=0.19",
+    "pytz>=2024.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+orderflow = "orderflow_system.main:main"

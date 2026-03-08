@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orderflow Trading Terminal</title>
+    <link rel="stylesheet" href="/static/style.css?v=8">
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+    <!-- ═══ Header ═══ -->
+    <header id="header">
+        <div class="header-left">
+            <h1>ORDERFLOW TERMINAL</h1>
+        </div>
+        <div class="header-center">
+            <div class="control-group">
+                <label class="control-label" for="symbolSelect">PAIR</label>
+                <select id="symbolSelect" class="terminal-select"></select>
+            </div>
+            <div class="control-group">
+                <label class="control-label">TF</label>
+                <div class="btn-group" id="tfGroup">
+                    <button class="tf-btn active" data-tf="60">1m</button>
+                    <button class="tf-btn" data-tf="300">5m</button>
+                    <button class="tf-btn" data-tf="900">15m</button>
+                    <button class="tf-btn" data-tf="3600">1H</button>
+                    <button class="tf-btn" data-tf="14400">4H</button>
+                    <button class="tf-btn" data-tf="86400">1D</button>
+                </div>
+            </div>
+            <div class="control-group">
+                <label class="control-label">RANGE</label>
+                <div class="btn-group" id="rangeGroup">
+                    <button class="range-btn" data-range="3600">1H</button>
+                    <button class="range-btn" data-range="14400">4H</button>
+                    <button class="range-btn active" data-range="86400">1D</button>
+                    <button class="range-btn" data-range="604800">1W</button>
+                    <button class="range-btn" data-range="2592000">1M</button>
+                </div>
+            </div>
+            <div class="control-group">
+                <label class="control-label">CHART</label>
+                <div class="btn-group" id="chartTypeGroup">
+                    <button class="chart-btn active" data-chart="candles">Candles</button>
+                    <button class="chart-btn" data-chart="line">Line</button>
+                    <button class="chart-btn" data-chart="area">Area</button>
+                    <button class="chart-btn" data-chart="bars">Bars</button>
+                    <button class="chart-btn" data-chart="baseline">Base</button>
+                </div>
+            </div>
+        </div>
+        <div class="header-right">
+            <span class="ws-status" id="wsStatus">
+                <span class="ws-dot disconnected"></span> Disconnected
+            </span>
+            <span class="data-source" id="dataSource">--</span>
+        </div>
+    </header>
+
+    <!-- ═══ Main Layout ═══ -->
+    <main id="mainGrid">
+        <!-- Waiting overlay -->
+        <div id="waitingOverlay">
+            <div class="waiting-content">
+                <div class="waiting-icon">📊</div>
+                <div class="waiting-title">Select a Pair to Begin</div>
+                <div class="waiting-sub">Pick an instrument from the dropdown or click a pair in the Scanner</div>
+            </div>
+        </div>
+
+        <!-- ═══ Chart (hero) ═══ -->
+        <div class="main-left">
+            <div class="panel panel-chart" id="pricePanel">
+                <div class="panel-header">
+                    <span class="panel-title">PRICE CHART</span>
+                    <span class="panel-price" id="currentPrice">--</span>
+                    <span class="panel-delta" id="currentDelta">Δ --</span>
+                </div>
+                <div class="panel-body chart-body-wrap">
+                    <div id="priceChartContainer"></div>
+                    <div class="chart-info-overlay" id="chartInfoOverlay">
+                        <div class="chart-info-top-left" id="chartInfoTopLeft"></div>
+                        <div class="chart-info-top-right" id="chartInfoTopRight"></div>
+                        <div class="chart-info-bottom-left" id="chartInfoBottomLeft"></div>
+                        <div class="chart-info-bottom-right" id="chartInfoBottomRight"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ Scanner sidebar ═══ -->
+        <div class="main-right">
+            <div class="panel panel-scanner" id="scannerPanel">
+                <div class="panel-header">
+                    <span class="panel-title">SCANNER</span>
+                    <span class="panel-count" id="scannerCount">0</span>
+                </div>
+                <div class="panel-body scanner-feed" id="scannerFeed">
+                    <div class="scanner-empty">Scanning pairs...</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- ═══ Footer ═══ -->
+    <footer id="footer">
+        <span id="tickCount">Ticks: --</span>
+        <span id="candleCount">Candles: --</span>
+        <span class="footer-separator">|</span>
+        <span id="sessionInfo">Session: --</span>
+        <span class="footer-separator">|</span>
+        <span id="lastUpdate">Updated: --</span>
+        <span class="footer-right">
+            <span id="dailyPnL" class="footer-pnl">P&L: $0.00</span>
+        </span>
+    </footer>
+
+    <script src="/static/app.js?v=8"></script>
+</body>
+</html>
