@@ -141,14 +141,17 @@ next gate run: `dist/` matches are only CPython's own `unicodedata.pyd`, not our
 
 ### P1 — the interaction canon and spec alignment
 
-**Status 2026-09-16: P1-1 through P1-5 are done** (handoff §33–§37) — the token block, `themes/`,
+**Status 2026-09-16: P1-1 through P1-6 are done** (handoff §33–§38) — the token block, `themes/`,
 `theme.js`, the Appearance card and the brief's grep gate at **0** (P1-1); the cursor spine adopted by
 six panels, measured live, one heatmap hover lighting the engine, the ladder, the tape and the profile
 with eight badges on one text (P1-2); a shift+drag on the engine producing the statistics strip and a
 real CSV on disk plus markers remembered per symbol (P1-3); the strips given keys, pause-on-hover and
 click-to-locate (P1-4); and the cosmetics rebuilt as feedback — density-tracked ghosts, a low imbalance
 glow with the POC keeping the strong one, a labelled zone projection, `carry_forward` on the panel and
-the hidden-block count beside its control (P1-5). **Next: P1-6, the heatmap answering duration.**
+the hidden-block count beside its control (P1-5); and the map answering duration — `held_ms` on the
+walls the map draws, a Held column, a cursor line and an optional age tint, with the 74/22 px insets
+shared between the map and its overlay (P1-6). **Next: P1-7, alerts that manage, scope and read like
+sentences.**
 
 **P1-1 · Theme and token layer first (brief A). — do this before any visual polish below.** L
 Unstarted: `atlas.css` contains **zero** `--of-` tokens (`grep -c -- '--of-'` → 0) and there is no
@@ -246,6 +249,24 @@ Surface `wall_age` / `wall_durations()` (backend-side, already built) as a held-
 and walls table, an optional wall-age tint, and the 74/22 px plot insets promoted to one shared constant
 read by both the map and the overlay. Gate: live — a level held ≥ 2 min shows its age; an alert created
 from that level fires at that level only, then is deleted.
+
+**Done 2026-09-16 (§38).** `attach_wall_ages()` joins `wall_prices` with `wall_durations()`: each wall
+the map draws carries `held_ms`, and `wall_age_ms` travels with it. The Held column, the cursor line
+(`held 1.2 min`, `(wall)` past the threshold) and an optional age tint (0 below the threshold → 0.22 at
+10 min, warm so it cannot read as density) all read that shape, and the 74/22 px insets are now
+`HEAT_INSET` in `atlas.js`, read by the overlay instead of repeated. Two `window.prompt` sites in the
+alert path became fields (an empty field means the default — found live, an empty field had produced
+`at_tol: 0`). Live: real holds of 1.3/1.7 min rendered in the table; a 5-minute hold tinted its own row
+`rgb(255,193,117)` while six rows away stayed black; the hold-alert created from a level carries
+`at_price`/`at_tol`/`min_age_s` and the UI channel, and its scope is enforced by the evaluator and
+pinned in `test_wall_age.py`. A live 2-minute hold was caught by a 20 s poller — the engine's own
+`wall_age` event at 76800.0, `held 2.4 min` — with two honest notes: the payload's event list keeps the
+last 120 events, so that event rolls out of it within a couple of minutes; and the Held column covers
+the 12 heaviest walls, so a held level outside that set shows its age in the event list rather than the
+table. The level-bound rule did not fire for that unrelated event (the "at that level only" half) and
+was deleted (16 rules, no `hm-` left); its own firing at its own level was not observed while it
+existed. Three `window.prompt` sites remain outside this phase
+(`drawings.js:365,417`, `menubar.js:557`), open.
 
 **P1-7 · Alerts: manage, scope, and read like sentences (brief F).** M
 Rule editor (kind, threshold, level scope, hold time, channels, cooldown) in the UI; every rule rendered

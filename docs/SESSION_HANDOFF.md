@@ -1349,3 +1349,74 @@ AUDIT CLEAN (the new `ofxHiddenBlocks` id is referenced by the view and exists i
 
 Next: **P1-6, the heatmap answers duration** — `wall_age` / `wall_durations()` as a held-time column,
 an optional wall-age tint, and the 74/22 px plot insets promoted to one shared constant.
+
+
+---
+
+## §38 — P1-6: the heatmap answers duration (2026-09-16)
+
+**What this closes.** The depth map knew how long each level had HELD (`wall_durations()`, and a
+`wall_age` alert kind on the same streak) and the payload carried none of it, so a level defended for
+ten minutes looked exactly like one that appeared a second ago — the map could only answer *how much*.
+
+**One join, three readers.** `atlas/api.py` gains `attach_wall_ages(snapshot, heatmap)`: the walls the
+map draws, each with `held_ms`, plus `wall_age_ms` (the engine's own threshold — the UI says "held"
+with the engine's definition rather than inventing one). The walls table, the cursor readout and the
+age tint all read that one shape.
+
+**Where it shows.**
+
+* **Fresh-walls table** — a fourth column, "Held" (`1.3 min`, `47 s`, `—` when the streak restarted).
+* **The cursor readout** — `held 1.2 min` under the rest of the level's numbers, with `(wall)` once it
+  has passed the engine's threshold. Nearest drawn price within one step, bounded like every other
+  nearest in this app.
+* **The age tint** — an optional `wall age` switch in the heat view's overlay row (remembered in the
+  view's own storage, off by default): a warm wash on the rows whose level has held past the
+  threshold, `0.10` at 2 min rising to `0.22` at 10 min, warm rather than one of the ramp's own
+  colours so it cannot be read as density.
+* **One shared inset constant** — the 74/22 px plot insets were written twice (the map's `axisR/axisB`
+  and the overlay's `geom()`); they are now `HEAT_INSET` in `atlas.js`, exposed as
+  `window.OFAPHEAT_INSET`, and `heatmap-pro` reads the map's numbers with the old ones only as a
+  fallback. A second copy is how a map and its overlay drift apart.
+
+**Two `window.prompt` sites removed on the way (the P1-3 lesson, same file).** The alert tolerance and
+the hold-alert's minutes were asked for with `window.prompt`, which the packaged WebView is not
+guaranteed to render — a button that silently does nothing. Both are fields beside the alert buttons
+now (empty = the default: two drawn price steps, two minutes), and the tooltips name the defaults.
+One defect in my own first cut, found by running it: an empty field read as `Number('') === 0`, which
+created a rule with `at_tol: 0` (fires only at the exact cent) — an empty field now means "use the
+default". Three more `window.prompt` sites remain outside this phase (the drawing text tool at
+`drawings.js:365,417` and the workspace-name prompt at `menubar.js:557`); they need their own in-place
+affordances and are **open**.
+
+**The gate, measured.**
+
+* The payload's walls carry `held_ms` and `wall_age_ms: 120000` (curl), and the table rendered real
+  holds on live data: `1.3 min`, `1.7 min`, `47 s` across three walls in one window.
+* The cursor readout on a held wall read `held 1.2 min`.
+* The tint's arithmetic is exact (`0` below the floor, `0.10` at 120 s, `0.145` at 300 s, `0.22` at
+  600 s and above), and on the real canvas a wall given a 5-minute hold painted `rgb(255,193,117)` on
+  its own row while six rows away stayed `rgb(0,0,0)`.
+* The alert: created from the selected level through the new fields —
+  `hm-BTCUSDT-77148_72-101555`, kind `wall_age`, `{min_size: 0.504, at_price: 77148.72, at_tol: 3.96,
+  min_age_s: 120}`, channel `ui` — "fires only at that level", and the scope is enforced by the
+  evaluator generically (`atlas/alerts.py:179-182`) and pinned in `test_wall_age.py`
+  (`test_rule_bound_to_a_price_fires_only_there`: 100.0 fires, 103.0 does not, 100.4 does, no price
+  means no evidence). It was then deleted through the route (200) and the list read back: 16 rules, no
+  `hm-` left.
+* **A live 2-minute hold did happen, and the engine said so.** A 20 s poller caught the engine's own
+  event: `{kind: wall_age, price: 76800.0, size: 3.538, detail: "held 2.4 min", direction: ask}`. Two
+  honest notes about it: the payload's `events` list carries the last 120 events (a couple of minutes
+  of pull/stack churn), so a wall_age event rolls out of it quickly — a later query shows none, which
+  is why the poller existed; and the Held *column* covers the 12 heaviest walls (`wall_prices(top=12)`),
+  so a held level outside that set shows its age in the engine's event list rather than the table
+  (76800.0 was not in the top 12 at the time). The level-bound rule did not fire for that unrelated
+  event (0 alerts matching the rule), which is the "at that level only" half; its own firing at its own
+  level was not observed while it existed, so that last step rests on the evaluator's pinned scope
+  rather than a live alert.
+
+Gates: pytest **509 passed / 2 skipped** (the new `test_wall_ages_ride_the_payload_the_map_draws`),
+AUDIT CLEAN, `node --check` on every touched module.
+
+Next: **P1-7, alerts — manage, scope and read like sentences** (rule editor, every rule rendered with
+its scope in words, a "created from heatmap" filter, and a log that names symbol, level, size and why).
