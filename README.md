@@ -1,4 +1,4 @@
-# OrderFlow Analysis Pro
+# ModFlow OrderFlow Analysis Suite
 
 > **Real-time orderflow trading system** — tick-level microstructure analysis, 5 pattern detectors, volume profile framing, state machine trade lifecycle, dual data feeds (MT5 + Bybit), FastAPI dashboard with WebSocket, Telegram alerts. Built on Fabio Testa's methodology.
 
@@ -71,7 +71,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         OrderFlow Analysis Pro                              │
+│                         ModFlow OrderFlow Analysis Suite                              │
 │                                                                             │
 │  ┌──────────────────────┐     ┌──────────────────────────────────────┐      │
 │  │   DATA SOURCES       │     │   ANALYTICS ENGINES (per instrument) │      │
@@ -526,7 +526,7 @@ The system auto-discovers instruments across 200+ broker-specific naming variant
 │                                                                      │
 │  ┌───────────────────────────────────┐  ┌────────────────────────┐  │
 │  │        PRICE CHART (app.js)       │  │   VOLUME PROFILE       │  │
-│  │   TradingView lightweight-charts  │  │   Horizontal bars      │  │
+│  │   the chart library lightweight-charts  │  │   Horizontal bars      │  │
 │  │   Signal markers overlay:         │  │   POC, VAH, VAL marks  │  │
 │  │   ▲ Absorption (teal)            │  │   Shape classification  │  │
 │  │   ▲ Initiative (green)           │  │   LVN markers          │  │
@@ -837,7 +837,7 @@ orderflow_system/
     ├── __main__.py                  # Standalone launcher (35L)
     └── static/
         ├── index.html               # Main HTML shell (121L)
-        ├── app.js                   # TradingView charts + WebSocket (939L)
+        ├── app.js                   # the chart library charts + WebSocket (939L)
         ├── style.css                # Dashboard styling (566L)
         ├── footprint.js             # Canvas footprint chart (700L)
         ├── signals.js               # Signal recommendation cards (479L)
@@ -874,7 +874,7 @@ orderflow_system/
 | GET | `/` | Dashboard UI |
 | GET | `/api/instruments` | Active instruments with stats + trade phase |
 | GET | `/api/scanner` | All pairs ranked by trade proximity (priority 0-118) |
-| GET | `/api/markers/{symbol}` | TradingView chart markers for signal events |
+| GET | `/api/markers/{symbol}` | the chart library chart markers for signal events |
 | GET | `/api/candles/{symbol}` | OHLCV candle history (params: count, tf, range) |
 | GET | `/api/volume-profile/{symbol}` | Volume profile with POC/VAH/VAL (params: days, range) |
 | GET | `/api/bias/{symbol}` | Daily bias + qualified levels |

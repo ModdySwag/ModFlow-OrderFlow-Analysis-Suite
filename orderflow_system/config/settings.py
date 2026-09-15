@@ -4,7 +4,7 @@ Global settings and instrument-specific configuration.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 
 class Instrument(Enum):
@@ -46,6 +46,25 @@ class Instrument(Enum):
     GOOGL = "GOOGL"
     # ── Crypto ──
     BTCUSD = "BTCUSDT"
+    # ── Crypto (Bybit linear perpetuals — streamable out of the box) ──
+    ETH = "ETHUSDT"
+    SOL = "SOLUSDT"
+    XRP = "XRPUSDT"
+    BNB = "BNBUSDT"
+    DOGE = "DOGEUSDT"
+    ADA = "ADAUSDT"
+    AVAX = "AVAXUSDT"
+    LINK = "LINKUSDT"
+    LTC = "LTCUSDT"
+    DOT = "DOTUSDT"
+    TRX = "TRXUSDT"
+    SUI = "SUIUSDT"
+    APT = "APTUSDT"
+    NEAR = "NEARUSDT"
+    ARB = "ARBUSDT"
+    OP = "OPUSDT"
+    POL = "POLUSDT"
+    TON = "TONUSDT"
 
 
 class SessionType(Enum):
@@ -68,7 +87,9 @@ class DataSource(Enum):
     """Data feed source selection."""
     BYBIT = "bybit"              # Bybit perpetual futures (free WebSocket)
     MT5 = "mt5"                  # MetaTrader 5 terminal (real broker data)
-    BOTH = "both"                # Run both feeds simultaneously
+    BOTH = "both"                # Exchange + MT5 simultaneously
+    ALPACA = "alpaca"            # Alpaca Markets: US equities/ETFs/options/crypto
+    ALL = "all"                  # Every configured source at once
 
 
 class BiasDirection(Enum):
@@ -215,6 +236,26 @@ class MT5Config:
 
 
 @dataclass
+class AlpacaConfig:
+    """Alpaca market-data settings (keys are runtime values, set from config.json)."""
+    key_id: str = ""                          # filled from the user config at start
+    secret: str = ""
+    paper: bool = True                        # paper keys only work on paper endpoints
+    feed: str = "iex"                         # iex | sip | delayed_sip (entitlement)
+    snapshot_seconds: float = 5.0             # REST snapshot cadence while open
+    history_minutes: int = 240                # 1-minute bars pulled at start
+    rest_per_min: int = 150                   # client budget under the plan's 200
+    stock_cap: int = 30                       # stream symbols on the free plan
+    option_cap: int = 200
+    #: app symbol → Alpaca symbol. Alpaca covers US equities/ETFs/options and crypto.
+    symbols: dict = field(default_factory=lambda: {
+        "AAPL": "AAPL", "TSLA": "TSLA", "AMZN": "AMZN", "MSFT": "MSFT",
+        "NVDA": "NVDA", "META": "META", "GOOGL": "GOOGL", "SPY": "SPY", "QQQ": "QQQ",
+        "BTCUSDT": "BTC/USD", "ETHUSDT": "ETH/USD", "SOLUSDT": "SOL/USD",
+    })
+
+
+@dataclass
 class InstrumentConfig:
     """Per-instrument configuration."""
     instrument: Instrument = Instrument.NAS100
@@ -228,650 +269,415 @@ class InstrumentConfig:
     risk: RiskConfig = field(default_factory=RiskConfig)
 
 
+# ─────────────────────────────────────────────
+# Instrument configs — class banks + per-instrument overrides
+# ─────────────────────────────────────────────
+#
+# This section used to be one ~35-line constructor per instrument: the same numbers
+# written out three dozen times, and a page of copying to list one more symbol. A bank
+# now carries what an asset class agrees on, a spec adds only what makes an instrument
+# different, and `scripts/regen_config_golden.py` (read by test_config_golden.py) pins
+# the result key-by-key against testdata/config_golden.json — so this is provably the
+# same config the explicit constructors built, and adding an instrument is a two-line
+# change (one spec row, one wrapper).
+
+@dataclass(frozen=True)
+class Bank:
+    """What an asset class agrees on: the sub-configs every member starts from."""
+    tick_size: float
+    absorption: AbsorptionConfig
+    initiative: InitiativeConfig
+    sweep: SweepConfig
+    exhaustion: ExhaustionConfig
+    volume_profile: VolumeProfileConfig
+
+
+#: One row per asset class. Read the fields as: price tick, aggressive volume,
+#: displacement in ticks, attempts, big-trade filter, delta threshold, initiative
+#: displacement, volume acceleration, levels swept, volume per level, thin-book
+#: threshold, volume decline, session, profile tick — plus sweep window in ms where
+#: a class differs. Attempts (2), declining bars (3) and the 30 s rolling window are
+#: the same everywhere; they stay settable per instrument from the settings view.
+_CONFIG_BANKS: dict[str, dict[str, Any]] = {
+    "index_major": dict(tick_size=0.1, aggressive=40, displacement=2, attempts=2, big_trade=5,
+                        delta=25, initiative_ticks=3, levels=3, per_level=15, thin_book=8,
+                        decline_pct=0.3, session=SessionType.NY_CASH, vp_tick=1.0),
+    "index_large": dict(tick_size=0.1, aggressive=30, displacement=2, attempts=2, big_trade=4,
+                        delta=20, initiative_ticks=3, levels=3, per_level=12, thin_book=6,
+                        decline_pct=0.3, session=SessionType.LONDON, vp_tick=1.0),
+    "index_intl": dict(tick_size=0.1, aggressive=25, displacement=2, attempts=2, big_trade=3,
+                       delta=18, initiative_ticks=3, levels=3, per_level=10, thin_book=5,
+                       decline_pct=0.3, session=SessionType.ASIAN, vp_tick=1.0),
+    "stock": dict(tick_size=0.01, aggressive=20, displacement=2, attempts=2, big_trade=3,
+                  delta=15, initiative_ticks=3, levels=3, per_level=8, thin_book=5,
+                  decline_pct=0.3, session=SessionType.NY_CASH, vp_tick=0.50),
+    "forex_major": dict(tick_size=0.00001, aggressive=20, displacement=2, attempts=2, big_trade=3,
+                        delta=15, initiative_ticks=3, accel=1.4, levels=3, per_level=8,
+                        thin_book=5, decline_pct=0.25, session=SessionType.FULL_DAY, vp_tick=0.0005),
+    "forex_jpy": dict(tick_size=0.001, aggressive=20, displacement=2, attempts=2, big_trade=3,
+                      delta=15, initiative_ticks=3, accel=1.4, levels=3, per_level=8,
+                      thin_book=5, decline_pct=0.25, session=SessionType.FULL_DAY, vp_tick=0.05),
+    "metal_gold": dict(tick_size=0.01, aggressive=30, displacement=3, attempts=2, big_trade=3,
+                       delta=20, initiative_ticks=4, levels=3, per_level=10, thin_book=5,
+                       decline_pct=0.25, session=SessionType.NY_CASH, vp_tick=0.50, sweep_ms=3000),
+    "metal_silver": dict(tick_size=0.001, aggressive=25, displacement=3, attempts=2, big_trade=3,
+                         delta=15, initiative_ticks=4, levels=3, per_level=8, thin_book=5,
+                         decline_pct=0.25, session=SessionType.FULL_DAY, vp_tick=0.05, sweep_ms=3000),
+    "energy": dict(tick_size=0.01, aggressive=30, displacement=3, attempts=2, big_trade=3,
+                   delta=20, initiative_ticks=4, levels=3, per_level=10, thin_book=5,
+                   decline_pct=0.25, session=SessionType.NY_CASH, vp_tick=0.1),
+    "crypto": dict(tick_size=0.01, aggressive=20, displacement=3, attempts=2, big_trade=3,
+                   delta=15, initiative_ticks=4, levels=3, per_level=8, thin_book=5,
+                   decline_pct=0.25, session=SessionType.FULL_DAY, vp_tick=10.0),
+}
+
+
+def _bank(tick_size: float, aggressive: float, displacement: float, attempts: int,
+          big_trade: float, delta: float, initiative_ticks: float, levels: int,
+          per_level: float, thin_book: float, decline_pct: float, session: SessionType,
+          vp_tick: float, accel: float = 1.5, sweep_ms: int = 2000,
+          bars_declining: int = 3, rolling_window_s: float = 30) -> Bank:
+    """Turn one bank row into sub-configs (kwargs are spelled out at the call sites)."""
+    return Bank(
+        tick_size=tick_size,
+        absorption=AbsorptionConfig(
+            min_aggressive_volume=aggressive,
+            max_price_displacement_ticks=displacement,
+            rolling_window_seconds=rolling_window_s,
+            min_attempts=attempts,
+            big_trade_filter=big_trade,
+        ),
+        initiative=InitiativeConfig(
+            min_delta_threshold=delta,
+            volume_acceleration_min=accel,
+            min_price_displacement_ticks=initiative_ticks,
+        ),
+        sweep=SweepConfig(
+            min_levels_swept=levels,
+            max_volume_per_level=per_level,
+            max_time_ms=sweep_ms,
+            thin_book_threshold=thin_book,
+        ),
+        exhaustion=ExhaustionConfig(
+            min_bars_declining=bars_declining,
+            volume_decline_pct=decline_pct,
+        ),
+        volume_profile=VolumeProfileConfig(session=session, tick_size=vp_tick),
+    )
+
+
+@dataclass(frozen=True)
+class Spec:
+    """What makes one instrument different from its class bank (None = inherit)."""
+    bank: str
+    tick_size: Optional[float] = None
+    aggressive: Optional[float] = None
+    delta: Optional[float] = None
+    levels: Optional[int] = None
+    per_level: Optional[float] = None
+    thin_book: Optional[float] = None
+    decline_pct: Optional[float] = None
+    vp_session: Optional[SessionType] = None
+    vp_tick: Optional[float] = None
+
+
+#: Every instrument the app ships, against its class bank. A row with no overrides
+#: means "this one is exactly its class" — which is now visible instead of implied.
+INSTRUMENT_SPECS: dict[Instrument, Spec] = {
+    # Indices
+    Instrument.NAS100:    Spec("index_major", aggressive=50, delta=30),
+    Instrument.SP500:     Spec("index_major"),
+    Instrument.DJ30:      Spec("index_major", tick_size=1.0, vp_tick=5.0),
+    Instrument.UK100:     Spec("index_large"),
+    Instrument.DAX40:     Spec("index_large", vp_tick=2.0),
+    Instrument.NIKKEI225: Spec("index_large", tick_size=1.0, vp_session=SessionType.ASIAN, vp_tick=50.0),
+    Instrument.CAC40:     Spec("index_intl", vp_session=SessionType.LONDON),
+    Instrument.ASX200:    Spec("index_intl"),
+    Instrument.HK50:      Spec("index_intl", tick_size=1.0, vp_tick=5.0),
+    # Metals
+    Instrument.GOLD:      Spec("metal_gold"),
+    Instrument.SILVER:    Spec("metal_silver"),
+    # Energy
+    Instrument.USOIL:     Spec("energy"),
+    Instrument.UKOIL:     Spec("energy", vp_session=SessionType.LONDON),
+    # Forex majors
+    Instrument.EURUSD:    Spec("forex_major"),
+    Instrument.GBPUSD:    Spec("forex_major"),
+    Instrument.AUDUSD:    Spec("forex_major"),
+    Instrument.USDCAD:    Spec("forex_major"),
+    Instrument.USDCHF:    Spec("forex_major"),
+    Instrument.NZDUSD:    Spec("forex_major"),
+    # Forex crosses (JPY pairs price in 3 digits)
+    Instrument.USDJPY:    Spec("forex_jpy"),
+    Instrument.EURJPY:    Spec("forex_jpy"),
+    Instrument.GBPJPY:    Spec("forex_jpy"),
+    Instrument.EURGBP:    Spec("forex_major"),
+    # Stocks (US CFDs)
+    Instrument.AAPL:      Spec("stock"),
+    Instrument.TSLA:      Spec("stock"),
+    Instrument.AMZN:      Spec("stock"),
+    Instrument.MSFT:      Spec("stock"),
+    Instrument.NVDA:      Spec("stock"),
+    Instrument.META:      Spec("stock"),
+    Instrument.GOOGL:     Spec("stock"),
+    # Crypto
+    Instrument.BTCUSD:    Spec("crypto"),
+    # Crypto majors without a spec row fall back to the crypto bank + CRYPTO_MAJORS.
+}
+
+#: Bybit-listed crypto majors a fresh install can stream, with their default
+#: tick sizes. The setup assistant corrects these from the venue when it imports
+#: instruments, so a value here only needs to be sane, not exact.
+CRYPTO_MAJORS: dict[str, float] = {
+    "ETHUSDT": 0.01, "SOLUSDT": 0.01, "XRPUSDT": 0.0001, "BNBUSDT": 0.1,
+    "DOGEUSDT": 0.00001, "ADAUSDT": 0.0001, "AVAXUSDT": 0.001, "LINKUSDT": 0.001,
+    "LTCUSDT": 0.01, "DOTUSDT": 0.001, "TRXUSDT": 0.00001, "SUIUSDT": 0.0001,
+    "APTUSDT": 0.001, "NEARUSDT": 0.001, "ARBUSDT": 0.0001, "OPUSDT": 0.0001,
+    "POLUSDT": 0.0001, "TONUSDT": 0.001,
+}
+
+
+def instrument_for(symbol: str) -> Instrument:
+    """The Instrument member for a symbol, extending the enum for venue-only ones.
+
+    The enum lists what the app ships, but Bybit lists hundreds of perpetuals and the
+    setup assistant can add any of them. Rather than let those symbols die as
+    "unknown instrument", a member is created on first use with the documented
+    extend-at-runtime recipe — it behaves like any other (same `.value`, same dict and
+    JSON round-trip, idempotent per symbol).
+    """
+    try:
+        return Instrument(symbol)
+    except ValueError:
+        pass
+    member = object.__new__(Instrument)
+    member._name_ = symbol
+    member._value_ = symbol
+    Instrument._value2member_map_[symbol] = member
+    Instrument._member_map_[symbol] = member
+    Instrument._member_names_.append(symbol)      # so iteration sees it too
+    return member
+
+
+def config_for_symbol(symbol: str, tick_size: Optional[float] = None) -> InstrumentConfig:
+    """Config for any symbol, shipped or venue-only (`get_config_for` + enum extension).
+
+    This is what the engine calls for an instrument a user added from the venue
+    catalogue: a known symbol uses its spec bank, an unknown one gets the crypto
+    profile with the tick size the venue reported.
+    """
+    return get_config_for(instrument_for(symbol), tick_size)
+
+
+def get_config_for(instrument: Instrument, tick_size: Optional[float] = None) -> InstrumentConfig:
+    """Build an instrument's config: class bank, then spec overrides, then a tick.
+
+    The single place an InstrumentConfig is constructed. Precedence for the price tick
+    is explicit argument → spec → CRYPTO_MAJORS → bank, so a caller that knows the
+    venue's tick (the setup assistant does) always wins.
+
+    Adding an instrument: one `Spec` row above, one wrapper below, and
+    `scripts/regen_config_golden.py --write` to record it.
+    """
+    spec = INSTRUMENT_SPECS.get(instrument)
+    bank_key = spec.bank if spec is not None else "crypto"
+    if bank_key not in _CONFIG_BANKS:
+        raise KeyError(f"{instrument.value}: unknown config bank {bank_key!r}")
+
+    fields = dict(_CONFIG_BANKS[bank_key])
+    if spec is not None:
+        for name in ("aggressive", "delta", "levels", "per_level", "thin_book", "decline_pct"):
+            if getattr(spec, name) is not None:
+                fields[name] = getattr(spec, name)
+        if spec.vp_session is not None:
+            fields["session"] = spec.vp_session
+        if spec.vp_tick is not None:
+            fields["vp_tick"] = spec.vp_tick
+
+    fields["tick_size"] = float(
+        tick_size
+        or (spec.tick_size if spec is not None else None)
+        or CRYPTO_MAJORS.get(instrument.value)
+        or fields["tick_size"]
+    )
+
+    bank = _bank(**fields)
+    return InstrumentConfig(
+        instrument=instrument,
+        tick_size=bank.tick_size,
+        absorption=bank.absorption,
+        initiative=bank.initiative,
+        sweep=bank.sweep,
+        exhaustion=bank.exhaustion,
+        volume_profile=bank.volume_profile,
+    )
+
+
+# ── Thin wrappers (public API: some are imported by name elsewhere) ──
+
 def get_nas100_config() -> InstrumentConfig:
     """NAS100USDT (Bybit perpetual) — proxy for NASDAQ futures."""
-    return InstrumentConfig(
-        instrument=Instrument.NAS100,
-        tick_size=0.1,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=50,
-            max_price_displacement_ticks=2,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=5,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=30,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=3,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=15,
-            max_time_ms=2000,
-            thin_book_threshold=8,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.3,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.NY_CASH,
-            tick_size=1.0,
-        ),
-    )
+    return get_config_for(Instrument.NAS100)
 
-
-def get_gold_config() -> InstrumentConfig:
-    """XAUUSDT (Bybit perpetual) — proxy for Gold futures."""
-    return InstrumentConfig(
-        instrument=Instrument.GOLD,
-        tick_size=0.01,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=30,
-            max_price_displacement_ticks=3,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=3,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=20,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=4,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=10,
-            max_time_ms=3000,
-            thin_book_threshold=5,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.25,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.NY_CASH,
-            tick_size=0.50,
-        ),
-    )
-
-
-# ─────────────────────────────────────────────
-# Index Configs
-# ─────────────────────────────────────────────
 
 def get_sp500_config() -> InstrumentConfig:
     """S&P 500 index CFD."""
-    return InstrumentConfig(
-        instrument=Instrument.SP500,
-        tick_size=0.1,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=40,
-            max_price_displacement_ticks=2,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=5,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=25,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=3,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=15,
-            max_time_ms=2000,
-            thin_book_threshold=8,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.3,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.NY_CASH,
-            tick_size=1.0,
-        ),
-    )
+    return get_config_for(Instrument.SP500)
 
 
 def get_dj30_config() -> InstrumentConfig:
     """Dow Jones 30 index CFD."""
-    return InstrumentConfig(
-        instrument=Instrument.DJ30,
-        tick_size=1.0,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=40,
-            max_price_displacement_ticks=2,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=5,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=25,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=3,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=15,
-            max_time_ms=2000,
-            thin_book_threshold=8,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.3,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.NY_CASH,
-            tick_size=5.0,
-        ),
-    )
+    return get_config_for(Instrument.DJ30)
 
 
 def get_uk100_config() -> InstrumentConfig:
     """FTSE 100 index CFD."""
-    return InstrumentConfig(
-        instrument=Instrument.UK100,
-        tick_size=0.1,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=30,
-            max_price_displacement_ticks=2,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=4,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=20,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=3,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=12,
-            max_time_ms=2000,
-            thin_book_threshold=6,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.3,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.LONDON,
-            tick_size=1.0,
-        ),
-    )
+    return get_config_for(Instrument.UK100)
 
 
 def get_dax40_config() -> InstrumentConfig:
     """DAX 40 index CFD."""
-    return InstrumentConfig(
-        instrument=Instrument.DAX40,
-        tick_size=0.1,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=30,
-            max_price_displacement_ticks=2,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=4,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=20,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=3,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=12,
-            max_time_ms=2000,
-            thin_book_threshold=6,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.3,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.LONDON,
-            tick_size=2.0,
-        ),
-    )
+    return get_config_for(Instrument.DAX40)
 
 
 def get_nikkei225_config() -> InstrumentConfig:
     """Nikkei 225 index CFD."""
-    return InstrumentConfig(
-        instrument=Instrument.NIKKEI225,
-        tick_size=1.0,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=30,
-            max_price_displacement_ticks=2,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=4,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=20,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=3,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=12,
-            max_time_ms=2000,
-            thin_book_threshold=6,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.3,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.ASIAN,
-            tick_size=50.0,
-        ),
-    )
+    return get_config_for(Instrument.NIKKEI225)
 
 
 def get_cac40_config() -> InstrumentConfig:
     """CAC 40 index CFD."""
-    return InstrumentConfig(
-        instrument=Instrument.CAC40,
-        tick_size=0.1,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=25,
-            max_price_displacement_ticks=2,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=3,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=18,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=3,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=10,
-            max_time_ms=2000,
-            thin_book_threshold=5,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.3,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.LONDON,
-            tick_size=1.0,
-        ),
-    )
+    return get_config_for(Instrument.CAC40)
 
 
 def get_asx200_config() -> InstrumentConfig:
     """ASX 200 index CFD."""
-    return InstrumentConfig(
-        instrument=Instrument.ASX200,
-        tick_size=0.1,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=25,
-            max_price_displacement_ticks=2,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=3,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=18,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=3,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=10,
-            max_time_ms=2000,
-            thin_book_threshold=5,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.3,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.ASIAN,
-            tick_size=1.0,
-        ),
-    )
+    return get_config_for(Instrument.ASX200)
 
 
 def get_hk50_config() -> InstrumentConfig:
     """Hang Seng 50 index CFD."""
-    return InstrumentConfig(
-        instrument=Instrument.HK50,
-        tick_size=1.0,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=25,
-            max_price_displacement_ticks=2,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=3,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=18,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=3,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=10,
-            max_time_ms=2000,
-            thin_book_threshold=5,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.3,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.ASIAN,
-            tick_size=5.0,
-        ),
-    )
+    return get_config_for(Instrument.HK50)
 
 
-# ─────────────────────────────────────────────
-# Metal & Energy Configs
-# ─────────────────────────────────────────────
+def get_gold_config() -> InstrumentConfig:
+    """XAUUSDT (Bybit perpetual) — proxy for Gold futures."""
+    return get_config_for(Instrument.GOLD)
+
 
 def get_silver_config() -> InstrumentConfig:
-    """XAGUSD — Silver CFD."""
-    return InstrumentConfig(
-        instrument=Instrument.SILVER,
-        tick_size=0.001,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=25,
-            max_price_displacement_ticks=3,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=3,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=15,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=4,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=8,
-            max_time_ms=3000,
-            thin_book_threshold=5,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.25,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.FULL_DAY,
-            tick_size=0.05,
-        ),
-    )
+    """XAGUSD — Silver."""
+    return get_config_for(Instrument.SILVER)
 
 
 def get_usoil_config() -> InstrumentConfig:
-    """WTI Crude Oil CFD."""
-    return InstrumentConfig(
-        instrument=Instrument.USOIL,
-        tick_size=0.01,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=30,
-            max_price_displacement_ticks=3,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=3,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=20,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=4,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=10,
-            max_time_ms=2000,
-            thin_book_threshold=5,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.25,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.NY_CASH,
-            tick_size=0.10,
-        ),
-    )
+    """WTI Crude Oil."""
+    return get_config_for(Instrument.USOIL)
 
 
 def get_ukoil_config() -> InstrumentConfig:
-    """Brent Crude Oil CFD."""
-    return InstrumentConfig(
-        instrument=Instrument.UKOIL,
-        tick_size=0.01,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=30,
-            max_price_displacement_ticks=3,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=3,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=20,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=4,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=10,
-            max_time_ms=2000,
-            thin_book_threshold=5,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.25,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.LONDON,
-            tick_size=0.10,
-        ),
-    )
-
-
-# ─────────────────────────────────────────────
-# Forex Configs
-# ─────────────────────────────────────────────
-
-def _forex_major_config(
-    instrument: Instrument,
-    tick_size: float = 0.00001,
-    vp_tick_size: float = 0.0005,
-) -> InstrumentConfig:
-    """Template for major forex pairs (high liquidity)."""
-    return InstrumentConfig(
-        instrument=instrument,
-        tick_size=tick_size,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=20,
-            max_price_displacement_ticks=2,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=3,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=15,
-            volume_acceleration_min=1.4,
-            min_price_displacement_ticks=3,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=8,
-            max_time_ms=2000,
-            thin_book_threshold=5,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.25,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.FULL_DAY,
-            tick_size=vp_tick_size,
-        ),
-    )
+    """Brent Crude Oil."""
+    return get_config_for(Instrument.UKOIL)
 
 
 def get_eurusd_config() -> InstrumentConfig:
     """EUR/USD — most liquid forex pair."""
-    return _forex_major_config(Instrument.EURUSD)
+    return get_config_for(Instrument.EURUSD)
 
 
 def get_gbpusd_config() -> InstrumentConfig:
     """GBP/USD — Cable."""
-    return _forex_major_config(Instrument.GBPUSD)
+    return get_config_for(Instrument.GBPUSD)
 
 
 def get_usdjpy_config() -> InstrumentConfig:
     """USD/JPY — 3-digit pricing."""
-    return _forex_major_config(Instrument.USDJPY, tick_size=0.001, vp_tick_size=0.05)
+    return get_config_for(Instrument.USDJPY)
 
 
 def get_audusd_config() -> InstrumentConfig:
     """AUD/USD — Aussie."""
-    return _forex_major_config(Instrument.AUDUSD)
+    return get_config_for(Instrument.AUDUSD)
 
 
 def get_usdcad_config() -> InstrumentConfig:
     """USD/CAD — Loonie."""
-    return _forex_major_config(Instrument.USDCAD)
+    return get_config_for(Instrument.USDCAD)
 
 
 def get_usdchf_config() -> InstrumentConfig:
     """USD/CHF — Swissie."""
-    return _forex_major_config(Instrument.USDCHF)
+    return get_config_for(Instrument.USDCHF)
 
 
 def get_nzdusd_config() -> InstrumentConfig:
     """NZD/USD — Kiwi."""
-    return _forex_major_config(Instrument.NZDUSD)
+    return get_config_for(Instrument.NZDUSD)
 
 
 def get_eurgbp_config() -> InstrumentConfig:
-    """EUR/GBP — cross pair."""
-    return _forex_major_config(Instrument.EURGBP)
+    """EUR/GBP — European cross."""
+    return get_config_for(Instrument.EURGBP)
 
 
 def get_eurjpy_config() -> InstrumentConfig:
-    """EUR/JPY — 3-digit pricing."""
-    return _forex_major_config(Instrument.EURJPY, tick_size=0.001, vp_tick_size=0.05)
+    """EUR/JPY — European yen cross."""
+    return get_config_for(Instrument.EURJPY)
 
 
 def get_gbpjpy_config() -> InstrumentConfig:
-    """GBP/JPY — volatile cross."""
-    return _forex_major_config(Instrument.GBPJPY, tick_size=0.001, vp_tick_size=0.05)
-
-
-# ─────────────────────────────────────────────
-# Stock Configs (US CFDs)
-# ─────────────────────────────────────────────
-
-def _stock_config(instrument: Instrument) -> InstrumentConfig:
-    """Template for US stock CFDs."""
-    return InstrumentConfig(
-        instrument=instrument,
-        tick_size=0.01,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=20,
-            max_price_displacement_ticks=2,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=3,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=15,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=3,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=8,
-            max_time_ms=2000,
-            thin_book_threshold=5,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.3,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.NY_CASH,
-            tick_size=0.50,
-        ),
-    )
+    """GBP/JPY — Dragon."""
+    return get_config_for(Instrument.GBPJPY)
 
 
 def get_aapl_config() -> InstrumentConfig:
-    return _stock_config(Instrument.AAPL)
+    """Apple — US stock CFD."""
+    return get_config_for(Instrument.AAPL)
 
 
 def get_tsla_config() -> InstrumentConfig:
-    return _stock_config(Instrument.TSLA)
+    """Tesla — US stock CFD."""
+    return get_config_for(Instrument.TSLA)
 
 
 def get_amzn_config() -> InstrumentConfig:
-    return _stock_config(Instrument.AMZN)
+    """Amazon — US stock CFD."""
+    return get_config_for(Instrument.AMZN)
 
 
 def get_msft_config() -> InstrumentConfig:
-    return _stock_config(Instrument.MSFT)
+    """Microsoft — US stock CFD."""
+    return get_config_for(Instrument.MSFT)
 
 
 def get_nvda_config() -> InstrumentConfig:
-    return _stock_config(Instrument.NVDA)
+    """NVIDIA — US stock CFD."""
+    return get_config_for(Instrument.NVDA)
 
 
 def get_meta_config() -> InstrumentConfig:
-    return _stock_config(Instrument.META)
+    """Meta Platforms — US stock CFD."""
+    return get_config_for(Instrument.META)
 
 
 def get_googl_config() -> InstrumentConfig:
-    return _stock_config(Instrument.GOOGL)
+    """Alphabet — US stock CFD."""
+    return get_config_for(Instrument.GOOGL)
 
-
-# ─────────────────────────────────────────────
-# Crypto Configs
-# ─────────────────────────────────────────────
 
 def get_btcusd_config() -> InstrumentConfig:
     """BTCUSDT — Bitcoin."""
-    return InstrumentConfig(
-        instrument=Instrument.BTCUSD,
-        tick_size=0.01,
-        absorption=AbsorptionConfig(
-            min_aggressive_volume=20,
-            max_price_displacement_ticks=3,
-            rolling_window_seconds=30,
-            min_attempts=2,
-            big_trade_filter=3,
-        ),
-        initiative=InitiativeConfig(
-            min_delta_threshold=15,
-            volume_acceleration_min=1.5,
-            min_price_displacement_ticks=4,
-        ),
-        sweep=SweepConfig(
-            min_levels_swept=3,
-            max_volume_per_level=8,
-            max_time_ms=2000,
-            thin_book_threshold=5,
-        ),
-        exhaustion=ExhaustionConfig(
-            min_bars_declining=3,
-            volume_decline_pct=0.25,
-        ),
-        volume_profile=VolumeProfileConfig(
-            session=SessionType.FULL_DAY,
-            tick_size=10.0,
-        ),
-    )
+    return get_config_for(Instrument.BTCUSD)
+
+
+def get_crypto_config(symbol: str, tick_size: float = 0.0) -> InstrumentConfig:
+    """A crypto perpetual config using the same pattern thresholds as BTC.
+
+    Crypto majors share one profile: the thresholds that work on BTC's tape are
+    the sane starting point for the rest, and every value stays editable from the
+    desktop settings view.
+    """
+    return get_config_for(Instrument(symbol), tick_size or None)
 
 
 def get_all_configs() -> list[InstrumentConfig]:
@@ -915,14 +721,23 @@ def get_all_configs() -> list[InstrumentConfig]:
         get_googl_config(),
         # Crypto
         get_btcusd_config(),
+        # Crypto majors (the setup assistant can import more from the venue)
+        *[get_crypto_config(sym) for sym in CRYPTO_MAJORS],
     ]
 
 
+# ── Footprint ──
+#: Prints smaller than this are ignored while building footprint bars (the conventional "Volume
+#: Filtering"). Set from the desktop config's `atlas.footprint.min_print_size`.
+FOOTPRINT_MIN_PRINT_SIZE: float = 0.0
+
 # ── Data Source ──
 # Change this to select your data feed:
-#   DataSource.MT5   → Use MetaTrader 5 (real broker data for NAS100, XAUUSD)
-#   DataSource.BYBIT → Use Bybit perpetuals (free crypto data)
-#   DataSource.BOTH  → Run both feeds simultaneously
+#   DataSource.MT5    → Use MetaTrader 5 (real broker data for NAS100, XAUUSD)
+#   DataSource.BYBIT  → Use Bybit perpetuals (free crypto data)
+#   DataSource.BOTH   → Run the exchange and MT5 feeds simultaneously
+#   DataSource.ALPACA → Use Alpaca Markets (US equities, ETFs, options, crypto)
+#   DataSource.ALL    → Run every configured source at once
 DATA_SOURCE = DataSource.MT5
 
 # ── MT5 Configuration ──
@@ -931,6 +746,15 @@ DATA_SOURCE = DataSource.MT5
 #   NAS100: "USTEC", "NAS100", "US100", "USTEC.cash", "USTECH100", "#NAS100"
 #   Gold:   "XAUUSD", "GOLD", "XAUUSD.cash"
 MT5 = MT5Config()
+
+# ── Alpaca Configuration ──
+# API keys live in the user config file (config.json → "alpaca"), never in source:
+# the desktop app writes them when you validate them in the Alpaca view, and this
+# module only carries the non-secret settings plus the symbol translation.
+#
+# The symbol map is app symbol → Alpaca symbol, the same pattern MT5.symbols uses.
+# Equities are plain tickers; Alpaca's crypto pairs are "BASE/QUOTE".
+ALPACA = AlpacaConfig()
 
 # Telegram config — user fills in their token/chat_id
 TELEGRAM = TelegramConfig()

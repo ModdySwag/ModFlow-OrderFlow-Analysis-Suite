@@ -27,7 +27,7 @@ class TimeAndSales {
 
         this.trades = [];
         this.cumulativeVolume = { buy: 0, sell: 0 };
-        this.paused = false;
+        this._timeCache = new Map();     // second -> formatted clock time (see _timeText)
         
         this._init();
     }
@@ -39,7 +39,7 @@ class TimeAndSales {
                     <div class="tape-controls">
                         <label class="tape-filter">
                             <span>Min Size:</span>
-                            <input type="number" id="tapeMinSize" value="1" min="1" class="tape-input">
+                            <input type="number" id="tapeMinSize" value="0" min="0" step="any" class="tape-input" title="Hide prints smaller than this. 0 shows every print the venue sends — on crypto feeds most prints are fractions of a coin, so a floor of 1 hides almost all of them.">
                         </label>
                         <label class="tape-filter">
                             <span>Side:</span>
@@ -111,6 +111,7 @@ class TimeAndSales {
         autoScrollBtn.addEventListener('click', () => {
             this.options.autoScroll = !this.options.autoScroll;
             autoScrollBtn.classList.toggle('active', this.options.autoScroll);
+            this._applyAnchoring();
         });
 
         // Clear button
@@ -120,7 +121,10 @@ class TimeAndSales {
 
         // Min size filter
         document.getElementById('tapeMinSize').addEventListener('change', (e) => {
-            this.options.minSizeFilter = parseInt(e.target.value) || 1;
+            /* 0 means "every print". The old `parseInt(v) || 1` made 0 falsy and silently restored a
+               floor of 1, which on a crypto feed hides essentially the whole tape. */
+            const wanted = Number(e.target.value);
+            this.options.minSizeFilter = Number.isFinite(wanted) && wanted > 0 ? wanted : 0;
             this._renderTrades();
         });
 
@@ -130,8 +134,113 @@ class TimeAndSales {
             this._renderTrades();
         });
 
-        this.options.minSizeFilter = 1;
+        this.options.minSizeFilter = 0;      // start by showing the real tape, then let the operator filter
         this.options.sideFilter = 'all';
+        this._applyAnchoring();
+    }
+
+    /* ── live path: one row in, one row out ──────────────────────────────────
+       This strip used to rebuild its whole table per print (innerHTML with up to
+       `displayTrades` rows) and re-format every timestamp with toLocaleTimeString:
+       measured 3.9 ms per print at 100 rows, so a busy tape dropped frames, and the
+       120-row reload when the view opened froze the UI for about half a second. The
+       live path now appends the new row, trims the tail, and formats each second once. */
+
+    _normalize(trade) {
+        if (!trade || !trade.price || !trade.size) return null;
+        return {
+            price: trade.price,
+            size: trade.size,
+            side: trade.side || (trade.aggressor === 'buy' ? 'buy' : 'sell'),
+            time: trade.time || Date.now(),
+            aggressor: trade.aggressor || trade.side,
+            isBig: trade.size >= this.options.bigTradeThreshold,
+        };
+    }
+
+    _visible(trade) {
+        if (trade.size < this.options.minSizeFilter) return false;
+        if (this.options.sideFilter !== 'all' && trade.side !== this.options.sideFilter) return false;
+        return true;
+    }
+
+    _rowHtml(trade) {
+        const sideClass = trade.side === 'buy' ? 'tape-row-buy' : 'tape-row-sell';
+        const bigClass = trade.isBig ? 'tape-row-big' : '';
+        return `
+                <tr class="tape-row ${sideClass} ${bigClass}">
+                    <td class="tape-time">${this._timeText(trade.time)}</td>
+                    <td class="tape-price">${this._formatPrice(trade.price)}</td>
+                    <td class="tape-size">${this._formatSize(trade.size)}</td>
+                    <td class="tape-side">
+                        <span class="tape-side-badge ${trade.side}">${trade.side.toUpperCase()}</span>
+                    </td>
+                </tr>
+            `;
+    }
+
+    /* A tape repeats the same second many times and toLocaleTimeString is the most expensive
+       call in this renderer, so each second is formatted once and cached (bounded). */
+    _timeText(timestamp) {
+        const sec = Math.floor((timestamp || Date.now()) / 1000);
+        const hit = this._timeCache.get(sec);
+        if (hit !== undefined) return hit;
+        const text = new Date(sec * 1000).toLocaleTimeString('en-US', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+        });
+        if (this._timeCache.size > 900) this._timeCache.clear();
+        this._timeCache.set(sec, text);
+        return text;
+    }
+
+    _trimRows() {
+        const max = this.options.displayTrades;
+        while (this.tbody.childElementCount > max && this.tbody.lastElementChild) {
+            this.tbody.removeChild(this.tbody.lastElementChild);
+        }
+    }
+
+    /**
+     * @returns {number} the height (px) of the rows just inserted, so the caller can hold a
+     *                   reader's view: rows are uniform, so one measured row height is enough and
+     *                   the trim below cannot distort it.
+     */
+    _prependRows(trades) {
+        let html = '';
+        let rows = 0;
+        for (const trade of trades) {
+            if (this._visible(trade)) { html += this._rowHtml(trade); rows += 1; }
+        }
+        if (!html) return 0;
+        this.tbody.insertAdjacentHTML('afterbegin', html);
+        const rowH = this.tbody.firstElementChild ? this.tbody.firstElementChild.offsetHeight : 0;
+        this._trimRows();
+        return rows * rowH;
+    }
+
+    _afterAppend(added) {
+        this._updateStats();
+        if (!this.bodyEl) return;
+        if (this.options.autoScroll) {
+            this.bodyEl.scrollTop = 0;                       // pinned to the newest print
+        } else {
+            this.bodyEl.scrollTop += added || 0;             // hold the reader's lines where they are
+        }
+    }
+
+    /**
+     * Who owns the scroll offset while rows arrive above the reader: this widget does, in both
+     * modes (see _applyAnchoring). Pinned mode puts the newest print at the top; reader mode adds
+     * the height of the inserted rows back onto the offset, which is what keeps the lines the reader
+     * is looking at in place while the tape keeps filling.
+     */
+    _applyAnchoring() {
+        /* Off in both modes: the widget owns this offset. Scroll anchoring compensates for rows
+           inserted above by pushing the offset down, and a capping tape adds and removes rows one for
+           one, so the height never grows and the compensation accumulates until the strip reaches the
+           end of its range - measured with a wrapped scrollTop setter: 200 -> 726 in 25 s with no
+           JavaScript writer involved, while the reader's lines slid away underneath. */
+        if (this.bodyEl) this.bodyEl.style.overflowAnchor = 'none';
     }
 
     /**
@@ -139,41 +248,38 @@ class TimeAndSales {
      * @param {Object} trade - { price, size, side, time, aggressor }
      */
     addTrade(trade) {
-        if (!trade || !trade.price || !trade.size) return;
+        const normalizedTrade = this._normalize(trade);
+        if (!normalizedTrade) return;
 
-        const normalizedTrade = {
-            price: trade.price,
-            size: trade.size,
-            side: trade.side || (trade.aggressor === 'buy' ? 'buy' : 'sell'),
-            time: trade.time || Date.now(),
-            aggressor: trade.aggressor || trade.side,
-            isBig: trade.size >= this.options.bigTradeThreshold
-        };
-
-        // Add to front of array
         this.trades.unshift(normalizedTrade);
+        if (this.trades.length > this.options.maxTrades) this.trades.length = this.options.maxTrades;
 
-        // Trim to max
-        if (this.trades.length > this.options.maxTrades) {
-            this.trades = this.trades.slice(0, this.options.maxTrades);
-        }
+        if (normalizedTrade.side === 'buy') this.cumulativeVolume.buy += normalizedTrade.size;
+        else this.cumulativeVolume.sell += normalizedTrade.size;
 
-        // Update cumulative volume
-        if (normalizedTrade.side === 'buy') {
-            this.cumulativeVolume.buy += normalizedTrade.size;
-        } else {
-            this.cumulativeVolume.sell += normalizedTrade.size;
-        }
-
-        this._renderTrades();
+        this._afterAppend(this._prependRows([normalizedTrade]));
     }
 
     /**
      * Add multiple trades at once
+     * @param {Array} trades - oldest first (as /api/tape returns them); the batch is
+     *                         reversed onto the head of the list and inserted in one pass
      */
     addTrades(trades) {
-        if (!Array.isArray(trades)) return;
-        trades.forEach(t => this.addTrade(t));
+        if (!Array.isArray(trades) || !trades.length) return;
+        const batch = [];
+        for (const t of trades) {
+            const n = this._normalize(t);
+            if (!n) continue;
+            batch.push(n);
+            if (n.side === 'buy') this.cumulativeVolume.buy += n.size;
+            else this.cumulativeVolume.sell += n.size;
+        }
+        if (!batch.length) return;
+        const newestFirst = batch.slice().reverse();
+        this.trades = newestFirst.concat(this.trades);
+        if (this.trades.length > this.options.maxTrades) this.trades.length = this.options.maxTrades;
+        this._afterAppend(this._prependRows(newestFirst));
     }
 
     /**
@@ -194,45 +300,21 @@ class TimeAndSales {
         this._renderTrades();
     }
 
+    /* Full rebuild — filter changes, clear, threshold changes only. The live path never
+       calls this: it is the O(displayTrades) path, not the O(1)-per-print one. */
     _renderTrades() {
-        // Filter trades
-        let filteredTrades = this.trades.filter(t => {
-            if (t.size < this.options.minSizeFilter) return false;
-            if (this.options.sideFilter !== 'all' && t.side !== this.options.sideFilter) return false;
-            return true;
-        });
-
-        // Limit display
-        filteredTrades = filteredTrades.slice(0, this.options.displayTrades);
-
-        // Generate HTML
+        const max = this.options.displayTrades;
         let html = '';
-        filteredTrades.forEach(trade => {
-            const sideClass = trade.side === 'buy' ? 'tape-row-buy' : 'tape-row-sell';
-            const bigClass = trade.isBig ? 'tape-row-big' : '';
-            const time = this._formatTime(trade.time);
-            
-            html += `
-                <tr class="tape-row ${sideClass} ${bigClass}">
-                    <td class="tape-time">${time}</td>
-                    <td class="tape-price">${this._formatPrice(trade.price)}</td>
-                    <td class="tape-size">${this._formatSize(trade.size)}</td>
-                    <td class="tape-side">
-                        <span class="tape-side-badge ${trade.side}">${trade.side.toUpperCase()}</span>
-                    </td>
-                </tr>
-            `;
-        });
-
-        this.tbody.innerHTML = html;
-
-        // Update stats
-        this._updateStats();
-
-        // Auto-scroll to top (newest trades)
-        if (this.options.autoScroll && this.bodyEl) {
-            this.bodyEl.scrollTop = 0;
+        let shown = 0;
+        for (const trade of this.trades) {
+            if (!this._visible(trade)) continue;
+            html += this._rowHtml(trade);
+            shown += 1;
+            if (shown >= max) break;
         }
+        this.tbody.innerHTML = html;
+        this._updateStats();
+        if (this.options.autoScroll && this.bodyEl) this.bodyEl.scrollTop = 0;
     }
 
     _updateStats() {
@@ -250,16 +332,6 @@ class TimeAndSales {
         this.volSellBar.style.width = (100 - buyPct) + '%';
     }
 
-    _formatTime(timestamp) {
-        const date = new Date(timestamp);
-        return date.toLocaleTimeString('en-US', { 
-            hour: '2-digit', 
-            minute: '2-digit', 
-            second: '2-digit',
-            hour12: false 
-        });
-    }
-
     _formatPrice(price) {
         if (price >= 1000) return price.toFixed(1);
         if (price >= 1) return price.toFixed(2);
@@ -269,7 +341,11 @@ class TimeAndSales {
     _formatSize(size) {
         if (size >= 1000000) return (size / 1000000).toFixed(2) + 'M';
         if (size >= 1000) return (size / 1000).toFixed(1) + 'K';
-        return Math.round(size).toString();
+        if (size >= 1) return size.toFixed(0);
+        /* Crypto prints are fractions of a coin: Math.round() rendered every live print as "0",
+           which reads as a broken tape rather than as a small size. */
+        if (size >= 0.01) return size.toFixed(3);
+        return Number(size).toPrecision(2);
     }
 
     destroy() {

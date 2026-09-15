@@ -80,14 +80,39 @@ class OrderbookLadder {
     }
 
     /**
+     * Normalise one level list to {price, size}.
+     *
+     * The engine's REST payload sends `{price, quantity}` (app.py), the demo fixtures and the
+     * WebSocket deltas use `{price, size}`. Reading only `.size` left this ladder with no
+     * sizes at all against the live feed: empty size cells, zero-width bars and a NaN footer.
+     * Arrays (`[price, size]`) are accepted too, so a shape change upstream degrades to a
+     * readable ladder instead of a silently empty one.
+     */
+    _levels(list) {
+        const out = [];
+        for (const level of list || []) {
+            if (Array.isArray(level)) {
+                const price = Number(level[0]);
+                const size = Number(level[1]);
+                if (Number.isFinite(price) && Number.isFinite(size)) out.push({ price, size });
+                continue;
+            }
+            const price = Number(level && level.price);
+            const size = Number(level && (level.size !== undefined ? level.size : level.quantity));
+            if (Number.isFinite(price) && Number.isFinite(size)) out.push({ price, size });
+        }
+        return out;
+    }
+
+    /**
      * Update full orderbook snapshot
-     * @param {Object} data - { bids: [{price, size}], asks: [{price, size}], currentPrice }
+     * @param {Object} data - { bids: [{price, size|quantity}], asks: [...], currentPrice }
      */
     setData(data) {
         if (!data) return;
         
-        this.bids = data.bids || [];
-        this.asks = data.asks || [];
+        this.bids = this._levels(data.bids);
+        this.asks = this._levels(data.asks);
         this.currentPrice = data.currentPrice || data.last_price || null;
         
         // Sort: bids descending, asks ascending
@@ -107,6 +132,11 @@ class OrderbookLadder {
      * Update single level (real-time delta)
      */
     updateLevel(side, price, size) {
+        const p = Number(price);
+        const q = Number(size);
+        if (!Number.isFinite(p) || !Number.isFinite(q)) return;   // a malformed delta must not poison the book
+        price = p;
+        size = q;
         const levels = side === 'bid' ? this.bids : this.asks;
         const idx = levels.findIndex(l => l.price === price);
         
@@ -289,11 +319,16 @@ class OrderbookLadder {
     }
 
     _scrollToCurrentPrice() {
+        /* One scroll per price change, not one per repaint: a smooth scroll issued on every
+           throttled render (10/s) queues animations against each other, forces layout each
+           time, and drags the ladder back under a user who is scrolling it by hand. */
         if (!this.currentPrice || !this.bodyEl) return;
-        
+        if (this._centeredPrice === this.currentPrice) return;
+        this._centeredPrice = this.currentPrice;
+
         const currentRow = this.bodyEl.querySelector('.ob-current');
         if (currentRow) {
-            currentRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            currentRow.scrollIntoView({ block: 'center' });
         }
     }
 
@@ -306,7 +341,10 @@ class OrderbookLadder {
     _formatSize(size) {
         if (size >= 1000000) return (size / 1000000).toFixed(2) + 'M';
         if (size >= 1000) return (size / 1000).toFixed(1) + 'K';
-        return Math.round(size).toString();
+        if (size >= 1) return size.toFixed(0);
+        /* Crypto book levels are fractions of a coin: Math.round() showed them all as "0". */
+        if (size >= 0.01) return size.toFixed(3);
+        return Number(size).toPrecision(2);
     }
 
     destroy() {

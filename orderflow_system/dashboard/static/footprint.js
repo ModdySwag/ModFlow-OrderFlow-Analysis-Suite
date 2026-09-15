@@ -1,5 +1,5 @@
 /**
- * Footprint Chart Component — TradingView-Style
+ * Footprint Chart Component — chart component
  * Drag to pan, scroll to zoom, crosshair cursor, smooth canvas rendering
  * Bid/Ask volume heatmap at each price level per candle bar
  */

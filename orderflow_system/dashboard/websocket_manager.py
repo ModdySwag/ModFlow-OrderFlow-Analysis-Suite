@@ -29,6 +29,7 @@ class Channel(str, Enum):
     ORDERBOOK = "orderbook"
     DELTA = "delta"
     STATS = "stats"
+    SEARCH = "search"          # batched palette rows (see desktop/search_service.py)
 
 
 def _serialize(obj: Any) -> Any:
@@ -75,6 +76,11 @@ class WebSocketManager:
             Channel.ORDERBOOK: 500,      # Max 2 book updates/sec
             Channel.DELTA: 200,
             Channel.STATS: 5000,         # Max every 5s
+            # The palette sends one batched message per window (300 ms) rather than a
+            # message per tick, so the channel throttle stays out of the way: the
+            # batching is the pacing mechanism, and it protects the stream from the
+            # slow-client disconnect (Alpaca code 407).
+            Channel.SEARCH: 0,
         }
 
     @property
@@ -184,3 +190,8 @@ class WebSocketManager:
     async def broadcast_stats(self, stats_data: dict):
         """Broadcast system stats."""
         await self.broadcast(Channel.STATS, stats_data)
+
+    async def broadcast_search_rows(self, rows: list[dict]) -> None:
+        """One batched palette update (already coalesced by RowBatcher)."""
+        if rows:
+            await self.broadcast(Channel.SEARCH, {"rows": rows})

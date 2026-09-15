@@ -41,7 +41,6 @@ class BybitFeed:
         self._ws = None
         self._running = False
         self._orderbooks: dict[str, OrderbookSnapshot] = {}
-        self._tick_buffer: dict[str, list[Tick]] = {s: [] for s in symbols}
         self._reconnect_delay = 1.0
 
     async def start(self):
@@ -124,8 +123,6 @@ class BybitFeed:
                 trade_id=trade.get("i", ""),
             )
 
-            self._tick_buffer[symbol].append(tick)
-
             if self.on_tick:
                 await self.on_tick(symbol, tick)
 
@@ -201,9 +198,3 @@ class BybitFeed:
 
     def get_orderbook(self, symbol: str) -> Optional[OrderbookSnapshot]:
         return self._orderbooks.get(symbol)
-
-    def flush_tick_buffer(self, symbol: str) -> list[Tick]:
-        """Return and clear buffered ticks for batch DB insert."""
-        ticks = self._tick_buffer.get(symbol, [])
-        self._tick_buffer[symbol] = []
-        return ticks

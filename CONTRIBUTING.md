@@ -1,4 +1,4 @@
-# Contributing to OrderFlow Analysis Pro
+# Contributing to ModFlow OrderFlow Analysis Suite
 
 Thank you for your interest in contributing!
 
@@ -7,7 +7,7 @@ Thank you for your interest in contributing!
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Make your changes
-4. Run tests: `pytest orderflow_system/test_integration.py`
+4. Run tests and the UI audit (see below)
 5. Submit a pull request
 
 ## Development Setup
@@ -15,6 +15,26 @@ Thank you for your interest in contributing!
 ```bash
 pip install -e ".[dev]"
 ```
+
+## Tests & UI audit (the two commands that must stay green)
+
+Every change must leave these green — CI runs exactly the same two commands
+(`.github/workflows/ci.yml`):
+
+```bash
+.venv/Scripts/python.exe -m pytest orderflow_system -q   # full suite (baseline: 130 passed)
+.venv/Scripts/python.exe scripts/audit_ui_refs.py        # JS → FastAPI routes / DOM ids (baseline: AUDIT CLEAN)
+```
+
+- Run the audit after **any** edit under `orderflow_system/desktop/ui/` or `dashboard/` — it catches broken
+  API paths, dead element ids and JS syntax errors without opening the app.
+- `orderflow_system/test_integration.py` is the fast smoke for the analytics pipeline; `test_alpaca.py`
+  covers the broker client with a stub transport (no live calls in CI).
+- Behaviour changes need a test that failed before the change. Data endpoints must keep the demo payload
+  shapes (`dashboard/demo_data.py` is the contract) — `test_payload_parity.py` guards that.
+- Headless UI smoke while developing:
+  `.venv/Scripts/python.exe -m orderflow_system.desktop --headless --port 8099` then hit
+  `http://127.0.0.1:8099/api/...` (see the run flags in `desktop/launcher.py`).
 
 ## Areas for Contribution
 

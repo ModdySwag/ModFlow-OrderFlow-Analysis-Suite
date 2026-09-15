@@ -67,6 +67,39 @@ class OrderbookLevel:
     quantity: float
 
 
+@dataclass(slots=True)
+class Quote:
+    """Top-of-book quote (NBBO or a venue's best bid/offer).
+
+    Only feeds that publish a book or a quote stream can fill this: the exchange
+    feed publishes depth (see OrderbookSnapshot), MetaTrader publishes a DOM when
+    the broker allows it, and Alpaca publishes quotes (but no depth) — which is why
+    the Alpaca crosshair views use this and the heatmap does not.
+    """
+    timestamp_ms: int
+    bid_price: float = 0.0
+    bid_size: float = 0.0
+    ask_price: float = 0.0
+    ask_size: float = 0.0
+    symbol: str = ""
+
+    @property
+    def mid(self) -> float:
+        if self.bid_price and self.ask_price:
+            return (self.bid_price + self.ask_price) / 2.0
+        return self.bid_price or self.ask_price or 0.0
+
+    @property
+    def spread(self) -> float:
+        if self.bid_price and self.ask_price:
+            return self.ask_price - self.bid_price
+        return 0.0
+
+    def is_valid(self) -> bool:
+        """A crossed or one-sided quote is not usable for trade classification."""
+        return bool(self.bid_price and self.ask_price and self.ask_price >= self.bid_price)
+
+
 @dataclass
 class OrderbookSnapshot:
     """L2 orderbook state at a point in time."""

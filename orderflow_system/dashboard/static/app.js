@@ -300,7 +300,7 @@ async function fetchJSON(url) {
 }
 
 // ════════════════════════════════════════════
-// TradingView Lightweight Charts
+// the vendored chart library
 // ════════════════════════════════════════════
 
 function createPriceChart() {

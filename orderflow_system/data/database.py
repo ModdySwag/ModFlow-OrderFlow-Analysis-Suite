@@ -24,8 +24,11 @@ class Database:
         self._db: Optional[aiosqlite.Connection] = None
 
     async def connect(self):
-        self._db = await aiosqlite.connect(self.db_path)
+        # timeout + busy_timeout: a second instance (or a CLI run) writing the
+        # same file must make us wait for the lock, not fail instantly.
+        self._db = await aiosqlite.connect(self.db_path, timeout=15.0)
         await self._db.execute("PRAGMA journal_mode=WAL")
+        await self._db.execute("PRAGMA busy_timeout=15000")
         await self._db.execute("PRAGMA synchronous=NORMAL")
         await self._create_tables()
         logger.info(f"Database connected: {self.db_path}")
@@ -197,6 +200,13 @@ class Database:
     # ── Volume Profiles ──
 
     async def insert_volume_profile(self, instrument: str, vp: VolumeProfileResult):
+        # Replace, never append: the hourly/daily rebuild re-inserts the same session_date, and the
+        # table had no unique key, so one session accumulated a row per rebuild (his DB held 81 rows
+        # for a single date, which is what made "last 5 sessions" five copies of one day).
+        await self._db.execute(
+            "DELETE FROM volume_profiles WHERE instrument = ? AND session_date = ?",
+            (instrument, vp.session_date),
+        )
         await self._db.execute(
             "INSERT INTO volume_profiles "
             "(instrument, session_date, poc, vah, val, total_volume, shape, "
@@ -212,10 +222,15 @@ class Database:
     async def get_volume_profiles(
         self, instrument: str, days: int = 5
     ) -> list[VolumeProfileResult]:
+        # One row per session_date - the newest - so `days` really means days. Without the
+        # correlated max(id) this returned however many rows the rebuilds had accumulated, and the
+        # LIMIT then cut across duplicates of a single session.
         cursor = await self._db.execute(
             "SELECT session_date, poc, vah, val, total_volume, shape, "
             "poc_position_pct, lvn_json, volume_at_price_json "
-            "FROM volume_profiles WHERE instrument = ? "
+            "FROM volume_profiles v WHERE instrument = ? AND v.id = ("
+            "  SELECT MAX(id) FROM volume_profiles x "
+            "  WHERE x.instrument = v.instrument AND x.session_date = v.session_date) "
             "ORDER BY session_date DESC LIMIT ?",
             (instrument, days),
         )

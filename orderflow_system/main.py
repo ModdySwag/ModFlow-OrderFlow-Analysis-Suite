@@ -22,9 +22,11 @@ import asyncio
 import logging
 import signal
 import sys
+from collections import deque
 from datetime import datetime, timezone
 from typing import Optional
 
+from orderflow_system.config import settings as runtime_settings
 from orderflow_system.config.settings import (
     InstrumentConfig,
     Instrument,
@@ -35,6 +37,7 @@ from orderflow_system.config.settings import (
     LOG_LEVEL,
     DATA_SOURCE,
     MT5,
+    ALPACA,
     DASHBOARD,
 )
 from orderflow_system.data.models import (
@@ -80,7 +83,10 @@ class InstrumentPipeline:
         )
         self.vp_engine = VolumeProfileEngine(config.volume_profile)
         self.delta_engine = DeltaEngine(tick_size=config.tick_size)
-        self.footprint_engine = FootprintEngine(tick_size=config.tick_size)
+        self.footprint_engine = FootprintEngine(
+            tick_size=config.tick_size,
+            min_print_size=float(getattr(runtime_settings, "FOOTPRINT_MIN_PRINT_SIZE", 0.0) or 0.0),
+        )
         self.orderbook_tracker = OrderbookTracker(
             thin_threshold=config.sweep.thin_book_threshold
         )
@@ -100,6 +106,9 @@ class InstrumentPipeline:
         self._tick_count: int = 0
         # Callback for routing candle-close signals to the system
         self._on_signals_callback = None
+        # Callback for handing the closed candle itself to the system
+        # (persistence + WS broadcast). Wired by OrderflowSystem.
+        self._on_candle_closed_callback = None
         self._candle_count: int = 0
 
     async def process_tick(self, tick: Tick):
@@ -171,6 +180,11 @@ class InstrumentPipeline:
         if signals and self._on_signals_callback:
             await self._on_signals_callback(self.symbol, signals)
 
+        # Hand the closed candle itself to the system (persist + broadcast).
+        # Runs AFTER the analytics pass, so it never re-runs analytics.
+        if self._on_candle_closed_callback:
+            await self._on_candle_closed_callback(self.symbol, candle)
+
         return signals
 
     @property
@@ -216,17 +230,31 @@ class OrderflowSystem:
         # Wire candle-close signals from each pipeline back to the system
         for sym, pipeline in self.pipelines.items():
             pipeline._on_signals_callback = self._on_candle_signals
+            pipeline._on_candle_closed_callback = self._on_candle_closed
         self.telegram = TelegramAlertBot(
             bot_token=TELEGRAM.bot_token,
             chat_id=TELEGRAM.chat_id,
         )
-        self.db = Database(DB_PATH)
+        # Read the path at call time: the desktop launcher repoints
+        # settings.DB_PATH at the per-user data directory, and a copy imported
+        # at module load would silently ignore that and write into the repo.
+        self.db = Database(getattr(runtime_settings, "DB_PATH", DB_PATH))
         self.feed: Optional[BybitFeed] = None
         self.mt5_feed: Optional[MT5Feed] = None
+        self.alpaca_feed = None            # AlpacaFeed when that source is on
         self.ws_manager: WebSocketManager = ws_manager
         self._running = False
         self._tick_batch_size = 100
         self._tick_buffers: dict[str, list[Tick]] = {}
+        # Bounded per-symbol tape buffer (dashboard initial fill + burst reads).
+        # deque(maxlen=N) = O(1) append, fixed memory, no list copies on trim.
+        self._recent_ticks_max = 500
+        self._recent_ticks: dict[str, deque[Tick]] = {}
+        # Most recent closed candle per symbol (live /api/footprint + microstructure).
+        self._last_candles: dict[str, Candle] = {}
+        # Most recent signals per symbol, newest last (live /api/microstructure).
+        self._recent_signals_max = 50
+        self._recent_signals: dict[str, deque[Signal]] = {}
 
     async def start(self):
         """Start the complete system."""
@@ -291,6 +319,31 @@ class OrderflowSystem:
             feed_tasks.append(self.feed.start())
             logger.info(f"Bybit feed configured: {symbols}")
 
+        if self.data_source in (DataSource.ALPACA, DataSource.ALL):
+            # ── Alpaca Markets Feed (US equities/ETFs/options + crypto) ──
+            from orderflow_system.data.alpaca_feed import AlpacaFeed
+
+            mapped = {s: ALPACA.symbols[s] for s in symbols if s in ALPACA.symbols}
+            if mapped:
+                self.alpaca_feed = AlpacaFeed(
+                    symbols=mapped,
+                    on_tick=self._on_tick,
+                    key_id=ALPACA.key_id,
+                    secret=ALPACA.secret,
+                    paper=ALPACA.paper,
+                    feed=ALPACA.feed,
+                    snapshot_seconds=ALPACA.snapshot_seconds,
+                    history_minutes=ALPACA.history_minutes,
+                    stock_cap=ALPACA.stock_cap,
+                    option_cap=ALPACA.option_cap,
+                )
+                feed_tasks.append(self._run_alpaca_feed())
+                logger.info("Alpaca feed configured: %s (feed=%s, paper=%s)",
+                            mapped, ALPACA.feed, ALPACA.paper)
+            else:
+                logger.warning("Alpaca source selected but no enabled instrument is mapped "
+                               "to an Alpaca symbol — nothing to stream")
+
         self._running = True
         source_name = self.data_source.value.upper()
         logger.info(f"Starting live feed [{source_name}] for: {', '.join(symbols)}")
@@ -324,6 +377,8 @@ class OrderflowSystem:
             await self.feed.stop()
         if self.mt5_feed:
             await self.mt5_feed.stop()
+        if self.alpaca_feed:
+            await self.alpaca_feed.stop()
         await self.db.close()
         logger.info("System stopped.")
 
@@ -420,6 +475,11 @@ class OrderflowSystem:
             symbol, tick.price, tick.size, tick.side.value
         )
 
+        # Bounded tape buffer for the dashboard's initial fill (/api/tape)
+        self._recent_ticks.setdefault(
+            symbol, deque(maxlen=self._recent_ticks_max)
+        ).append(tick)
+
         # Buffer ticks for batch DB insert
         if symbol not in self._tick_buffers:
             self._tick_buffers[symbol] = []
@@ -428,6 +488,29 @@ class OrderflowSystem:
         if len(self._tick_buffers[symbol]) >= self._tick_batch_size:
             await self.db.insert_ticks_batch(symbol, self._tick_buffers[symbol])
             self._tick_buffers[symbol] = []
+
+    def recent_ticks(self, symbol: str, count: int = 200) -> list[Tick]:
+        """Newest-last slice of the bounded tape buffer for *symbol*.
+
+        Feeds `/api/tape` (initial tape fill) and burst metrics. Returns an empty
+        list — never demo data — when nothing has streamed yet; the endpoint is
+        responsible for the demo fallback and the `source` field.
+        """
+        if count <= 0:
+            return []
+        buf = self._recent_ticks.get(symbol)
+        if not buf:
+            return []
+        return list(buf)[-count:]
+
+    def recent_signals(self, symbol: str, count: int = 10) -> list[Signal]:
+        """Most recent pattern signals for *symbol*, newest last."""
+        if count <= 0:
+            return []
+        buf = self._recent_signals.get(symbol)
+        if not buf:
+            return []
+        return list(buf)[-count:]
 
     async def _on_orderbook(self, symbol: str, snapshot: OrderbookSnapshot):
         """Handle orderbook update."""
@@ -454,41 +537,51 @@ class OrderflowSystem:
         if not pipeline:
             return
 
+        self._recent_signals.setdefault(
+            symbol, deque(maxlen=self._recent_signals_max)
+        ).extend(signals)
+
         for signal in signals:
             await self._handle_signal(symbol, pipeline, signal)
 
-    async def _on_candle_close_handler(self, symbol: str, candle: Candle):
-        """Process closed candle signals."""
+    async def _on_candle_closed(self, symbol: str, candle: Candle):
+        """Persist + broadcast a closed candle. Called BY the pipeline.
+
+        The pipeline invokes this AFTER its analytics pass; signals have already
+        been routed through ``_on_signals_callback``. It deliberately does NOT
+        call ``pipeline._on_candle_close`` again — doing so would run the
+        analytics twice per candle (the historical wiring bug this replaces).
+        """
         pipeline = self.pipelines.get(symbol)
         if not pipeline:
             return
 
-        signals = await pipeline._on_candle_close(candle)
+        self._last_candles[symbol] = candle
 
-        # Store candle
-        await self.db.insert_candle(symbol, "1m", candle)
+        try:
+            # Store candle
+            await self.db.insert_candle(symbol, "1m", candle)
 
-        # Broadcast candle to dashboard
-        await self.ws_manager.broadcast_candle(symbol, {
-            "time": candle.timestamp_ms / 1000,
-            "open": round(candle.open, 6),
-            "high": round(candle.high, 6),
-            "low": round(candle.low, 6),
-            "close": round(candle.close, 6),
-            "volume": round(candle.volume, 2),
-            "delta": round(candle.delta, 2),
-        })
+            # Broadcast candle to dashboard
+            await self.ws_manager.broadcast_candle(symbol, {
+                "time": candle.timestamp_ms / 1000,
+                "open": round(candle.open, 6),
+                "high": round(candle.high, 6),
+                "low": round(candle.low, 6),
+                "close": round(candle.close, 6),
+                "volume": round(candle.volume, 2),
+                "delta": round(candle.delta, 2),
+            })
 
-        # Broadcast cumulative delta
-        await self.ws_manager.broadcast_delta(symbol, {
-            "time": candle.timestamp_ms / 1000,
-            "value": round(pipeline.delta_engine.cumulative_delta, 2),
-            "bar_delta": round(candle.delta, 2),
-        })
-
-        # Process each signal through the aggregator
-        for signal in signals:
-            await self._handle_signal(symbol, pipeline, signal)
+            # Broadcast cumulative delta
+            await self.ws_manager.broadcast_delta(symbol, {
+                "time": candle.timestamp_ms / 1000,
+                "value": round(pipeline.delta_engine.cumulative_delta, 2),
+                "bar_delta": round(candle.delta, 2),
+            })
+        except Exception:
+            # A dashboard/DB hiccup must never take the feed down.
+            logger.exception("candle persistence/broadcast failed for %s", symbol)
 
     async def _handle_signal(
         self, symbol: str, pipeline: InstrumentPipeline, signal: Signal
@@ -517,6 +610,18 @@ class OrderflowSystem:
             await self.ws_manager.broadcast_signal(symbol, agg)
             if trade:
                 await self.ws_manager.broadcast_trade_state(symbol, trade)
+
+    async def _run_alpaca_feed(self):
+        """Seed the history, then start the streams (a fresh chart reads as broken)."""
+        try:
+            bars = await self.alpaca_feed.seed_history()
+            logger.info("Alpaca history seeded: %d bars", bars)
+        except Exception as exc:                      # noqa: BLE001 — history is a bonus
+            logger.warning("Alpaca history seeding failed: %s", exc)
+        await self.alpaca_feed.start()
+        # keep the task alive with the feed's own lifetime
+        while self._running:
+            await asyncio.sleep(1.0)
 
     async def _periodic_tasks(self):
         """Run periodic tasks: VP rebuild, bias update, stats logging."""

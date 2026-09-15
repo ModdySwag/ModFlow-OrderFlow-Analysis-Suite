@@ -32,12 +32,17 @@ _BASE_PRICES = {
     # Indices
     "NAS100USDT": 21450.0, "SP500": 6100.0, "DJ30": 44200.0,
     "DAX40": 18900.0, "UK100": 8350.0,
-    # Crypto
+    # Crypto (every shipped major, so enabling one in demo mode shows a sane chart
+    # instead of the 1000.0 placeholder — the fallback is for symbols nobody listed)
     "BTCUSDT": 98500.0, "ETHUSDT": 2680.0, "SOLUSDT": 195.0,
-    "XRPUSDT": 2.45, "BNBUSDT": 680.0,
-    # Stocks
+    "XRPUSDT": 2.45, "BNBUSDT": 680.0, "DOGEUSDT": 0.32, "ADAUSDT": 0.95,
+    "AVAXUSDT": 38.0, "LINKUSDT": 22.0, "LTCUSDT": 105.0, "DOTUSDT": 7.2,
+    "TRXUSDT": 0.25, "SUIUSDT": 4.3, "APTUSDT": 9.5, "NEARUSDT": 5.2,
+    "ARBUSDT": 0.85, "OPUSDT": 1.9, "POLUSDT": 0.48, "TONUSDT": 5.4,
+    # Stocks (also the Alpaca equity examples — the demo generator must be able to
+    # serve every symbol the Alpaca view offers, or the UI looks broken without keys)
     "AAPL": 232.0, "TSLA": 365.0, "AMZN": 228.0, "MSFT": 415.0,
-    "NVDA": 138.0, "META": 680.0, "GOOGL": 185.0,
+    "NVDA": 138.0, "META": 680.0, "GOOGL": 185.0, "SPY": 560.0, "QQQ": 480.0,
 }
 
 _TICK_SIZES = {
@@ -50,13 +55,27 @@ _TICK_SIZES = {
     "NAS100USDT": 0.5, "SP500": 0.25, "DJ30": 1.0, "DAX40": 0.5, "UK100": 0.5,
     # Crypto
     "BTCUSDT": 0.5, "ETHUSDT": 0.1, "SOLUSDT": 0.01, "XRPUSDT": 0.0001, "BNBUSDT": 0.1,
+    **{s: 0.0001 for s in ["DOGEUSDT", "ADAUSDT", "TRXUSDT", "ARBUSDT", "OPUSDT", "POLUSDT", "SUIUSDT"]},
+    **{s: 0.001 for s in ["AVAXUSDT", "LINKUSDT", "DOTUSDT", "APTUSDT", "NEARUSDT", "TONUSDT"]},
+    "LTCUSDT": 0.01,
     # Stocks
-    **{s: 0.01 for s in ["AAPL","TSLA","AMZN","MSFT","NVDA","META","GOOGL"]},
+    **{s: 0.01 for s in ["AAPL","TSLA","AMZN","MSFT","NVDA","META","GOOGL","SPY","QQQ"]},
 }
 
 
 def _base_price(symbol: str) -> float:
     return _BASE_PRICES.get(symbol, 1000.0)
+
+
+def models_symbol(symbol: str) -> bool:
+    """Does the demo generator actually have a price for this symbol?
+
+    Demo data is only honest for symbols it models: the old blanket fallback invented a
+    price for anything (1000.0), which put a $1,028 chart on a token trading at $0.19
+    whenever a live symbol was still warming up. Callers use this to serve nothing
+    instead of something made up.
+    """
+    return symbol in _BASE_PRICES
 
 
 def _tick_size(symbol: str) -> float:

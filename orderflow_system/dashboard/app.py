@@ -28,6 +28,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from orderflow_system.dashboard.websocket_manager import WebSocketManager, _serialize
 from orderflow_system.data.models import TradePhase
+from orderflow_system.data.enums import as_value
 from orderflow_system.dashboard import demo_data
 
 logger = logging.getLogger(__name__)
@@ -182,11 +183,11 @@ async def get_scanner():
     return results
 
 
-# ── Chart Markers — signal events formatted for TradingView ──
+# ── Chart Markers — signal events formatted for the chart library ──
 
 def _signal_to_marker(sig, is_buy: bool, action: str, time_s: int) -> dict:
-    """Convert a signal to TradingView marker format."""
-    sig_type = sig.signal_type.value if hasattr(sig.signal_type, 'value') else str(sig.signal_type)
+    """Convert a signal to chart marker format."""
+    sig_type = as_value(sig.signal_type)
 
     if action == "enter":
         return {"time": time_s, "position": "belowBar" if is_buy else "aboveBar",
@@ -253,7 +254,7 @@ async def get_markers(symbol: str, limit: int = Query(default=200, le=500)):
 
     markers = []
     for sig in raw_signals:
-        is_buy = (sig.direction == Side.BUY) if hasattr(sig.direction, 'name') else (sig.direction == 'buy')
+        is_buy = as_value(sig.direction) == "buy"
         time_s = sig.timestamp_ms // 1000
         agg = agg_by_ts.get(sig.timestamp_ms)
         action = agg.action if agg else "alert_only"
@@ -509,7 +510,7 @@ async def get_bias(symbol: str):
     """Get current daily bias and qualified levels."""
     system = get_system()
     if not system:
-        return demo_data.demo_bias(symbol)
+        return _with_source(demo_data.demo_bias(symbol), "demo")
 
     pipeline = system.pipelines.get(symbol)
     if not pipeline:
@@ -522,9 +523,10 @@ async def get_bias(symbol: str):
             "confidence": 0,
             "qualified_levels": [],
             "notes": "No profile data yet",
+            "source": "engine",
         }
 
-    return _serialize(bias)
+    return _with_source(_serialize(bias), "engine")
 
 
 @app.get("/api/signals/{symbol}")
@@ -568,7 +570,7 @@ async def get_strategy_status(symbol: str):
     """
     system = get_system()
     if not system:
-        return demo_data.demo_strategy_status(symbol)
+        return _with_source(demo_data.demo_strategy_status(symbol), "demo")
 
     pipeline = system.pipelines.get(symbol)
     if not pipeline:
@@ -594,7 +596,7 @@ async def get_strategy_status(symbol: str):
         step_profile["detail"] = bias.notes or f"{bias.profile_shape} profile"
         step_profile["sub"] = [
             f"Shape: {bias.profile_shape}",
-            f"Direction: {bias.direction.value if hasattr(bias.direction, 'value') else bias.direction}",
+            f"Direction: {as_value(bias.direction)}",
             f"Confidence: {bias.confidence:.0f}%",
             f"POC: {bias.poc:.2f}" if bias.poc else "POC: --",
             f"VAH: {bias.vah:.2f}" if bias.vah else "VAH: --",
@@ -687,11 +689,11 @@ async def get_strategy_status(symbol: str):
         "sub": [],
     }
     if trade and trade.phase in ("absorption", "position_open", "break_even", "trailing"):
-        phase_val = trade.phase.value if hasattr(trade.phase, 'value') else trade.phase
+        phase_val = as_value(trade.phase)
         if phase_val in ("absorption", "position_open", "break_even", "trailing"):
             step_entry["status"] = "triggered"
             if trade.entry_price > 0:
-                step_entry["detail"] = f"Entered {'LONG' if trade.direction == 'buy' or (hasattr(trade.direction, 'value') and trade.direction.value == 'buy') else 'SHORT'} @ {trade.entry_price:.2f}"
+                step_entry["detail"] = f"Entered {'LONG' if as_value(trade.direction) == 'buy' else 'SHORT'} @ {trade.entry_price:.2f}"
             else:
                 step_entry["detail"] = "Absorption confirmed — awaiting position fill"
             step_entry["sub"].append(f"Phase: {phase_val}")
@@ -719,7 +721,7 @@ async def get_strategy_status(symbol: str):
         "sub": [],
     }
     if trade:
-        phase_val = trade.phase.value if hasattr(trade.phase, 'value') else str(trade.phase)
+        phase_val = as_value(trade.phase)
         if phase_val == "position_open":
             step_mgmt["status"] = "active"
             step_mgmt["detail"] = "Position open — waiting for initiative to move to BE"
@@ -780,8 +782,9 @@ async def get_strategy_status(symbol: str):
         "current_price": current_price,
         "steps": [step_profile, step_levels, step_price, step_absorption, step_entry, step_mgmt],
         "trade": _serialize(trade) if trade else None,
-        "bias_direction": bias.direction.value if bias and hasattr(bias.direction, 'value') else (bias.direction if bias else "neutral"),
+        "bias_direction": as_value(bias.direction, "neutral") if bias else "neutral",
         "bias_confidence": bias.confidence if bias else 0,
+        "source": "engine",
     }
 
 
@@ -796,6 +799,7 @@ def _empty_strategy_status(symbol: str, reason: str):
         "trade": None,
         "bias_direction": "neutral",
         "bias_confidence": 0,
+        "source": "engine",
     }
 
 
@@ -804,7 +808,7 @@ async def get_orderbook(symbol: str, levels: int = Query(default=10, le=25)):
     """Get current orderbook state."""
     system = get_system()
     if not system:
-        return demo_data.demo_orderbook(symbol)
+        return _with_source(demo_data.demo_orderbook(symbol), "demo")
 
     pipeline = system.pipelines.get(symbol)
     if not pipeline:
@@ -813,7 +817,7 @@ async def get_orderbook(symbol: str, levels: int = Query(default=10, le=25)):
     tracker = pipeline.orderbook_tracker
     snapshot = tracker.latest_snapshot
     if not snapshot:
-        return {"bids": [], "asks": [], "imbalance": 0.0}
+        return {"bids": [], "asks": [], "imbalance": 0.0, "source": "engine"}
 
     return {
         "timestamp_ms": snapshot.timestamp_ms,
@@ -830,6 +834,7 @@ async def get_orderbook(symbol: str, levels: int = Query(default=10, le=25)):
         "mid_price": snapshot.mid_price,
         "spread": snapshot.spread,
         "imbalance": round(snapshot.imbalance_ratio(), 4),
+        "source": "engine",
     }
 
 
@@ -887,20 +892,223 @@ async def get_delta(
     return result
 
 
+# ──────────────────────────────────────────────
+# Live payload builders
+#
+# Policy for the live/demo boundary:
+#   * an endpoint whose payload is a MAPPING carries "source": "engine"|"demo";
+#   * an endpoint whose payload is a LIST (tape, footprint, candles, delta,
+#     signals, instruments, scanner, markers) cannot carry a top-level key
+#     without breaking the JS, so the live/demo truth for those comes from
+#     /api/control/live-status (see engine.live_status()).
+# ──────────────────────────────────────────────
+
+def _with_source(payload, source: str):
+    """Tag a mapping payload with its data source; pass lists through untouched."""
+    if isinstance(payload, dict):
+        payload = dict(payload)
+        payload["source"] = source
+    return payload
+
+
+def _ms_to_utc_midnight() -> int:
+    """Milliseconds until the next UTC day rollover (session countdown)."""
+    from datetime import datetime, time, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    midnight = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
+    return int((midnight + timedelta(days=1) - now).total_seconds() * 1000)
+
+
+def _live_tape_rows(ticks) -> list:
+    """Demo-shaped tape rows from the pipeline's bounded tick buffer."""
+    return [
+        {
+            "time": t.timestamp_ms / 1000,
+            "price": round(t.price, 6),
+            "size": round(t.size, 6),
+            "side": as_value(t.side),
+        }
+        for t in ticks
+    ]
+
+
+def _query_value(value: Any, default: Any, cast) -> Any:
+    """Coerce a handler parameter that may still be FastAPI's `Query(...)` object.
+
+    Endpoints here are also called directly (the test suite does it, and so does the replay
+    path), and in that case an unset parameter arrives as the `Query` marker rather than its
+    default. Falling back to the documented default keeps both call styles honest.
+    """
+    if value is None or isinstance(value, (int, float, str, bool)):
+        try:
+            return cast(value)
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
+def _annotate_footprint_bars(bars: list, mode: str = "same_price", threshold: float = 3.0,
+                             equal_tolerance: float = 0.0) -> list:
+    """Add the Numbers-Bars analysis pack to serialised footprint bars, in place.
+
+    One implementation for live, stored and demo bars: `analyse_levels` works on the
+    price→(bid, ask) mapping every path already produces, so the demo panels and the live
+    panels show the same numbers for the same shape of data.
+    """
+    from orderflow_system.analytics.footprint import analyse_levels
+
+    for bar in bars:
+        if not isinstance(bar, dict):
+            continue
+        rows = {}
+        for level in bar.get("levels") or []:
+            try:
+                rows[float(level.get("price"))] = (float(level.get("bid") or 0.0),
+                                                   float(level.get("ask") or 0.0))
+            except (TypeError, ValueError):
+                continue
+        bar["calc"] = analyse_levels(rows, tick_size=0.0, threshold=threshold, mode=mode,
+                                     equal_tolerance=equal_tolerance)
+    return bars
+
+
+def _live_footprint_bars(pipeline, limit: int = 200, mode: str = "same_price",
+                         threshold: float = 3.0, equal_tolerance: float = 0.0) -> list:
+    """Demo-shaped footprint bars from the pipeline's footprint history."""
+    history = list(getattr(pipeline.footprint_engine, "history", []) or [])[-limit:]
+    bars = []
+    for bar in history:
+        levels = [
+            {
+                "price": float(price),
+                "bid": round(lv.bid_volume, 6),
+                "ask": round(lv.ask_volume, 6),
+            }
+            for price, lv in sorted(bar.levels.items())
+        ]
+        poc = max(levels, key=lambda lv: lv["bid"] + lv["ask"])["price"] if levels else None
+        bars.append({
+            "time": bar.timestamp_ms / 1000,
+            "open": round(bar.open, 6),
+            "high": round(bar.high, 6),
+            "low": round(bar.low, 6),
+            "close": round(bar.close, 6),
+            "poc": poc,
+            "levels": levels,
+        })
+    return _annotate_footprint_bars(bars, mode=mode, threshold=threshold,
+                                    equal_tolerance=equal_tolerance)
+
+
+def _market_state(candles) -> str:
+    """Documented heuristic for the microstructure snapshot: TRENDING when the recent
+    range and net delta lean the same way, COMPRESSION when the range is tiny,
+    REBALANCING otherwise. It is a summary of what the tape did, not advice."""
+    closes = [c.close for c in candles if c.close]
+    if len(closes) < 3:
+        return "REBALANCING"
+    last = closes[-1] or 1.0
+    rng_pct = (max(closes) - min(closes)) / last * 100.0
+    net = sum(c.delta for c in candles)
+    volume = sum(c.volume for c in candles) or 1.0
+    tilt = net / volume
+    if rng_pct >= 0.5 and abs(tilt) >= 0.15:
+        return "TRENDING"
+    if rng_pct <= 0.15:
+        return "COMPRESSION"
+    return "REBALANCING"
+
+
+def _live_microstructure(system, pipeline) -> dict:
+    """Microstructure snapshot built from live engine state, in the demo payload's shape."""
+    candles = pipeline.candle_builder.get_recent_candles(20)
+    signals = system.recent_signals(pipeline.symbol, 20) if hasattr(system, "recent_signals") else []
+
+    by_type: dict[str, list] = {}
+    for sig in signals:
+        by_type.setdefault(as_value(sig.signal_type), []).append(sig)
+
+    last_abs = by_type.get("absorption", [None])[-1]
+    last_init = by_type.get("initiative_auction", [None])[-1]
+    divergence = by_type.get("delta_divergence", [])
+    exhaustion = by_type.get("exhaustion", [])
+    session = as_value(getattr(pipeline.config.volume_profile, "session", None), "24/7")
+    net = sum(c.delta for c in candles)
+
+    return {
+        "source": "engine",
+        "marketState": _market_state(candles),
+        "session": {"name": session, "remaining": _ms_to_utc_midnight()},
+        "absorption": {
+            "level": round(last_abs.price_level, 6) if last_abs else None,
+            "attempts": int(last_abs.details.get("attempts", 0)) if last_abs else 0,
+            "strength": round(last_abs.strength) if last_abs else 0,
+            "side": as_value(last_abs.direction, "neutral") if last_abs else "neutral",
+        },
+        "initiative": {
+            "count": len(by_type.get("initiative_auction", [])),
+            "direction": ("up" if as_value(last_init.direction) == "buy" else "down") if last_init else "none",
+            "strength": round(last_init.strength) if last_init else 0,
+        },
+        "delta": {
+            "cumulative": round(pipeline.delta_engine.cumulative_delta, 1),
+            "direction": (1 if net > 0 else -1 if net < 0 else 0),
+            "divergence": bool(divergence),
+        },
+        "exhaustion": round(exhaustion[-1].strength) if exhaustion else 0,
+        "patterns": [
+            {
+                "type": as_value(sig.signal_type),
+                "confidence": round(min(max(sig.strength / 100.0, 0.0), 0.99), 2),
+                "price": round(sig.price_level, 6),
+            }
+            for sig in signals[-4:]
+        ],
+    }
+
+
 @app.get("/api/footprint/{symbol}")
 async def get_footprint(
     symbol: str,
     tf: int = Query(default=60, description="Timeframe in seconds"),
     range_s: int = Query(default=86400, alias="range", description="History range in seconds"),
+    mode: str = Query(default="same_price", pattern="^(same_price|diagonal)$",
+                      description="Imbalance convention: same price row, or diagonal (the conventional)"),
+    threshold: float = Query(default=3.0, ge=1.0, le=50.0, description="Imbalance ratio"),
+    equal_tolerance: float = Query(default=0.0, ge=0.0, le=1.0,
+                                   description="Relative tolerance for the equal-side highlight"),
 ):
-    """Get footprint chart data with bid/ask at each price level."""
+    """Get footprint chart data with bid/ask at each price level.
+
+    Each bar carries `calc` — the Numbers-Bars analysis pack (delta, POC share, extremes,
+    imbalance rows in the requested convention, equal-side rows). See analytics/footprint.py.
+    """
+    tf = _query_value(tf, 60, int)
+    range_s = _query_value(range_s, 86400, int)
+    mode = _query_value(mode, "same_price", str)
+    threshold = _query_value(threshold, 3.0, float)
+    equal_tolerance = _query_value(equal_tolerance, 0.0, float)
+    if mode not in ("same_price", "diagonal"):
+        mode = "same_price"
+    annotate = {"mode": mode, "threshold": threshold, "equal_tolerance": equal_tolerance}
     system = get_system()
     if not system:
-        return demo_data.demo_footprint(symbol, tf=tf, range_s=range_s)
+        return _annotate_footprint_bars(demo_data.demo_footprint(symbol, tf=tf, range_s=range_s), **annotate)
     pipeline = system.pipelines.get(symbol)
     if not pipeline:
         return JSONResponse({"error": f"Unknown symbol: {symbol}"}, status_code=404)
-    return demo_data.demo_footprint(symbol, tf=tf, range_s=range_s)
+    bars = _live_footprint_bars(pipeline, mode=mode, threshold=threshold,
+                                equal_tolerance=equal_tolerance)
+    if not bars:
+        # Engine running but no candle has closed yet. Fill from the demo generator
+        # only when it actually models this symbol — for anything else (a venue symbol
+        # added from the catalogue) an invented price is worse than an empty chart
+        # while it warms up, and the UI shows its warming state from live-status.
+        if not demo_data.models_symbol(symbol):
+            return []
+        return _annotate_footprint_bars(demo_data.demo_footprint(symbol, tf=tf, range_s=range_s), **annotate)
+    return bars
 
 
 @app.get("/api/tape/{symbol}")
@@ -909,8 +1117,14 @@ async def get_tape(symbol: str, count: int = Query(default=60, le=200)):
     system = get_system()
     if not system:
         return demo_data.demo_tape_trades(symbol, count=count)
-    # TODO: return real tape from live feed buffer
-    return demo_data.demo_tape_trades(symbol, count=count)
+    ticks = system.recent_ticks(symbol, count=count) if hasattr(system, "recent_ticks") else []
+    if not ticks:
+        # Engine running but nothing streamed for this symbol yet → demo fill, but only
+        # for symbols the generator models (see get_footprint).
+        if not demo_data.models_symbol(symbol):
+            return []
+        return demo_data.demo_tape_trades(symbol, count=count)
+    return _live_tape_rows(ticks)
 
 
 @app.get("/api/microstructure/{symbol}")
@@ -918,9 +1132,15 @@ async def get_microstructure(symbol: str):
     """Get microstructure snapshot (absorption, initiative, delta, exhaustion, patterns)."""
     system = get_system()
     if not system:
+        return _with_source(demo_data.demo_microstructure(symbol), "demo")
+    pipeline = system.pipelines.get(symbol)
+    if not pipeline:
         return demo_data.demo_microstructure(symbol)
-    # TODO: pull real microstructure state from pipeline
-    return demo_data.demo_microstructure(symbol)
+    snap = _live_microstructure(system, pipeline)
+    if snap["delta"]["cumulative"] == 0 and not snap["patterns"] and not pipeline.candle_builder.current_candle:
+        # No live state yet → demo fill, tagged as demo.
+        return _with_source(demo_data.demo_microstructure(symbol), "demo")
+    return snap
 
 
 @app.get("/api/stats")
@@ -933,6 +1153,7 @@ async def get_stats():
             "ws_clients": ws_manager.client_count,
             "instruments": demo_data.demo_instruments(),
             "running": True,
+            "source": "demo",
         }
 
     instruments = []
@@ -944,6 +1165,7 @@ async def get_stats():
         "ws_clients": ws_manager.client_count,
         "instruments": instruments,
         "running": system._running,
+        "source": "engine",
     }
 
 
