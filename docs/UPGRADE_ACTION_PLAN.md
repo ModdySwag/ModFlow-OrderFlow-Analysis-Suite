@@ -141,6 +141,11 @@ next gate run: `dist/` matches are only CPython's own `unicodedata.pyd`, not our
 
 ### P1 — the interaction canon and spec alignment
 
+**Status 2026-09-16: P1-1 is done** (handoff §33) — the token block, `themes/`, `theme.js`, the
+Appearance card, and the brief's grep gate at **0** across `atlas.css`, `ui.css`, `modules.css` and the
+five theme files; the dark default moved no pixel, and light/contrast/dense/accents were measured live at
+1024×640 and 2560×1440. **Next: P1-2, the cursor-link spine.**
+
 **P1-1 · Theme and token layer first (brief A). — do this before any visual polish below.** L
 Unstarted: `atlas.css` contains **zero** `--of-` tokens (`grep -c -- '--of-'` → 0) and there is no
 `themes/` directory; `.ofx-tip-hot` and friends hard-code raw hex. Deliver: token block + `themes/` CSS

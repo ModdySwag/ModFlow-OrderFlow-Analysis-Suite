@@ -981,3 +981,71 @@ venue gap — the unit tests drive the handler, the live run shows no false posi
 
 Next per the plan: **P1-1, the theme/token layer** (its grep gate is cheap and every colour decision
 below it needs the tokens to exist).
+
+
+### 33. 2026-09-16 — P1-1: the theme and token layer (the brief's gate at zero)
+
+Workstream A of the agent brief, delivered as one pass.
+
+**What landed**
+
+- **One token block** (`atlas.css`): ~110 tokens declared as rgb triples (`--of-bg-rgb: 10,14,22`) with
+  the solid form beside each (`--of-bg: rgb(var(--of-bg-rgb))`), because the shell leans on translucent
+  overlays and `rgba(var(--of-steel-rgb),.35)` themes while a hard-coded `rgba(120,150,190,.35)` cannot.
+- **Every raw colour in the shell converted onto it** — 117 hex literals and ~170 `rgba()` literals
+  across `atlas.css`, `ui.css` and `modules.css`. ui.css's own small token block became an alias block
+  (`--bg-panel: var(--of-surface)`, …) so the ~1000 lines of existing rules became theme-aware without
+  being rewritten. A script did the conversion and aborts on any unmapped colour, so nothing was
+  silently missed.
+- **`themes/`**: `dark.css` (the anchor), `light.css`, `contrast.css`, `accents.css` (the eight Windows
+  accents — cobalt, teal, green, lime, amber, orange, magenta, violet), `density.css`
+  (comfortable 32 / compact 26 / dense 22, all on `--of-row-h`; the row rules read the token, so a
+  density is a number, not a rewrite).
+- **`theme.js`** + an inline `<head>` script: the appearance is `data-theme` / `data-accent` /
+  `data-density` on `<html>`. The config (`ui.theme`, `ui.accent`, `ui.density`, clamped on write) is
+  the record; localStorage is only the **pre-paint mirror**, so the first paint is already the right
+  theme and the config wins where they disagree (verified below).
+- **Settings → Appearance**: three selects, wired through the intent arbiter's write queue, so a user
+  flipping through them writes once.
+- Guards: `test_wiring.py` gains the appearance guard and *the raw-colour guard* (the brief's grep as a
+  test); `test_config_store.py` pins the three defaults and their clamps; `audit_ui_refs.py` audits
+  `theme.js` with every other module.
+
+**The brief's gate** — `grep -nE '#[0-9a-fA-F]{3,8}\b' atlas.css | grep -v -- '--of-'` → **0 lines**.
+Also 0 for `ui.css`, `modules.css` and all five theme files.
+
+**Measured live** (sandbox 8093; screenshots in `docs/screenshots/p11-theme-{dark,light}-{1024x640,2560x1440}.png`):
+
+| state | body bg | ink | accent | `--of-row-h` | nav row | statusbar | doc overflow |
+|---|---|---|---|---|---|---|---|
+| dark (default) | rgb(10,14,22) | rgb(233,238,248) | rgb(79,140,255) | 32px | 32px | visible | 0 |
+| light | rgb(242,245,250) | rgb(20,26,38) | rgb(79,140,255) | 32px | 32px | visible | 0 |
+| light + dense | rgb(242,245,250) | rgb(20,26,38) | rgb(79,140,255) | 22px | 22px | visible | 0 |
+| light + compact | rgb(242,245,250) | rgb(20,26,38) | rgb(79,140,255) | 26px | 26px | visible | 0 |
+| light + dense + magenta | rgb(242,245,250) | rgb(20,26,38) | rgb(216,0,115) | 22px | 22px | visible | 0 |
+| contrast | rgb(0,0,0) | rgb(255,255,255) | rgb(216,0,115) | 32px | 32px | visible | 0 |
+
+The dark default renders exactly as it did before the pass (body bg `rgb(10,14,22)`, ink
+`rgb(233,238,248)`) — a token pass that moves no pixel. At **1024×640** and **2560×1440**: document
+overflow 0, status bar in view (41px, wrapped, at the small size), rail fills the height, 0
+`client error:` lines in the log. Config-wins proof: with the localStorage mirror deleted and the page
+reloaded, the config's `light`/`teal` came up (`source: 'config'`).
+
+**Two decisions, on the record**
+
+1. **The chart canvases keep their dark ground in the light shell.** The engine's palette
+   (`ofx.js math.theme`) is drawn light-on-dark — grid, labels and ramps would be unreadable on a light
+   stage. Re-theming the canvas palette is expression work (P1-8), not a token swap; the light shell
+   themes the chrome, the panels and the readouts.
+2. **The config stays the record.** `config_store` says browser storage is never the source of truth;
+   that holds — the mirror never wins, it only paints first.
+
+Gates after the pass: **496 passed / 2 skipped**, AUDIT CLEAN, `node --check` on every module, and all
+twelve selftests unchanged (ofx 119 · shell 22 · bus 13 · links 10 · watchlist 17 · news 17 ·
+options 21 · fundamentals 18 · market-pressure 12 · intent 7 · study-api 45 · search-ops).
+
+Not covered, plainly: the engine's canvas palette is still its own dark set (decision 1); the
+colour-blind ramps are P1-8; and the light shell has been looked at on the two sizes above only.
+
+Next: **P1-2, the cursor-link spine** — one hover lighting the profile, CVD, depth, tape and imbalance
+strip at once, surviving repaint, resize and a symbol switch.

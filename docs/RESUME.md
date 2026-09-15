@@ -1,17 +1,18 @@
 # Resume here — ModFlow OrderFlow Analysis Suite
 
 One page for picking this up cold. The full trail lives in `docs/SESSION_HANDOFF.md`
-(§24–§32 cover the terminal-mode build, the bus, the panels, the commit series and the P0 trust pass);
-`docs/DX_TERMINAL_AND_QUANTOWER_PLAN.md` is the phase plan with the decisions behind it, and
-`docs/UPGRADE_ACTION_PLAN.md` is the prioritised plan of action — from `report1.txt`, corrected against the
-tree. **P0 of that plan is done (handoff §32); the next work item is P1-1, the theme/token layer.**
+(§24–§33 cover the terminal-mode build, the bus, the panels, the commit series, the P0 trust pass and
+the theme/token layer); `docs/DX_TERMINAL_AND_QUANTOWER_PLAN.md` is the phase plan with the decisions
+behind it, and `docs/UPGRADE_ACTION_PLAN.md` is the prioritised plan of action — from `report1.txt`,
+corrected against the tree. **P0 is done (§32) and P1-1, the theme/token layer, is done (§33); the next
+work item is P1-2, the cursor-link spine.**
 
 ## Where it stands
 
-- **Branch `master`, HEAD = the `docs: the P0 trust pass recorded` commit** (top of the branch, tree clean,
-  nothing pushed; `git log -1` names it). On top of the nine earlier commits sit four P0 fixes by area:
-  `443008d` desktop (watchlist rows, bus counter), `7a81bf6` the cursor trace's ladder contract,
-  `65672f2` order-book sequence integrity, `d83e7a0` per-client broadcast queues.
+- **Branch `master`, HEAD = the `docs:` commit that closes P1-1** (top of the branch, tree clean,
+  nothing pushed; `git log -1` names it). Recent work, by area: the four P0 fixes (`443008d` desktop,
+  `7a81bf6` the cursor-trace contract, `65672f2` book integrity, `d83e7a0` broadcast queues), then the
+  theme layer — the token block + `themes/` + `theme.js` + the Appearance card.
 - **Nothing is pushed.** `origin` is `github.com/mahmoud20138/OrderFlow-Analysis-Pro` — the original
   project, not Moddy's. Putting this on his own GitHub is a remote/fork decision, one command when asked.
 - Local identity is `ModdySwag <ModdySwag@users.noreply.github.com>` (repo-local, nothing global changed).
@@ -20,7 +21,7 @@ tree. **P0 of that plan is done (handoff §32); the next work item is P1-1, the 
 
 ```bash
 unset PYTHONPATH
-.venv/Scripts/python.exe -m pytest orderflow_system -q        # expect 493 passed / 2 skipped
+.venv/Scripts/python.exe -m pytest orderflow_system -q        # expect 496 passed / 2 skipped
 .venv/Scripts/python.exe scripts/audit_ui_refs.py             # expect AUDIT CLEAN
 node orderflow_system/desktop/ui/shell.selftest.js            # 22   (also: bus 13, links 10,
 node orderflow_system/desktop/ui/bus.selftest.js              # 13    watchlist 17, news 17,
