@@ -93,6 +93,13 @@ under ~5 s (`RESUME.md` traps).
 
 ### P0 — displayed truth and session integrity
 
+**Status 2026-09-16: all six closed.** The pass is recorded in `docs/SESSION_HANDOFF.md` §32 with the
+evidence per item; P0-1's three visuals were seen live and exposed three further defects (the ladder's
+missing `data-price`, a highlight wiped by the ladder's own re-render, an unbounded nearest-match), all
+fixed and pinned. P0-2/P0-3 carry new selftest checks (watchlist 17, bus 13); P0-4/P0-5 carry
+`test_book_integrity.py` (4) and `test_websocket_backpressure.py` (5). Gates after the pass: 493 passed /
+2 skipped, AUDIT CLEAN.
+
 Nothing in P1 matters while a panel can show a stale or contradictory number. Norm: truth before polish (§3.1).
 
 **P0-1 · Prove the three unverified visuals on live data.** M
@@ -300,7 +307,7 @@ true state.
 
 ## 4. Sequence, dependencies, and the phase gates
 
-**Phase 0 — trust pass (P0-1 … P0-6).** No dependency on anything else. Ends when: the three visuals are
+**Phase 0 — trust pass (P0-1 … P0-6).** **Done 2026-09-16 — see handoff §32.** No dependency on anything else. Ends when: the three visuals are
 seen or their defects named, the watchlist and bus readouts are re-checked live, R2/R3 carry their tests,
 and `grep -ri hermes` over source is zero — with the full gate block green.
 

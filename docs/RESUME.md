@@ -1,16 +1,17 @@
 # Resume here — ModFlow OrderFlow Analysis Suite
 
 One page for picking this up cold. The full trail lives in `docs/SESSION_HANDOFF.md`
-(§24–§31 cover the terminal-mode build, the bus, the panels and the commit series);
+(§24–§32 cover the terminal-mode build, the bus, the panels, the commit series and the P0 trust pass);
 `docs/DX_TERMINAL_AND_QUANTOWER_PLAN.md` is the phase plan with the decisions behind it, and
 `docs/UPGRADE_ACTION_PLAN.md` is the prioritised plan of action — from `report1.txt`, corrected against the
-tree — so start there for what to do next.
+tree. **P0 of that plan is done (handoff §32); the next work item is P1-1, the theme/token layer.**
 
 ## Where it stands
 
-- **Branch `master`, HEAD `bcb94ea`** — the tree is committed and clean. It was stuck at `b2ff4ee` for the
-  whole build; the nine commits are grouped by area (docs, desktop, data, atlas, tests, tooling, the
-  earlier-session work in `settings.py`/`dashboard`/`analytics`, and the resume doc).
+- **Branch `master`, HEAD = the `docs: the P0 trust pass recorded` commit** (top of the branch, tree clean,
+  nothing pushed; `git log -1` names it). On top of the nine earlier commits sit four P0 fixes by area:
+  `443008d` desktop (watchlist rows, bus counter), `7a81bf6` the cursor trace's ladder contract,
+  `65672f2` order-book sequence integrity, `d83e7a0` per-client broadcast queues.
 - **Nothing is pushed.** `origin` is `github.com/mahmoud20138/OrderFlow-Analysis-Pro` — the original
   project, not Moddy's. Putting this on his own GitHub is a remote/fork decision, one command when asked.
 - Local identity is `ModdySwag <ModdySwag@users.noreply.github.com>` (repo-local, nothing global changed).
@@ -19,12 +20,12 @@ tree — so start there for what to do next.
 
 ```bash
 unset PYTHONPATH
-.venv/Scripts/python.exe -m pytest orderflow_system -q        # expect 483 passed / 2 skipped
+.venv/Scripts/python.exe -m pytest orderflow_system -q        # expect 493 passed / 2 skipped
 .venv/Scripts/python.exe scripts/audit_ui_refs.py             # expect AUDIT CLEAN
-node orderflow_system/desktop/ui/shell.selftest.js            # 22   (also: bus 12, links 10,
-node orderflow_system/desktop/ui/bus.selftest.js              # 12    watchlist 15, news 17,
+node orderflow_system/desktop/ui/shell.selftest.js            # 22   (also: bus 13, links 10,
+node orderflow_system/desktop/ui/bus.selftest.js              # 13    watchlist 17, news 17,
 node orderflow_system/desktop/ui/options.selftest.js          # 21    options 21, fundamentals 18,
-node orderflow_system/desktop/ui/watchlist.selftest.js        # 15    market-pressure 12)
+node orderflow_system/desktop/ui/watchlist.selftest.js        # 17    market-pressure 12, ofx 119)
 node orderflow_system/desktop/ui/fundamentals.selftest.js     # 18
 ```
 
@@ -37,7 +38,7 @@ check `orderflow.log` for `client error:` lines.
 
 | What | Where |
 |---|---|
-| The upgrade plan's **P0 trust pass**: the three unverified visuals, the watchlist configured rows, the bus counter, sweep R2/R3, and the single `hermes` string in `desktop/api.py:1525`. | plan §2 |
+| The upgrade plan's **P1** work: start with P1-1, the theme/token layer (`atlas.css` holds zero `--of-` tokens today — its grep gate is cheap and every colour decision below it needs the tokens), then the cursor-link spine and the strips. | plan §2 |
 | Watchlist: configured-instrument rows ("—" rows beside the demo list) — wired to the 2 s beat, not re-checked live. Recipe: add `ZZZTEST` to the config's instrument list, reload, expect a row. | handoff §27 |
 | Bus chip's `sub` count disagrees with `telemetry().subscribers` (measured `1 sub · 2 ch` vs 3) — two counters, one mis-named. | handoff §29 |
 | Fundamentals supply cell and the options gamma precision — both fixed, cosmetic residue noted. | handoff §25 |

@@ -951,3 +951,33 @@ deferred, each with its gate, the design principles the ordering follows, and th
 Gates at writing: 483 passed / 2 skipped, AUDIT CLEAN; selftests ofx 119, shell 22, bus 12, links 10,
 watchlist 15, news 17, options 21, fundamentals 18, market-pressure 12, intent 7, study-api 45,
 search-ops pass.
+
+
+### 32. 2026-09-16 — the P0 trust pass from the upgrade plan (all six, with evidence)
+
+Run on a sandbox (`ofap_p0_sandbox`, a copy of the §27 state so `ZZZTEST` is in its instrument list,
+port 8093, engine live on Bybit BTCUSDT). Every line below is a measurement, and the gate block at the
+end was run after all of it.
+
+| P0 item | Result | Evidence |
+|---|---|---|
+| **P0-1** the three unverified visuals (§2) | **Seen** | *Stacked zone*: zoomed past the 54 px label gate, the draw-call capture holds `STACK 3L`, the per-bar band `rgba(86,214,255,0.12)` at 62×26 px and 11 projected row bands `rgba(64,224,255,0.18)`. *Thermal ramp*: palette stops `rgb(26,38,58) → rgb(96,70,58) → rgb(186,110,46) → rgb(232,176,84) → rgb(255,244,214)`; the same hottest cell (col 1, size 189) reads `255,236,187,179` on classic and `251,178,73,179` on thermal. *Trace line*: `#ofxTrace` at the cursor's price, tip and readout populated, note `on the ladder` with the row highlighted — and `outside the drawn ladder levels`, with no row, when 140 points away |
+| **P0-1 exposed three defects, all fixed** | **Fixed** | (1) The ladder never emitted `data-price` — the attribute `ofx-view.js:461` queries — so no row could ever match, in any view (`orderbook.js`, pinned in `test_wiring.py`). (2) A class toggled by the consumer was wiped by the ladder's next rebuild; the highlight is now state the ladder re-applies in its own render (`setTrace`, verified still present after a poll). (3) `nearest(prices, null)` accepted any distance, so a cursor 41 points off a 15-level ladder read `on the ladder`; the match is bounded by one grid step now |
+| **P0-2** watchlist configured rows (§27) | **Fixed, proven both ways** | Engine **stopped**: 45 demo rows + 7 configured rows, incl. `ZZZTEST — ticks — vol — Δ — — configured`, sub line `the server is answering with its demo list, not your feed · 7 configured instrument(s) with no feed`. Engine **running**: 1 row, source `engine`, 0 configured rows. Root cause, measured: `refreshPlaceholders()` was reached only from `refresh()` and the no-bus timer — never from the bus beat — and the bootstrap read called a bare global `api()` that exists only inside a real page, so the read had never worked under test. Selftest 15 → 17 |
+| **P0-3** bus chip vs telemetry (§29) | **Fixed** | `announce()` dispatched `subscribers: state.subscribers` — a field this module has never had, so every `ofap:bus` event carried `undefined`, and the one number nobody could verify was the one that appeared to disagree. One `subscriberCount()` now feeds `telemetry()` and the event, and the open event fires after the join. Live: event `{action:'open', channels:2, subscribers:2}`; chip, `summary()` and `telemetry()` agree on subscribers and channels at the same instant. (The chip's *fetch* count still lags between repaints — it is a snapshot, by design.) Selftest 12 → 13 |
+| **P0-4** order-book integrity (sweep R3) | **Implemented** | Bybit's `u` is tracked per symbol: duplicates and reorders are dropped, a gap marks the book stale, drops the deltas that follow and re-subscribes for a snapshot (`OrderbookSnapshot.stale`, `book_health()`, `live_status()["endpoints"]["orderbook"] == "stale"`). 4 new tests (`test_book_integrity.py`). Live: 25 s of engine, `orderbook: live`, 0 gap warnings, 684 ticks — no false staleness |
+| **P0-5** broadcast backpressure (sweep R2) | **Implemented** | Per-client bounded queue + writer task; nothing is written under the manager's lock; a full queue trims the oldest for `tick/orderbook/delta/stats` only and never for `signal`; a write that times out drops the client. 5 new tests (`test_websocket_backpressure.py`). Live: WS accepted, client count 1, no timeouts or tracebacks in the log |
+| **P0-6** `hermes` in source (non-negotiable #7) | **Fixed** | `desktop/api.py:1525` comment reworded; `grep -ri hermes` over source is 0 matches. (`dist/` matches are CPython's own `unicodedata.pyd` — noted so the gate is not misread.) |
+
+Gates after everything: **493 passed / 2 skipped**, AUDIT CLEAN, `node --check` on every touched JS,
+selftests ofx 119 · shell 22 · bus 13 · links 10 · watchlist 17 · news 17 · options 21 · fundamentals 18 ·
+market-pressure 12 · intent 7 · study-api 45 · search-ops pass; no `client error:` lines in the sandbox
+log. New tests: `test_book_integrity.py` (4), `test_websocket_backpressure.py` (5), one wiring guard.
+
+What the pass did **not** cover, stated plainly: the stacked-zone band was seen at one zoom level (not
+across zoom/resize/symbol change); the tape's scroll across a rebuild and 4K at Windows 150 % are still
+unverified (§2), and they were not part of P0. The `stale` state has not been exercised against a real
+venue gap — the unit tests drive the handler, the live run shows no false positives.
+
+Next per the plan: **P1-1, the theme/token layer** (its grep gate is cheap and every colour decision
+below it needs the tokens to exist).
