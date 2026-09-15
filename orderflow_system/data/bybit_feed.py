@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 BYBIT_WS_URL = "wss://stream.bybit.com/v5/public/linear"
 
 
+def _update_id(data: dict) -> int:
+    """Bybit's `u` — the update id deltas must arrive consecutively against. Absent means 0, which no
+    real delta carries, so a malformed message cannot advance the sequence."""
+    try:
+        return int(data.get("u") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 class BybitFeed:
     """
     Real-time data feed from Bybit perpetual futures.
@@ -42,6 +51,12 @@ class BybitFeed:
         self._running = False
         self._orderbooks: dict[str, OrderbookSnapshot] = {}
         self._reconnect_delay = 1.0
+        # Sequence integrity: Bybit's `u` is an update id, and the local book is only valid while the
+        # deltas are consecutive. Tracked per symbol, with counters the status line can quote.
+        self._book_seq: dict[str, int] = {}
+        self._book_stale: set[str] = set()
+        self._book_gaps = 0
+        self._deltas_dropped = 0
 
     async def start(self):
         """Connect and begin receiving data."""
@@ -152,15 +167,71 @@ class BybitFeed:
                 bids=sorted(bids, key=lambda x: -x.price),
                 asks=sorted(asks, key=lambda x: x.price),
             )
+            # A snapshot is the only thing that makes the book trustworthy again, so it is what
+            # clears the stale mark and re-seeds the sequence.
+            self._book_seq[symbol] = _update_id(data)
+            self._book_stale.discard(symbol)
         elif msg_type == "delta":
             book = self._orderbooks.get(symbol)
             if book is None:
                 return
+            if symbol in self._book_stale:
+                self._deltas_dropped += 1
+                return                          # waiting for the snapshot; nothing to apply onto
+            u = _update_id(data)
+            seq = self._book_seq.get(symbol)
+            if seq is None:
+                return
+            if u <= seq:
+                # A duplicate or a late delta: applying it would write an old state over a newer one.
+                self._deltas_dropped += 1
+                return
+            if u > seq + 1:
+                # A gap. The local book no longer reflects the venue: mark it, drop what follows until
+                # a fresh snapshot arrives, and ask for one. A wrong book is worse than no book.
+                self._book_stale.add(symbol)
+                self._book_gaps += 1
+                book.stale = True
+                logger.warning(
+                    "orderbook %s: sequence gap (%s → %s) — marked stale and re-subscribed for a "
+                    "fresh snapshot", symbol, seq, u)
+                await self._resubscribe_book(symbol)
+                if self.on_orderbook:
+                    await self.on_orderbook(symbol, book)
+                return
             self._apply_delta(book, data)
+            self._book_seq[symbol] = u
             book.timestamp_ms = ts
 
         if symbol in self._orderbooks and self.on_orderbook:
             await self.on_orderbook(symbol, self._orderbooks[symbol])
+
+    async def _resubscribe_book(self, symbol: str) -> bool:
+        """Ask the venue for a fresh snapshot for one book.
+
+        Bybit answers a re-subscribe with a new snapshot for the topic, which is the only thing that
+        makes the local book trustworthy again. A dead socket is not an error here: the reconnect path
+        subscribes everything anyway.
+        """
+        ws = self._ws
+        if ws is None:
+            return False
+        try:
+            await ws.send(json.dumps({"op": "subscribe", "args": [f"orderbook.50.{symbol}"]}))
+            return True
+        except Exception as exc:                              # pragma: no cover - socket errors
+            logger.warning("orderbook %s: re-subscribe failed (%s) — waiting for the reconnect",
+                           symbol, exc)
+            return False
+
+    def book_health(self) -> dict:
+        """Sequence health per symbol — what a status line needs to say 'stale' honestly."""
+        return {
+            "stale": sorted(self._book_stale),
+            "gaps": self._book_gaps,
+            "dropped_deltas": self._deltas_dropped,
+            "seq": dict(self._book_seq),
+        }
 
     def _apply_delta(self, book: OrderbookSnapshot, data: dict):
         """Apply incremental orderbook updates."""

@@ -102,10 +102,17 @@ class Quote:
 
 @dataclass
 class OrderbookSnapshot:
-    """L2 orderbook state at a point in time."""
+    """L2 orderbook state at a point in time.
+
+    ``stale`` is set by the feed when the local book lost sequence continuity (a gap or a reordered
+    delta): the levels are the last known-good state, not what the venue is showing now. A consumer
+    that trades on a stale book is trading levels nobody can vouch for, so the flag travels with the
+    snapshot instead of living in a log line.
+    """
     timestamp_ms: int
     bids: list[OrderbookLevel] = field(default_factory=list)  # Sorted desc by price
     asks: list[OrderbookLevel] = field(default_factory=list)  # Sorted asc by price
+    stale: bool = False
 
     @property
     def best_bid(self) -> Optional[float]:

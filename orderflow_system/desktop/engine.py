@@ -670,6 +670,16 @@ class EngineController:
                     return "demo"
                 return "live" if has_data else "warming"
 
+            def book_state(rows) -> str:
+                """A book that lost sequence continuity says so. 'stale' is a state a trader must see,
+                not a 'live' quietly showing the last known-good levels (bybit_feed sets the flag)."""
+                if not running:
+                    return "demo"
+                snapshots = [p.orderbook_tracker.latest_snapshot for p in rows]
+                if any(getattr(s, "stale", False) for s in snapshots):
+                    return "stale"
+                return "live" if any(s is not None for s in snapshots) else "warming"
+
             recent = getattr(system, "_recent_ticks", {}) or {}
             last_candles = getattr(system, "_last_candles", {}) or {}
             signals = getattr(system, "_recent_signals", {}) or {}
@@ -682,7 +692,7 @@ class EngineController:
                 "candles": state_for(has_candles),
                 "volume_profile": state_for(any(p.profile_framing.current_bias is not None for p in pipelines)),
                 "bias": state_for(any(p.profile_framing.current_bias is not None for p in pipelines)),
-                "orderbook": state_for(any(p.orderbook_tracker.latest_snapshot is not None for p in pipelines)),
+                "orderbook": book_state(pipelines),
                 "scanner": state_for(has_candles),
                 "strategy": state_for(has_candles),
             }
