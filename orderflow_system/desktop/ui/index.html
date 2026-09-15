@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ModFlow OrderFlow Analysis Suite</title>
+<link rel="stylesheet" href="/desktop/ui.css">
+<link rel="stylesheet" href="/desktop/modules.css">
+<link rel="stylesheet" href="/desktop/atlas.css">
+</head>
+<body>
+<div class="app">
+
+    <!-- ═══ Rail ═══ -->
+    <aside class="rail">
+        <div class="brand">
+            <div class="brand-mark">MF</div>
+            <div class="brand-text">
+                <span class="brand-name">ModFlow</span>
+                <span class="brand-sub">OrderFlow Analysis Suite</span>
+            </div>
+        </div>
+
+        <button class="nav-item active" data-view="overview"><span class="nav-icon">◈</span> Overview</button>
+        <button class="nav-item" data-view="chart"><span class="nav-icon">▤</span> Chart</button>
+        <button class="nav-item" data-view="heatmap"><span class="nav-icon">▩</span> Heatmap</button>
+        <button class="nav-item" data-view="studies" title="Indicator modules (the suite's indicator contract): add, parameterise and apply studies to the chart."><span class="nav-icon">∑</span> Studies</button>
+        <button class="nav-item" data-view="orderflow"><span class="nav-icon">▦</span> Order Flow</button>
+        <button class="nav-item" data-view="ofx" title="Order-flow engine: split-candle footprint matrix, DOM heatmap with liquidity decay, execution sweeps, CVD ribbon and the crosshair HUD."><span class="nav-icon">◫</span> Engine</button>
+        <button class="nav-item" data-view="depth"><span class="nav-icon">≡</span> Depth</button>
+        <button class="nav-item" data-view="tape"><span class="nav-icon">⇅</span> Time &amp; Sales</button>
+        <button class="nav-item" data-view="trackers"><span class="nav-icon">⚡</span> Trackers <span class="nav-badge" id="navTrackerCount">0</span></button>
+        <button class="nav-item" data-view="cvd"><span class="nav-icon">∿</span> CVD</button>
+        <button class="nav-item" data-view="profile"><span class="nav-icon">▥</span> Profile</button>
+        <button class="nav-item" data-view="frames"><span class="nav-icon">▮</span> Frames</button>
+        <button class="nav-item" data-view="signals"><span class="nav-icon">◉</span> Signals <span class="nav-badge" id="navSignalCount">0</span></button>
+        <button class="nav-item" data-view="strategy"><span class="nav-icon">⛭</span> Strategy</button>
+        <button class="nav-item" data-view="performance"><span class="nav-icon">◔</span> Performance</button>
+        <div class="rail-spacer"></div>
+        <button class="nav-item" data-view="replay"><span class="nav-icon">⟲</span> Replay</button>
+        <button class="nav-item" data-view="alerts"><span class="nav-icon">✦</span> Alerts <span class="nav-badge" id="navAlertCount">0</span></button>
+        <button class="nav-item" data-view="instruments"><span class="nav-icon">☰</span> Instruments</button>
+        <button class="nav-item" data-view="alpaca" title="Link a US brokerage account: stocks, ETFs, options, crypto, news and the market calendar (Alt+A)."><span class="nav-icon">⌂</span> Alpaca</button>
+        <button class="nav-item" data-view="platforms" title="Optional external data bridge (DTC). No account details are stored."><span class="nav-icon">⌸</span> Platforms</button>
+        <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span> Settings</button>
+        <button class="nav-item" data-view="logs"><span class="nav-icon">▣</span> Logs</button>
+        <button class="nav-item" data-view="watchlist"><span class="nav-icon">▤</span> Watchlist</button>
+        <button class="nav-item" data-view="news"><span class="nav-icon">✉</span> News</button>
+        <button class="nav-item" data-view="fundamentals" title="Filed fundamentals for the active instrument: SEC EDGAR annual filings for US filers, CoinGecko market data for crypto (no key, no account)"><span class="nav-icon">▧</span> Fundamentals</button>
+        <button class="nav-item" data-view="options" title="Deribit's public crypto option chain: expiries, strikes, IV and the Greeks (BTC/ETH/SOL by currency; no key, no account)."><span class="nav-icon">◇</span> Options</button>
+        <div class="rail-footer">
+            <div id="railPlatform">—</div>
+            <button class="rail-term" id="railTerminal" type="button"
+                    title="Terminal mode: the same panels arranged as widgets, with tabs and layouts (Ctrl+Alt+T)">◫ Terminal mode</button>
+            <div><a href="/" target="_blank" rel="noopener">Classic terminal ↗</a></div>
+        </div>
+    </aside>
+
+    <!-- ═══ Content ═══ -->
+    <div class="content">
+        <nav id="menuBar" class="menubar" role="menubar" aria-label="Application menu"></nav>
+        <header class="topbar">
+      <button id="menuBtn" class="menu-btn" aria-haspopup="true" aria-expanded="false" title="Main menu (/) — workspaces, panels by purpose, free data connections">☰</button>
+      <span class="brand-mini">ModFlow</span>
+            <div class="symbol-picker">
+                <label for="symbolSelect">Instrument</label>
+                <select id="symbolSelect"></select>
+            </div>
+            <span class="pill" id="enginePill"><span class="dot"></span> <span id="enginePillText">Stopped</span></span>
+            <span class="pill" id="wsPill"><span class="dot"></span> <span id="wsPillText">WS --</span></span>
+            <span class="pill" id="sourcePill">source: --</span>
+            <span class="pill" id="livePill" title="What the panels are actually reading: live engine, warming up, or demo data">data: --</span>
+            <div class="grow"></div>
+            <div class="seg" id="modeSwitch" role="group" aria-label="Workspace: classic layout or widget terminal">
+                <button class="seg-btn on" type="button" data-mode="classic" aria-pressed="true"
+                        title="Classic: one panel at a time (Ctrl+Alt+T)">Classic</button>
+                <button class="seg-btn" type="button" data-mode="terminal" aria-pressed="false"
+                        title="Terminal: the same panels as widgets, with tabs (Ctrl+Alt+T)">Terminal</button>
+            </div>
+            <button class="btn primary" id="btnStart">▶ Start engine</button>
+            <button class="btn danger hidden" id="btnStop">■ Stop engine</button>
+            <button class="btn" id="btnRestart" title="Restart with the saved settings">⟳</button>
+            <div id="menuPanel" class="menu-panel" role="menu" aria-label="Main menu">
+      <div class="menu-head"><input id="menuFilter" placeholder="filter panels… (type here)"><button id="menuClose" class="menu-x" title="close">×</button></div>
+      <div id="menuBody"></div>
+    </div>
+    <div id="hotkeySheet" class="overlay-sheet" role="dialog" aria-label="Hotkeys">
+      <button id="hotkeyClose" class="menu-x overlay-x" title="close">×</button>
+    </div>
+    <button id="ofapPause" class="ofap-pause" type="button" aria-pressed="false"
+            title="Hold every background refresh while you work on the board">▶ live — updates running</button>
+  </header>
+
+        <main class="views">
+
+            <!-- ── Overview ── -->
+            <section class="view active" data-view="overview">
+                <div class="view-head">
+                    <div class="view-title">Overview</div>
+                    <div class="view-sub" id="ovSub">engine stopped — press Start</div>
+                </div>
+                <div id="ovBanner"></div>
+                <div id="ovAlpacaBanner"></div>
+                <div class="grid cols-4">
+                    <div class="kpi" id="kpiPrice"><span class="kpi-label">Last price</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="kpiDelta"><span class="kpi-label">Cumulative delta</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="kpiTicks"><span class="kpi-label">Ticks</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="kpiCandles"><span class="kpi-label">Candles closed</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                </div>
+                <div class="grid split">
+                    <div class="card">
+                        <div class="card-head"><span class="card-title">Session summary</span><div class="spacer"></div>
+                            <button class="btn small" id="btnRefreshStats">Refresh</button></div>
+                        <div class="card-body"><table class="data" id="ovTable">
+                            <thead><tr><th>Instrument</th><th>Price</th><th>Ticks</th><th>Candles</th><th>Cum Δ</th><th>Trade phase</th></tr></thead>
+                            <tbody></tbody>
+                        </table></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-head"><span class="card-title">Latest signals</span></div>
+                        <div class="card-body" id="ovSignals"><div class="dim">No signals yet.</div></div>
+                    </div>
+                </div>
+                <div id="ovAlpacaHost"></div>
+            </section>
+
+            <!-- ── Chart ── -->
+            <section class="view" data-view="chart" data-surface="chart">
+                <div class="view-head">
+                    <div class="view-title">Chart</div>
+                    <div class="view-sub" id="chartSub">candles · delta · value-area levels · signal markers</div>
+                    <div class="grow"></div>
+                    <div class="row">
+                        <div class="field"><label>Timeframe</label><select id="tfSelect">
+                            <option value="60">1m</option><option value="300">5m</option><option value="900">15m</option>
+                            <option value="3600">1H</option><option value="14400">4H</option><option value="86400">1D</option></select></div>
+                        <div class="field"><label>Range</label><select id="rangeSelect">
+                            <option value="3600">1H</option><option value="14400">4H</option><option value="86400" selected>1D</option>
+                            <option value="604800">1W</option><option value="2592000">1M</option></select></div>
+                        <div class="field"><label>Overlays</label><div class="row">
+                            <label class="switch"><input type="checkbox" id="ovMarkers" checked> markers</label>
+                            <label class="switch"><input type="checkbox" id="ovVP" checked> value area</label></div></div>
+                    </div>
+                </div>
+                <div class="grid cols-4">
+                    <div class="kpi" id="chPrice"><span class="kpi-label">Last</span><span class="kpi-value">--</span></div>
+                    <div class="kpi" id="chDelta"><span class="kpi-label">Window delta</span><span class="kpi-value">--</span></div>
+                    <div class="kpi" id="chPoc"><span class="kpi-label">POC</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="chBias"><span class="kpi-label">Daily bias</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                </div>
+                <div class="card"><div class="card-head"><span class="card-title">Price action</span><div class="spacer"></div>
+                    <span class="dim" id="chartStatus"></span></div>
+                    <div class="card-body"><div class="chart-wrap" id="chart"></div></div>
+                </div>
+                <div class="card"><div class="card-head"><span class="card-title">Data box</span>
+                    <div class="spacer"></div><span class="dim">values of the active studies at the crosshair bar</span>
+                    <button class="btn small" data-view-jump="studies" title="Add or parameterise studies">Manage studies</button></div>
+                    <div class="card-body" id="studiesBox"><div class="dim">no studies on the chart yet</div></div>
+                </div>
+            </section>
+
+            <!-- ── Order Flow (footprint) ── -->
+            <!-- ── Studies (indicator module for this suite's contracts) ── -->
+            <section class="view" data-view="studies" data-surface="studies">
+                <style>
+                    .st-row { display: flex; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); }
+                    .st-row:last-child { border-bottom: 0; }
+                    .st-row .grow { flex: 1; }
+                    .st-tag { margin: 12px 0 2px; text-transform: uppercase; letter-spacing: .06em; font-size: 11px; color: var(--dim); }
+                    .st-warn { color: #ffcf7a; }
+                    .st-card { border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin: 8px 0; }
+                    .st-params { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+                    .st-field { display: flex; flex-direction: column; font-size: 12px; }
+                    .st-field input, .st-field select { background: #0b0f14; border: 1px solid var(--line);
+                        border-radius: 4px; color: inherit; padding: 4px 6px; font-size: 12px; min-width: 90px; }
+                    .st-field.switch { flex-direction: row; align-items: center; gap: 5px; }
+                    .st-box { width: 100%; border-collapse: collapse; }
+                    .st-box td { padding: 3px 8px 3px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+                    .st-val { text-align: right; font-variant-numeric: tabular-nums; }
+                    .st-errors { margin-top: 8px; }
+                    #stSource { width: 100%; background: #0b0f14; border: 1px solid var(--line); border-radius: 6px;
+                        color: inherit; font-family: ui-monospace, Consolas, monospace; font-size: 12px; padding: 8px; }
+                    .st-note { border-left: 3px solid rgba(120,180,255,0.5); background: rgba(120,180,255,0.05);
+                        padding: 8px 10px; margin: 8px 0; }
+                </style>
+                <div class="view-head">
+                    <div class="view-title">Studies</div>
+                    <div class="view-sub">indicator modules — the suite's indicator contract's custom-indicator contract, running on this chart's data</div>
+                    <div class="grow"></div>
+                    <button class="btn small" data-help="studies" title="How the contract works, what is supported, and how to write a module">How it works</button>
+                    <button class="btn small" data-view-jump="chart" title="Studies draw on the Chart view">Open chart</button>
+                </div>
+                <div id="studiesBody"><div class="dim">loading…</div></div>
+            </section>
+
+            <section class="view" data-view="orderflow">
+                <div class="view-head"><div class="view-title">Order Flow</div>
+                    <div class="view-sub">bid/ask volume per price level, POC and value area</div></div>
+                <div class="grid cols-4">
+                    <div class="kpi" id="ofPoc"><span class="kpi-label">POC</span><span class="kpi-value">--</span></div>
+                    <div class="kpi" id="ofVah"><span class="kpi-label">VAH</span><span class="kpi-value">--</span></div>
+                    <div class="kpi" id="ofVal"><span class="kpi-label">VAL</span><span class="kpi-value">--</span></div>
+                    <div class="kpi" id="ofShape"><span class="kpi-label">Profile shape</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                </div>
+                <div id="ofBanner"></div>
+                <div class="card"><div class="card-head"><span class="card-title">Footprint</span>
+                    <div class="spacer"></div>
+                    <span class="dim" id="ofProfileStatus">profile: --</span>
+                    <select class="btn small" id="ofImbMode" title="Imbalance convention — same price row (the reference layout style) or diagonal (the DTC platform Numbers Bars: a row's ask against the bid one tick below)">
+                        <option value="same_price">imbalance: same price</option>
+                        <option value="diagonal">imbalance: diagonal</option>
+                    </select>
+                    <input class="btn small" id="ofImbThresh" type="number" min="1" max="50" step="0.5" value="3"
+                           style="width:72px" title="Imbalance ratio (3 = three times the opposing side)">
+                    <span class="dim" id="ofCalc" title="Numbers-Bars calculated values for the last bar">calc: --</span>
+                    <button class="btn small" id="btnRebuildProfile">Rebuild profile</button>
+                    <span class="dim">drag to pan · scroll to zoom</span></div>
+                    <div class="card-body" style="padding:0"><div id="footprintChart" style="height:600px"></div></div>
+                </div>
+            </section>
+
+            <!-- ── Depth ── -->
+            <section class="view" data-view="ofx" data-surface="ofx">
+                <div class="view-head"><div class="view-title">Order-flow engine</div>
+                    <div class="view-sub">DOM liquidity behind a split-candle footprint matrix; execution sweeps, crosshair HUD and a CVD ribbon locked to the same X transform</div></div>
+                <div class="row ofx-bar">
+                    <label>symbol <input id="ofxSymbol" size="10" value="BTCUSDT"></label>
+                    <label>R <input id="ofxR" type="number" step="0.5" min="1.5" max="20" style="width:64px"></label>
+                    <label>stack <input id="ofxStack" type="number" step="1" min="2" max="8" style="width:52px"></label>
+                    <label>lambda ms <input id="ofxLambda" type="number" step="50" min="100" max="5000" style="width:76px"></label>
+                    <button id="ofxApply">Apply</button>
+                    <label>min block <input id="ofxMinBlock" type="number" step="5" min="0" style="width:70px" title="hide execution blocks below this size"></label>
+                    <label>VA % <input id="ofxVaPct" type="number" step="0.05" min="0.5" max="0.95" style="width:70px" title="share of the candle that counts as the value area"></label>
+                    <label title="classic: blue-to-red by magnitude. thermal: slate-to-gold, monotonic in heat, with the baseline desaturated so sized cells stand out on their own.">ramp <select id="ofxRamp">
+                        <option value="classic">classic</option><option value="thermal">thermal</option></select></label>
+                    <button id="ofxSnap" class="ofx-chip">● live</button>
+                    <button id="ofxFit" class="ofx-chip" title="Show the whole session in view (double-clicking the stage does the same)">⤢ fit</button>
+                    <canvas id="ofxSpark" width="90" height="20" title="live price sparkline"></canvas>
+                    <span class="spacer"></span>
+                    <span class="dim" id="ofxLod">LOD: —</span>
+                </div>
+                <div class="ofx-flex">
+                    <div id="ofxStage" class="ofx-stage">
+                        <canvas id="ofxHeat" class="ofx-layer"></canvas>
+                        <canvas id="ofxBase" class="ofx-layer"></canvas>
+                        <canvas id="ofxLive" class="ofx-layer"></canvas>
+                        <div id="ofxTip" class="ofx-tip"></div>
+                        <div id="ofxSnapFloat" class="ofx-snap-float">⟲ Snap to present<canvas id="ofxSpark2" width="88" height="18"></canvas></div>
+                    </div>
+                    <div id="ofxReadout" class="ofx-readout"></div>
+                </div>
+                <canvas id="ofxRibbon" class="ofx-ribbon"></canvas>
+                <section id="ofxLegendPanel" class="ofx-legend-panel">
+                    <div class="ofx-leg-head">
+                        <button id="ofxLegendToggle" class="ofx-chip" aria-expanded="true">▾ legend</button>
+                        <span id="ofxLegendSub" class="ofx-leg-sub">layout · colour keys · data · interactions</span>
+                    </div>
+                    <div id="ofxLegendBody" class="ofx-leg-body"></div>
+                </section>
+                <div class="row"><span class="dim" id="ofxStats">engine idle</span><span class="spacer"></span><span class="dim" id="ofxDepthNote"></span></div>
+            </section>
+
+            <section class="view" data-view="depth" data-surface="depth">
+                <div class="view-head"><div class="view-title">Market depth</div>
+                    <div class="view-sub">L2 ladder with imbalance and spread</div></div>
+                <div class="grid cols-3">
+                    <div class="kpi" id="dpBid"><span class="kpi-label">Best bid</span><span class="kpi-value">--</span></div>
+                    <div class="kpi" id="dpAsk"><span class="kpi-label">Best ask</span><span class="kpi-value">--</span></div>
+                    <div class="kpi" id="dpImb"><span class="kpi-label">Imbalance</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                </div>
+                <div class="card"><div class="card-head"><span class="card-title">Order book</span></div>
+                    <div class="card-body" style="padding:0"><div id="orderbookLadder" style="height:560px"></div></div></div>
+            </section>
+
+            <!-- ── Tape ── -->
+            <section class="view" data-view="tape" data-surface="tape">
+                <div class="view-head"><div class="view-title">Time &amp; Sales</div>
+                    <div class="view-sub">tick-by-tick prints, large trades highlighted</div></div>
+                <div id="tapeBanner"></div>
+                <div class="card"><div class="card-head"><span class="card-title">Tape</span></div>
+                    <div class="card-body" style="padding:0"><div id="tapeContainer" style="height:620px"></div></div></div>
+            </section>
+
+            <!-- ── Signals ── -->
+            <section class="view" data-view="signals">
+                <div class="view-head"><div class="view-title">Signals</div>
+                    <div class="view-sub">aggregated pattern signals with entry, stop, targets and grade</div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Signal cards</span></div>
+                    <div class="card-body" style="padding:0"><div id="signalsContainer" style="min-height:400px"></div></div></div>
+            </section>
+
+            <!-- ── Strategy ── -->
+            <section class="view" data-view="strategy">
+                <div class="view-head"><div class="view-title">Strategy pipeline</div>
+                    <div class="view-sub">what the system is waiting for, and why</div></div>
+                <div class="grid split">
+                    <div class="card"><div class="card-head"><span class="card-title">Fabio methodology checklist</span></div>
+                        <div class="card-body"><div class="steps" id="strategySteps"></div></div></div>
+                    <div class="card"><div class="card-head"><span class="card-title">Microstructure</span></div>
+                        <div class="card-body" style="padding:0"><div id="microPanel" style="height:520px"></div></div></div>
+                </div>
+            </section>
+
+            <!-- ── Performance ── -->
+            <section class="view" data-view="performance">
+                <div class="view-head"><div class="view-title">Performance</div>
+                    <div class="view-sub" id="perfSub">journal of signals and outcomes for this instrument</div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Journal</span></div>
+                    <div class="card-body" style="padding:0"><div id="perfDashboard" style="min-height:420px"></div></div></div>
+            </section>
+
+            <!-- ── Heatmap (the reference layout market-depth heatmap) ── -->
+            <section class="view" data-view="heatmap" data-surface="heatmap">
+                <div class="view-head"><div class="view-title">Market depth heatmap</div>
+                    <div class="view-sub">resting liquidity over time · bubbles = executed aggression · purple = pulled, cyan = stacked</div>
+                    <div class="grow"></div>
+                    <div class="row">
+                        <div class="field"><label>Window</label><select id="hmColumns">
+                            <option value="120">2 min</option><option value="240" selected>4 min</option>
+                            <option value="480">8 min</option><option value="900">15 min</option></select></div>
+                        <div class="field"><label>Rows</label><select id="hmRows">
+                            <option value="120">120</option><option value="200" selected>200</option><option value="300">300</option></select></div>
+                        <div class="field"><label>Overlays</label><div class="row">
+                            <label class="switch"><input type="checkbox" id="hmTrades" checked> trades</label>
+                            <label class="switch"><input type="checkbox" id="hmEvents" checked> spoof/stack</label></div></div>
+                        <div class="field"><label>&nbsp;</label><button class="btn small" id="hmAuto"><span id="hmAutoLabel">auto: on</span></button></div>
+                    </div>
+                </div>
+                <div class="grid cols-4">
+                    <div class="kpi" id="hmWalls"><span class="kpi-label">Wall levels tracked</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="hmStack"><span class="kpi-label">Stacking events</span><span class="kpi-value">--</span><span class="kpi-sub">liquidity added</span></div>
+                    <div class="kpi" id="hmPull"><span class="kpi-label">Pulled near price</span><span class="kpi-value">--</span><span class="kpi-sub">spoof candidates</span></div>
+                    <div class="kpi" id="hmSpan"><span class="kpi-label">Depth</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                </div>
+                <div class="card"><div class="card-head"><span class="card-title">Liquidity map</span><div class="spacer"></div>
+                    <span class="dim" id="hmStatus">waiting for data…</span></div>
+                    <div class="card-body" style="padding:0"><canvas id="heatmapCanvas" class="heat-canvas"></canvas></div>
+                </div>
+                <div class="grid cols-2">
+                    <div class="card"><div class="card-head"><span class="card-title">Level events</span></div>
+                        <div class="card-body" style="padding:0"><table class="data" id="hmEventTable">
+                            <thead><tr><th>Time</th><th>Kind</th><th>Price</th><th>Size</th><th>Detail</th></tr></thead><tbody></tbody></table></div></div>
+                    <div class="card"><div class="card-head"><span class="card-title">Fresh walls</span></div>
+                        <div class="card-body" style="padding:0"><table class="data" id="hmWallTable">
+                            <thead><tr><th>Price</th><th>Resting size</th><th>Distance</th></tr></thead><tbody></tbody></table></div></div>
+                </div>
+            </section>
+
+            <!-- ── Trackers (MBO-style detections) ── -->
+            <section class="view" data-view="trackers">
+                <div class="view-head"><div class="view-title">Order-flow trackers</div>
+                    <div class="view-sub">iceberg · sweeps · stop runs · liquidations · big trades · speed of tape</div></div>
+                <div id="tkBanner"></div>
+                <div class="grid cols-4">
+                    <div class="kpi" id="tkBig"><span class="kpi-label">Big trades</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="tkSweeps"><span class="kpi-label">Sweeps</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="tkIcebergs"><span class="kpi-label">Icebergs (inferred)</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="tkSpeed"><span class="kpi-label">Speed of tape</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                </div>
+                <div class="grid cols-2">
+                    <div class="card"><div class="card-head"><span class="card-title">Iceberg tracker</span><div class="spacer"></div>
+                        <span class="tag warn" title="True MBO is not published by any public Bybit feed — this is inferred from repeated equal prints at one price">inferred</span></div>
+                        <div class="card-body" style="padding:0"><table class="data" id="tkIcebergTable">
+                            <thead><tr><th>Time</th><th>Price</th><th>Side</th><th>Refills</th><th>Modal</th><th>Total</th><th>Life</th><th>Grade</th></tr></thead><tbody></tbody></table></div></div>
+                    <div class="card"><div class="card-head"><span class="card-title">Sweeps</span></div>
+                        <div class="card-body" style="padding:0"><table class="data" id="tkSweepTable">
+                            <thead><tr><th>Time</th><th>Side</th><th>Levels</th><th>Size</th><th>Aggressors</th><th>Range (ticks)</th><th>Corridor</th><th>Duration</th></tr></thead><tbody></tbody></table></div></div>
+                </div>
+                <div class="grid cols-2">
+                    <div class="card"><div class="card-head"><span class="card-title">Imbalance ladder</span><div class="spacer"></div>
+                        <span class="dim" id="tkImbStats">--</span></div>
+                        <div class="card-body" style="padding:0"><table class="data" id="tkImbTable">
+                            <thead><tr><th>Price</th><th>Side</th><th>Volume here</th><th>vs other side</th><th>Ratio</th></tr></thead><tbody></tbody></table></div></div>
+                    <div class="card"><div class="card-head"><span class="card-title">Stacked imbalances</span><div class="spacer"></div>
+                        <span class="tag" title="the reference layout rule: bid at a level vs the ask one level above (and the mirror), consecutive levels = stacked">150% rule</span></div>
+                        <div class="card-body" style="padding:0"><table class="data" id="tkStackTable">
+                            <thead><tr><th>Side</th><th>From</th><th>To</th><th>Levels</th><th>Volume</th><th>Peak ratio</th></tr></thead><tbody></tbody></table></div></div>
+                </div>
+                <div class="card"><div class="card-head"><span class="card-title">Big-trade zones</span><div class="spacer"></div>
+                    <span class="dim" id="tkZoneStats">--</span></div>
+                    <div class="card-body" style="padding:0"><table class="data" id="tkZoneTable">
+                        <thead><tr><th>Zone</th><th>Buy</th><th>Sell</th><th>Total</th><th>Delta</th><th>Trades</th><th>Last</th></tr></thead><tbody></tbody></table></div></div>
+                <div class="grid cols-2">
+                    <div class="card"><div class="card-head"><span class="card-title">Stop runs</span><div class="spacer"></div>
+                        <span class="tag warn" title="Inferred from fast range expansion + volume burst, confirmed by liquidation clusters">inferred</span></div>
+                        <div class="card-body" style="padding:0"><table class="data" id="tkStopTable">
+                            <thead><tr><th>Time</th><th>Dir</th><th>Ticks</th><th>Volume</th><th>Stops</th><th>Liquidations</th></tr></thead><tbody></tbody></table></div></div>
+                    <div class="card"><div class="card-head"><span class="card-title">Big trades</span><div class="spacer"></div>
+                        <span class="dim" id="tkThreshold">threshold: --</span></div>
+                        <div class="card-body" style="padding:0"><table class="data" id="tkBigTable">
+                            <thead><tr><th>Time</th><th>Side</th><th>Price</th><th>Size</th><th>×threshold</th></tr></thead><tbody></tbody></table></div></div>
+                </div>
+                <div class="card"><div class="card-head"><span class="card-title">Liquidations</span><div class="spacer"></div>
+                    <span class="dim" id="tkLiqStats">--</span></div>
+                    <div class="card-body" style="padding:0"><table class="data" id="tkLiqTable">
+                        <thead><tr><th>Time</th><th>Price</th><th>Size</th><th>Side</th></tr></thead><tbody></tbody></table></div></div>
+            </section>
+
+            <!-- ── CVD ── -->
+            <section class="view" data-view="cvd" data-surface="cvd">
+                <div class="view-head"><div class="view-title">Cumulative volume delta</div>
+                    <div class="view-sub">CVD + CVD Pro: multi-window delta, slope, price/delta divergence</div>
+                    <div class="grow"></div>
+                    <button class="btn small" id="cvdReanchor">Re-anchor</button></div>
+                <div class="grid cols-4">
+                    <div class="kpi" id="cvdValue"><span class="kpi-label">CVD (session)</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="cvd1m"><span class="kpi-label">Δ 1m</span><span class="kpi-value">--</span></div>
+                    <div class="kpi" id="cvd5m"><span class="kpi-label">Δ 5m</span><span class="kpi-value">--</span></div>
+                    <div class="kpi" id="cvdSlope"><span class="kpi-label">Slope / bucket</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                </div>
+                <div class="card"><div class="card-head"><span class="card-title">CVD vs price</span><div class="spacer"></div>
+                    <span class="dim" id="cvdStatus">--</span></div>
+                    <div class="card-body" style="padding:0"><canvas id="cvdCanvas" class="series-canvas"></canvas></div>
+                </div>
+                <div class="card"><div class="card-head"><span class="card-title">Divergences</span></div>
+                    <div class="card-body" style="padding:0"><table class="data" id="cvdDivTable">
+                        <thead><tr><th>Time</th><th>Kind</th><th>Strength</th><th>Note</th></tr></thead><tbody></tbody></table></div></div>
+            </section>
+
+            <!-- ── Market profile (TPO) ── -->
+            <section class="view" data-view="profile" data-surface="profile">
+                <div class="view-head"><div class="view-title">Market profile (TPO)</div>
+                    <div class="view-sub">30-minute brackets · POC / value area / initial balance / range extension / single prints</div></div>
+                <div class="grid cols-4">
+                    <div class="kpi" id="mpPoc"><span class="kpi-label">POC</span><span class="kpi-value">--</span></div>
+                    <div class="kpi" id="mpVa"><span class="kpi-label">Value area</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="mpIb"><span class="kpi-label">Initial balance</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="mpExt"><span class="kpi-label">Range extension</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                </div>
+                <div class="grid split">
+                    <div class="card"><div class="card-head"><span class="card-title">TPO ladder</span><div class="spacer"></div>
+                        <span class="dim" id="mpStatus">--</span></div>
+                        <div class="card-body" style="padding:0"><div class="tpo-grid" id="tpoGrid"></div></div></div>
+                    <div class="card"><div class="card-head"><span class="card-title">Session reads</span></div>
+                        <div class="card-body" id="mpReads"><div class="dim">no data yet</div></div></div>
+                </div>
+            </section>
+
+            <!-- ── Frames ── -->
+            <section class="view" data-view="frames" data-surface="frames">
+                <div class="view-head"><div class="view-title">Frames</div>
+                    <div class="view-sub">non-time bars: Range · Renko · Reversal · Tick · Volume</div>
+                    <div class="grow"></div>
+                    <div class="field"><label>Frame</label><select id="frameSelect">
+                        <option value="range">Range</option><option value="renko">Renko</option>
+                        <option value="reversal">Reversal</option><option value="tick" selected>Tick</option>
+                        <option value="volume">Volume</option></select></div>
+                </div>
+                <div class="card"><div class="card-head"><span class="card-title">Closed bars</span><div class="spacer"></div>
+                    <span class="dim" id="frameStatus">--</span></div>
+                    <div class="card-body"><canvas id="frameCanvas" class="series-canvas"></canvas></div>
+                </div>
+                <div class="card"><div class="card-head"><span class="card-title">Recent bars</span></div>
+                    <div class="card-body" style="padding:0"><table class="data" id="frameTable">
+                        <thead><tr><th>Time</th><th>O</th><th>H</th><th>L</th><th>C</th><th>Volume</th><th>Delta</th><th>Ticks</th><th>Duration</th></tr></thead><tbody></tbody></table></div></div>
+            </section>
+
+            <!-- ── Replay ── -->
+            <section class="view" data-view="replay">
+                <div class="view-head"><div class="view-title">Market replay</div>
+                    <div class="view-sub">replay a recorded session through the analytics — no broker, no risk</div></div>
+                <div id="rpBanner"></div>
+                <div class="grid cols-2">
+                    <div class="card"><div class="card-head"><span class="card-title">Source</span></div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="field"><label>Instrument</label><input type="text" id="rpSymbol" placeholder="BTCUSDT"></div>
+                                <div class="field"><label>Source</label><select id="rpSource">
+                                    <option value="db">Recorded ticks (SQLite)</option>
+                                    <option value="exchange">Exchange tape (last 1000)</option></select></div>
+                            </div>
+                            <div class="row">
+                                <div class="field"><label>From (minutes ago)</label><input type="number" id="rpFrom" value="60" min="1"></div>
+                                <div class="field"><label>To (minutes ago)</label><input type="number" id="rpTo" value="0" min="0"></div>
+                            </div>
+                            <button class="btn primary" id="rpLoad">Load session</button>
+                            <span class="dim" id="rpLoadResult"></span>
+                        </div></div>
+                    <div class="card"><div class="card-head"><span class="card-title">Transport</span><div class="spacer"></div>
+                        <span class="pill" id="rpStatePill"><span class="dot"></span> <span id="rpStateText">idle</span></span></div>
+                        <div class="card-body">
+                            <div class="row">
+                                <button class="btn success" id="rpPlay">▶ Play</button>
+                                <button class="btn" id="rpPause">⏸ Pause</button>
+                                <button class="btn danger" id="rpStop">■ Stop</button>
+                            </div>
+                            <div class="field" style="margin-top:12px"><label>Speed <span id="rpSpeedLabel">10×</span></label>
+                                <input type="range" id="rpSpeed" min="0.5" max="500" step="0.5" value="10"></div>
+                            <div class="field"><label>Position</label>
+                                <input type="range" id="rpSeek" min="0" max="1000" step="1" value="0"></div>
+                            <div class="dim" id="rpProgress">--</div>
+                        </div></div>
+                </div>
+                <div class="grid cols-4">
+                    <div class="kpi" id="rpTotal"><span class="kpi-label">Events loaded</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="rpIndex"><span class="kpi-label">Position</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="rpClock"><span class="kpi-label">Replay clock</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="rpMode"><span class="kpi-label">Mode</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                </div>
+                <div class="banner info" style="display:block">
+                    Replay feeds the same analytics the live engine uses, so the Heatmap, Trackers, CVD, Profile and Frames views rebuild while it runs.
+                    Ticks come from this app's own SQLite history; the exchange tape is the fallback for symbols that have no local history yet.
+                </div>
+            </section>
+
+            <!-- ── Alerts ── -->
+            <section class="view" data-view="alerts" data-surface="alerts">
+                <div class="view-head"><div class="view-title">Order-flow alerts</div>
+                    <div class="view-sub">rules over every detection · per-rule thresholds, channels and cooldowns</div>
+                    <div class="grow"></div>
+                    <label class="switch"><input type="checkbox" id="alSound" checked> sound</label>
+                    <label class="switch"><input type="checkbox" id="alAuto" checked> auto-refresh</label>
+                    <button class="btn small" id="alClear">Clear log</button></div>
+                <div class="card"><div class="card-head"><span class="card-title">Alert log</span><div class="spacer"></div>
+                    <span class="dim" id="alStats">--</span></div>
+                    <div class="card-body" style="padding:0"><table class="data" id="alertTable">
+                        <thead><tr><th>Time</th><th>Severity</th><th>Kind</th><th>Symbol</th><th>Message</th></tr></thead><tbody></tbody></table></div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Rules</span><div class="spacer"></div>
+                    <button class="btn small" id="alSave">Save rules</button></div>
+                    <div class="card-body" style="padding:0"><table class="data" id="ruleTable">
+                        <thead><tr><th>On</th><th>Name</th><th>Kind</th><th>Params (JSON)</th><th>Cooldown s</th><th>Fired</th></tr></thead><tbody></tbody></table></div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Persisted history</span><div class="spacer"></div>
+                    <span class="dim" id="histStats">--</span>
+                    <button class="btn small" id="histReload">Reload</button></div>
+                    <div class="card-body" style="padding:0"><table class="data" id="histTable">
+                        <thead><tr><th>When</th><th>Kind</th><th>Price</th><th>Size</th><th>Detail</th></tr></thead><tbody></tbody></table></div></div>
+            </section>
+
+            <!-- ── Instruments ── -->
+            <section class="view" data-view="instruments" data-surface="instruments">
+                <div class="view-head"><div class="view-title">Instruments</div>
+                    <div class="view-sub">choose what the engine subscribes to — unsupported feeds are greyed out</div></div>
+                <div id="instBanner"></div>
+                <div class="card"><div class="card-head"><span class="card-title">Coverage</span><div class="spacer"></div>
+                    <button class="btn small" id="btnValidate">Validate against Bybit</button>
+                    <button class="btn small" id="btnEnableCrypto">Enable all supported</button>
+                    <button class="btn small" id="btnDisableAll">Clear</button></div>
+                    <div class="card-body" style="padding:0"><table class="data" id="instTable">
+                        <thead><tr><th>On</th><th>Instrument</th><th>Class</th><th>MT5 symbol</th><th>Bybit</th><th>Tick size</th></tr></thead>
+                        <tbody></tbody></table></div>
+                </div>
+            </section>
+
+            <!-- ── Settings ── -->
+            <!-- ── Platforms (the DTC platform · the reference platform) ── -->
+            <section class="view" data-view="platforms">
+                <style>
+                    .pl-table { width: 100%; border-collapse: collapse; margin: 6px 0 14px; }
+                    .pl-table td { border-bottom: 1px solid var(--line); padding: 6px 8px 6px 0;
+                                   vertical-align: top; font-size: 13px; }
+                    .pl-table td:first-child { width: 30%; }
+                    .pl-cover td:nth-child(2) { width: 22%; color: var(--dim); }
+                    .pl-price { white-space: nowrap; }
+                    .pl-list { margin: 0; padding-left: 16px; }
+                    .pl-list li { margin: 2px 0; }
+                    .pl-note { border-left: 3px solid rgba(120,180,255,0.5); background: rgba(120,180,255,0.05);
+                               padding: 8px 10px; margin: 8px 0; }
+                    .pl-note.ok { border-color: rgba(80,200,140,0.6); background: rgba(80,200,140,0.06); }
+                    .pl-note.bad { border-color: rgba(230,110,110,0.6); background: rgba(230,110,110,0.06); }
+                    .pl-wiz { margin: 8px 0; }
+                    .pl-wiz-links { margin: 6px 0; display: flex; flex-wrap: wrap; gap: 6px; }
+                    .field-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 8px 0; }
+                    .field-row label { display: flex; flex-direction: column; font-size: 12px; color: var(--dim); }
+                    .field-row label.switch { flex-direction: row; align-items: center; gap: 5px; }
+                    .field-row input { background: #0b0f14; border: 1px solid var(--line); border-radius: 4px;
+                                       color: inherit; padding: 4px 6px; font-size: 12px; }
+                </style>
+                <div class="view-head">
+                    <div class="view-title">Platforms</div>
+                    <div class="view-sub">the DTC platform &amp; the reference platform — plans, prices, links, and what this build covers for free</div>
+                    <div class="grow"></div>
+                    <button class="btn small" data-help="bridges" title="What the bridge does, what it stores, and how to switch on the conventional DTC server">How it works</button>
+                </div>
+                <div id="plRedirectNote"></div>
+                <div id="platformsBody"><div class="dim">loading…</div></div>
+            </section>
+
+            <section class="view" data-view="settings">
+                <div class="view-head"><div class="view-title">Settings</div>
+                    <div class="view-sub" id="setSub">stored in your user config directory — no source edits</div></div>
+                <div class="grid cols-2">
+                    <div class="card"><div class="card-head"><span class="card-title">Data &amp; engine</span></div>
+                        <div class="card-body">
+                            <div class="field"><label>Data source</label><select id="setSource">
+                                <option value="bybit">Bybit perpetuals (crypto, works on Windows + macOS)</option>
+                                <option value="mt5">MetaTrader 5 (Windows only)</option>
+                                <option value="both">Bybit + MT5</option>
+                                <option value="alpaca">Alpaca Markets (US equities, ETFs, options, crypto — needs a linked account)</option>
+                                <option value="all">All of them</option></select>
+                                <div class="hint" id="sourceHint"></div></div>
+                            <div class="row">
+                                <div class="field"><label>Signal cooldown (s)</label><input type="number" id="setCooldown" min="0" step="5"></div>
+                                <div class="field"><label>Min composite score</label><input type="number" id="setScore" min="0" max="100" step="5"></div>
+                                <div class="field"><label>Log level</label><select id="setLogLevel">
+                                    <option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option></select></div>
+                            </div>
+                        </div></div>
+
+                    <div class="card"><div class="card-head"><span class="card-title">Telegram alerts</span><div class="spacer"></div>
+                        <span class="pill" id="tgPill"><span class="dot"></span> <span id="tgPillText">not configured</span></span></div>
+                        <div class="card-body">
+                            <label class="switch" style="margin-bottom:10px"><input type="checkbox" id="setTgEnabled"> route order-flow alerts to Telegram</label>
+                            <div class="field"><label>Bot token</label><input type="password" id="setTgToken" placeholder="123456:ABC-DEF..."><div class="hint">Create a bot with @BotFather, then paste its token.</div></div>
+                            <div class="field"><label>Chat id</label><input type="text" id="setTgChat" placeholder="e.g. 123456789"></div>
+                            <div class="row">
+                                <button class="btn" id="btnTgTest">Send test message</button>
+                                <span class="dim" id="tgTestResult"></span>
+                            </div>
+                        </div></div>
+                </div>
+
+                <div class="card"><div class="card-head"><span class="card-title">Order-flow (the reference layout) settings</span>
+                    <div class="spacer"></div>
+                    <label class="switch"><input type="checkbox" id="atlasExtras"> extra Bybit streams (deep book · liquidations · block flags)</label></div>
+                    <div class="card-body">
+                        <div id="atlasBanner"></div>
+                        <div class="grid cols-3" id="atlasGrid"></div>
+                        <div class="hint">Iceberg and stop-run thresholds are inference parameters: the venue publishes no order-level feed, so tune them per instrument until the counts match what you see on the tape.</div>
+                    </div></div>
+
+                <div class="card"><div class="card-head"><span class="card-title">Pattern thresholds</span>
+                    <div class="spacer"></div><span class="dim" id="patTarget">—</span></div>
+                    <div class="card-body">
+                        <div id="patBanner"></div>
+                        <div class="grid cols-3" id="patGrid"></div>
+                    </div></div>
+
+                <div class="card"><div class="card-head"><span class="card-title">Order-flow extras</span>
+                    <div class="spacer"></div><span class="dim">imbalance · zones · history · Telegram routing — applied on engine start</span></div>
+                    <div class="card-body">
+                        <div id="atlasV2Banner"></div>
+                        <div class="grid cols-3" id="atlasV2Grid"></div>
+                    </div></div>
+
+                <div class="row">
+                    <button class="btn primary" id="btnSaveSettings">Save settings</button>
+                    <button class="btn" id="btnSaveRestart">Save &amp; restart engine</button>
+                    <button class="btn" id="btnReloadSettings">Reload</button>
+                    <button class="btn danger" id="btnResetSettings">Reset to defaults</button>
+                    <span class="dim" id="saveResult"></span>
+                </div>
+            </section>
+
+            <!-- ── Alpaca (optional broker account) ── -->
+            <section class="view" data-view="alpaca" data-surface="alpaca">
+                <div class="view-head">
+                    <div class="view-title">Alpaca</div>
+                    <div class="view-sub" id="alpSub">a US brokerage account as an optional data source — stocks, ETFs, options, crypto, news and the market calendar</div>
+                    <div class="grow"></div>
+                    <button class="btn small" data-help="alpaca" title="Step-by-step: create an account, generate keys, and what a paper account can do">How to get keys</button>
+                    <button class="btn small" id="alpWizard" title="Walk through linking an account inside the setup assistant">Open setup assistant</button>
+                </div>
+                <div id="alpBanner"></div>
+                <div id="alpCardHost"></div>
+                <div class="card"><div class="card-head"><span class="card-title">Symbols</span>
+                    <div class="spacer"></div><span class="dim" id="alpRouteNote">which symbols this account will serve</span></div>
+                    <div class="card-body">
+                        <div id="alpRouteHost"><div class="dim">loading…</div></div>
+                        <div class="hint">Ticker format is Alpaca's: equities and ETFs as plain symbols (<b>AAPL</b>),
+                            crypto as a pair (<b>BTC/USD</b>). The free plan streams 30 symbols; history is readable
+                            for any symbol the account can reach.</div>
+                    </div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Live feed</span>
+                    <div class="spacer"></div><span class="pill" id="alpFeedPill">idle</span></div>
+                    <div class="card-body">
+                        <div id="alpFeedHost"><div class="dim">loading…</div></div>
+                        <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:10px">
+                            <div class="field" style="flex:0 0 240px"><label>Market-data feed</label>
+                                <select id="alpFeedSelect" title="IEX is the free plan's real-time feed; SIP carries the whole market and needs a paid plan (Basic can read it 15 minutes late).">
+                                    <option value="iex">IEX — real-time (free plan)</option>
+                                    <option value="delayed_sip">SIP — 15-minute delayed</option>
+                                    <option value="sip">SIP — real-time (paid plans)</option></select>
+                                <div class="hint" id="alpFeedHint"></div></div>
+                            <button class="btn small" id="alpFeedSave">Save feed</button>
+                            <span class="dim" id="alpFeedMsg"></span>
+                        </div>
+                        <div class="hint">The feed starts with the engine: set <b>Data source</b> to Alpaca
+                            (or <b>All</b>) in Settings, then press Start engine. Depth views stay on the
+                            exchange feed — Alpaca publishes no order book.</div>
+                    </div></div>
+
+                <div class="card"><div class="card-head"><span class="card-title">What Alpaca adds — and what it cannot</span></div>
+                    <div class="card-body">
+                        <table class="alp-adds">
+                            <tr><td class="dim">Adds</td><td>US equities / ETFs / options / crypto instruments, real-time IEX tape
+                                (30 symbols on the free plan), 15-minute-delayed full-market history, Benzinga news, the US market
+                                calendar, and — in the next phase — paper orders, positions and a portfolio view.</td></tr>
+                            <tr><td class="dim">Cannot add</td><td>Order-book depth. Alpaca publishes trades, quotes and bars only,
+                                so the heatmap, the DOM ladder and the participants'-intent reader stay on the exchange feed, which
+                                does publish depth.</td></tr>
+                            <tr><td class="dim">Data honesty</td><td>Free-plan real-time US data is IEX (a single venue, a small
+                                share of volume); full-market SIP data is readable once it is older than 15 minutes. The app labels
+                                which feed a panel is showing.</td></tr>
+                        </table>
+                        <div class="hint">Everything else the program can change at runtime lives in <b>Settings</b>.</div>
+                    </div></div>
+            </section>
+
+            <!-- ── Logs ── -->
+            <section class="view" data-view="logs">
+                <div class="view-head"><div class="view-title">Logs</div>
+                    <div class="view-sub" id="logSub">--</div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Engine log</span><div class="spacer"></div>
+                    <select id="logLevel"><option value="">all levels</option><option>INFO</option><option>WARNING</option><option>ERROR</option></select>
+                    <label class="switch"><input type="checkbox" id="logAuto" checked> auto-refresh</label>
+                    <button class="btn small" id="btnLogClear">Clear</button></div>
+                    <div class="card-body" style="padding:0"><div class="log-list" id="logList"><div class="dim">No log lines yet.</div></div></div>
+                </div>
+            </section>
+
+            <section class="view" data-view="watchlist">
+                <div class="view-head"><div class="view-title">Watchlist</div>
+                    <div class="view-sub" id="watchlistSub">quotes for your enabled instruments — one shared poll, not one per row</div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Instruments</span><div class="spacer"></div>
+                    <span class="dim" id="watchlistCount">0</span>
+                    <label class="switch"><input type="checkbox" id="watchlistAuto" checked> auto-refresh</label>
+                    <button class="btn small" id="watchlistRefresh">Refresh</button></div>
+                    <div class="card-body" style="padding:0"><div class="log-list" id="watchlistBody"><div class="dim">Loading…</div></div></div>
+                </div>
+            </section>
+
+            <section class="view" data-view="news">
+                <div class="view-head"><div class="view-title">News</div>
+                    <div class="view-sub" id="newsSub">headlines for the active symbol, from whatever news source this install is configured with</div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Headlines</span><div class="spacer"></div>
+                    <span class="dim" id="newsCount">0</span>
+                    <span class="dim" id="newsSource">—</span>
+                    <button class="btn small" id="newsRefresh">Refresh</button></div>
+                    <div class="card-body" style="padding:0"><div class="log-list" id="newsBody"><div class="dim">Loading…</div></div></div>
+                </div>
+            </section>
+
+            <!-- ── Fundamentals ── -->
+            <section class="view" data-view="fundamentals">
+                <div class="view-head"><div class="view-title">Fundamentals</div>
+                    <div class="view-sub" id="fundamentalsSub">filed numbers for the active instrument — SEC EDGAR for US filers, CoinGecko for crypto</div></div>
+                <div class="card"><div class="card-head">
+                    <span class="card-title" id="fundamentalsSymbol">—</span><div class="spacer"></div>
+                    <span class="dim" id="fundamentalsCount">0</span>
+                    <select id="fundamentalsConcept" title="Which headline concept to read the annual filing facts for"></select>
+                    <button class="btn small" id="fundamentalsRefresh">Refresh</button></div>
+                    <div class="card-body" style="padding:0"><div class="log-list" id="fundamentalsBody"><div class="dim">Loading…</div></div></div>
+                </div>
+            </section>
+
+            <section class="view" data-view="options">
+                <div class="view-head"><div class="view-title">Options</div>
+                    <div class="view-sub" id="optionsSub">Deribit's public crypto option chain — expiries, strikes, IV and Greeks, no key and no account</div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Chain</span><div class="spacer"></div>
+                    <span class="dim" id="optionsCount">0</span>
+                    <select id="optionsExpiry" title="Expiry — the list is Deribit's own"></select>
+                    <label class="switch"><input type="checkbox" id="optionsAuto" checked> auto-refresh</label>
+                    <button class="btn small" id="optionsRefresh">Refresh</button></div>
+                    <div class="card-body" style="padding:0"><div class="log-list" id="optionsBody"><div class="dim">Loading…</div></div>
+                        <div class="log-line" id="optionsDetail"></div></div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+</div>
+
+<script src="/desktop/vendor/lightweight-charts.js"></script>
+<script src="/static/footprint.js"></script>
+<script src="/static/orderbook.js"></script>
+<script src="/static/tape.js"></script>
+<script src="/static/signals.js"></script>
+<script src="/static/performance.js"></script>
+<script src="/static/microstructure.js"></script>
+<script src="/desktop/ui.js"></script>
+<script src="/desktop/atlas.js"></script>
+<!-- The arbiter must be parsed BEFORE atlas-v2.js runs its loader: that loader injects the rest of
+     the modules (intent.js among them) and its guard looks for this exact attribute. With the tag
+     after atlas-v2.js the guard found nothing, injected a second copy, and the module's IIFE ran
+     twice (two OFAPINTENT instances, two flush timers, doubled document listeners). -->
+<script src="/desktop/intent.js" data-atlas-intent="1"></script>
+<script src="/desktop/atlas-v2.js"></script>
+<script src="/desktop/pause.js"></script>
+<script src="/desktop/menu.js"></script>
+<script src="/desktop/scale.js"></script>
+<script src="/desktop/heatmap-pro.js"></script>
+<script src="/desktop/cursor-link.js"></script>
+<script src="/desktop/strips.js"></script>
+<script src="/desktop/ofx.js"></script>
+<script src="/desktop/ofx-view.js"></script>
+<script src="/desktop/drawings.js"></script>
+<script src="/desktop/menubar.js"></script>
+<script src="/desktop/shell.js"></script>
+<script src="/desktop/links.js"></script>
+<script src="/desktop/bus.js"></script>
+<script src="/desktop/watchlist.js"></script>
+<script src="/desktop/news.js"></script>
+<script src="/desktop/fundamentals.js"></script>
+<script src="/desktop/options.js"></script>
+  <div class="statusbar">
+    <span>source: <b id="statusSource">—</b></span>
+    <span>workspace: <b id="statusWorkspace">default</b></span>
+    <span>mode: <b id="statusMode">Classic</b></span>
+    <span>tab: <b id="statusTab">—</b></span>
+    <span>widgets: <b id="statusWidgets">0</b></span>
+    <span>feed: <b id="statusFeed">—</b></span>
+    <span>bus: <b id="statusBus">idle</b></span>
+    <span class="dim" id="statusHint"></span>
+  </div>
+</body>
+</html>

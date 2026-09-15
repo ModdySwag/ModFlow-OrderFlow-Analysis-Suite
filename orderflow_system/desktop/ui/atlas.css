@@ -1,0 +1,430 @@
+/* ══════════════════════════════════════════════════════════════════
+   reference-style view chrome — heatmap canvas, CVD/frame charts, TPO
+   ladder, profile reads. Loaded after ui.css + modules.css.
+   ══════════════════════════════════════════════════════════════════ */
+
+.heat-canvas {
+    width: 100%; height: min(56vh, 900px); min-height: 220px; display: block;
+    background: #0b1220; border-radius: 0 0 10px 10px;
+}
+.series-canvas {
+    width: 100%; height: min(30vh, 460px); min-height: 160px; display: block;
+    background: #0b1220; border-radius: 0 0 10px 10px;
+}
+
+/* value colours inside tables / reads (KPI cards have their own rules) */
+td.up, b.up, span.up   { color: var(--green); }
+td.down, b.down, span.down { color: var(--red); }
+
+/* ── TPO ladder ───────────────────────────────────────────────── */
+.tpo-grid {
+    max-height: 640px; overflow: auto;
+    font-family: var(--font-mono); font-size: 12px;
+    padding: 4px 0;
+}
+.tpo-row {
+    display: grid;
+    grid-template-columns: 84px 96px 1fr auto;
+    gap: 10px; align-items: center;
+    padding: 2.5px 12px;
+    border-bottom: 1px solid rgba(34,48,73,.35);
+}
+.tpo-row:hover { background: rgba(79,140,255,.06); }
+.tpo-row.poc   { background: rgba(79,140,255,.16); }
+.tpo-row.edge  { background: rgba(53,208,127,.10); }
+.tpo-row.va    { background: rgba(79,140,255,.05); }
+.tpo-row.single .tpo-letters { color: var(--orange); }
+.tpo-price { color: var(--text-primary); }
+.tpo-letters { color: var(--text-secondary); letter-spacing: .07em; }
+.tpo-volwrap {
+    background: rgba(34,48,73,.55); height: 8px;
+    border-radius: 4px; overflow: hidden;
+}
+.tpo-vol {
+    display: block; height: 100%; border-radius: 4px;
+    background: linear-gradient(90deg, #2f6fd0, #52c7ff);
+}
+.tpo-tags { display: flex; gap: 4px; }
+
+/* ── profile reads panel ──────────────────────────────────────── */
+.reads-line {
+    display: flex; justify-content: space-between; gap: 10px;
+    padding: 6px 0; border-bottom: 1px solid rgba(34,48,73,.4);
+    font-size: 12.5px;
+}
+.reads-line span { color: var(--text-secondary); }
+.reads-sub {
+    margin: 12px 0 4px; font-size: 11px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-muted);
+}
+.reads-list div {
+    display: flex; justify-content: space-between; gap: 10px;
+    font-family: var(--font-mono); font-size: 12px; padding: 3px 0;
+}
+.reads-list i { color: var(--text-muted); font-style: normal; }
+
+
+/* ── order-flow engine ─────────────────────────────────────────────────── */
+.ofx-bar { gap: 10px; align-items: center; flex-wrap: wrap; }
+.ofx-bar input { background: rgba(12,18,30,.9); color: #cfd8e6; border: 1px solid rgba(120,150,190,.35); border-radius: 4px; padding: 3px 6px; }
+.ofx-stage { position: relative; height: clamp(320px, 58vh, 900px); margin: 8px 0; border: 1px solid rgba(120,150,190,.25); border-radius: 6px; overflow: hidden; background: #070b12; }
+.ofx-layer { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#ofxHeat { z-index: 1; } #ofxBase { z-index: 2; cursor: crosshair; } #ofxLive { z-index: 3; pointer-events: none; }
+/* Stage + readout as one row: the numbers never sit on top of the price rail or the matrix
+   (measured: as an overlay the panel covered the rail and clipped its longer values). */
+.ofx-flex { display: flex; gap: 8px; align-items: stretch; margin: 8px 0; }
+.ofx-flex .ofx-stage { flex: 1 1 auto; margin: 0; min-width: 0; }
+/* The cursor's metrics as text: the canvas keeps the picture, this keeps the numbers
+   readable, selectable and copyable. */
+.ofx-readout { flex: 0 0 238px; width: 238px; box-sizing: border-box; max-height: 100%; overflow-y: auto;
+  background: rgba(8,12,20,.87); border: 1px solid rgba(120,150,190,.35);
+  border-radius: 6px; padding: 6px 8px; font: 500 10px/1.35 ui-monospace, monospace; color: #cfd8e6; }
+.ofx-readout .ofx-ro-title { font-weight: 700; color: #9fb4d0; margin-bottom: 4px; letter-spacing: .04em; }
+.ofx-ro-row { display: flex; justify-content: space-between; gap: 8px; }
+.ofx-ro-k { color: #8b9bb4; flex: 0 0 auto; }
+.ofx-ro-v { font-variant-numeric: tabular-nums; text-align: right; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ofx-ro-v.up { color: #35d07f; }
+.ofx-ro-v.down { color: #ff5d6c; }
+.ofx-ro-v.hot { color: #d29922; }
+.ofx-ro-sep { height: 1px; background: rgba(120,150,190,.22); margin: 4px 0; }
+.ofx-ro-hint { color: #6e7681; margin-top: 4px; }
+.ofx-legend { font: 500 10px ui-monospace, monospace; opacity: .85; }
+html.ui-compact .ofx-readout { flex-basis: 206px; width: 206px; font-size: 9.5px; }
+@media (max-width: 1180px) { .ofx-readout { flex-basis: 200px; width: 200px; font-size: 9.5px; } }
+@media (max-width: 980px) { .ofx-readout { display: none; } }
+.ofx-tip-hot { color: #d29922; }
+
+.ofx-ribbon { width: 100%; height: 84px; display: block; background: #070b12; border: 1px solid rgba(120,150,190,.25); border-radius: 6px; }
+.ofx-tip { position: absolute; z-index: 4; display: none; pointer-events: none; background: rgba(8,12,20,.94); border: 1px solid rgba(120,150,190,.45); border-radius: 6px; padding: 6px 8px; font: 500 11px ui-monospace, monospace; color: #cfd8e6; max-width: 240px; }
+.ofx-chip-on { background: rgba(255,214,102,.22); border-color: rgba(255,214,102,.6); color: #ffd666; }
+
+
+.ofx-snap-float { position: absolute; right: 14px; bottom: 14px; z-index: 5; display: none;
+  align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; cursor: pointer;
+  background: rgba(255,214,102,.16); border: 1px solid rgba(255,214,102,.6); color: #ffd666;
+  font: 600 11px ui-monospace, monospace; letter-spacing: .02em; }
+.ofx-snap-float.on { display: inline-flex; animation: ofx-breathe 1.6s ease-in-out infinite; }
+.ofx-snap-float canvas { display: block; opacity: .95; }
+@keyframes ofx-breathe { 0%,100% { box-shadow: 0 0 0 0 rgba(255,214,102,0); }
+  50% { box-shadow: 0 0 14px 2px rgba(255,214,102,.35); } }
+@media (prefers-reduced-motion: reduce) { .ofx-snap-float.on { animation: none; } }
+
+
+/* pause-while-you-work control (topbar, right) */
+.ofap-pause { margin-left: auto; padding: 4px 12px; border-radius: 999px; cursor: pointer;
+  font: 600 11px ui-monospace, monospace; letter-spacing: .02em;
+  border: 1px solid rgba(120,150,190,.45); background: rgba(120,150,190,.12); color: #cfd8e6; }
+.ofap-pause:hover { border-color: rgba(150,180,220,.7); }
+.ofap-pause.on { border-color: rgba(255,214,102,.65); background: rgba(255,214,102,.16); color: #ffd666;
+  box-shadow: 0 0 12px rgba(255,214,102,.25); }
+
+
+/* main menu (purpose-grouped panels), hotkey sheet, status bar */
+.menu-btn { margin-left: 8px; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 14px;
+  border: 1px solid rgba(120,150,190,.45); background: rgba(120,150,190,.10); color: #cfd8e6; }
+.menu-btn:hover { border-color: rgba(150,180,220,.75); color: #eaf0f8; }
+.brand-mini { font: 600 11px ui-monospace, monospace; letter-spacing: .16em; text-transform: uppercase; color: #8fa6c4; }
+.menu-panel { position: fixed; top: 46px; left: 8px; z-index: 80; display: none; min-width: 560px; max-width: 82vw;
+  background: rgba(10,14,22,.98); border: 1px solid rgba(120,150,190,.4); border-radius: 10px;
+  box-shadow: 0 18px 60px rgba(0,0,0,.55); padding: 10px; }
+.menu-panel.on { display: block; }
+.menu-head { display: flex; gap: 8px; margin-bottom: 8px; }
+.menu-head input { flex: 1; background: rgba(12,18,30,.95); border: 1px solid rgba(120,150,190,.35);
+  border-radius: 6px; padding: 5px 8px; color: #cfd8e6; font: 500 12px ui-monospace, monospace; }
+.menu-x { background: transparent; border: 0; color: #8fa6c4; font-size: 16px; cursor: pointer; }
+.menu-col { display: inline-block; vertical-align: top; width: 49%; }
+.menu-group { margin: 0 0 10px; }
+.menu-group-title { font: 600 10px ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; color: #7f95b3; margin: 6px 0 4px; }
+.menu-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 5px 8px;
+  border-radius: 6px; border: 1px solid transparent; background: transparent; color: #cfd8e6; cursor: pointer; font-size: 12px; }
+.menu-item:hover { background: rgba(64,224,255,.10); border-color: rgba(64,224,255,.35); }
+.menu-label { font-weight: 600; }
+.menu-label em { font-style: normal; color: #7fd4ff; }
+.menu-hint { margin-left: auto; color: #708199; font-size: 10px; }
+.menu-row { display: flex; gap: 6px; align-items: center; }
+.menu-row input { background: rgba(12,18,30,.95); border: 1px solid rgba(120,150,190,.35); border-radius: 6px; padding: 4px 6px; color: #cfd8e6; }
+.menu-row button { background: rgba(120,150,190,.14); border: 1px solid rgba(120,150,190,.4); border-radius: 6px; color: #cfd8e6; padding: 4px 8px; cursor: pointer; font-size: 11px; }
+.menu-ws-list { flex-wrap: wrap; margin-top: 6px; }
+.menu-ws { display: inline-flex; align-items: center; border: 1px solid rgba(120,150,190,.35); border-radius: 999px; overflow: hidden; }
+.menu-ws button { border: 0; background: transparent; color: #cfd8e6; padding: 3px 8px; cursor: pointer; font-size: 11px; }
+.menu-ws-x { color: #8fa6c4 !important; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: #35d07f; box-shadow: 0 0 8px rgba(53,208,127,.8); }
+.dot.bad { background: #ff5d6c; }
+.dot.idle { background: #708199; }
+.overlay-sheet { position: fixed; inset: 10% 22% auto 22%; z-index: 90; display: none; background: rgba(10,14,22,.98);
+  border: 1px solid rgba(120,150,190,.45); border-radius: 12px; padding: 16px; box-shadow: 0 24px 70px rgba(0,0,0,.6); }
+.overlay-sheet.on { display: block; }
+.overlay-title { font: 600 13px ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; color: #9fb4d0; margin-bottom: 8px; }
+.overlay-x { position: absolute; right: 10px; top: 8px; }
+.hk-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.hk-table th { text-align: left; color: #7f95b3; font-weight: 600; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; padding: 4px 6px; }
+.hk-table td { padding: 5px 6px; border-top: 1px solid rgba(120,150,190,.16); }
+.hk-keys { font: 600 12px ui-monospace, monospace; color: #ffd666; white-space: nowrap; }
+.hk-scope { color: #708199; } .hk-scope.on { color: #7fd4ff; }
+.statusbar { display: flex; gap: 18px; align-items: center; padding: 5px 14px; border-top: 1px solid rgba(120,150,190,.22);
+  font: 500 11px ui-monospace, monospace; color: #8fa6c4; background: rgba(8,12,20,.9); }
+.statusbar b { color: #cfd8e6; font-weight: 600; }
+
+.menu-item-off { opacity: .55; cursor: not-allowed; }
+.menu-item-off:hover { background: transparent; border-color: transparent; }
+
+.wiz-warn { background: rgba(255,182,77,.10); border-color: rgba(255,182,77,.45); }
+
+/* -- scaling: everything below is here so the shell survives every window state ---------------
+   Short window (or a snapped half-screen): shrink the chart stages, tighten the chrome, and let
+   the tall panels scroll instead of pushing the status bar off the bottom. */
+.menu-panel { max-height: calc(100vh - 76px); overflow: auto; }
+#wizBody { max-height: min(58vh, 640px); overflow: auto; }
+.view { min-height: 0; }
+.card-body { min-height: 0; }
+html.ui-compact .rail { padding-top: 4px; }
+html.ui-compact .rail .nav-item { padding-top: 3px; padding-bottom: 3px; font-size: 12px; }
+html.ui-compact .heat-canvas { height: 42vh; }
+html.ui-compact .series-canvas { height: 24vh; }
+html.ui-compact .ofx-stage { height: clamp(260px, 50vh, 620px); }
+html.ui-compact .topbar { padding-top: 4px; padding-bottom: 4px; }
+@media (max-height: 720px) {
+    .heat-canvas { height: 40vh; }
+    .series-canvas { height: 22vh; }
+    .ofx-stage { height: clamp(240px, 46vh, 560px); }
+}
+
+/* -- scaling passes ---------------------------------------------------------------------------
+   Measured faults, fixed at the root: (1) the topbar could not wrap, so its buttons pushed the
+   document 315 px wider than a 1024-wide window; (2) the status bar was a sibling *below* a
+   100vh shell, so it sat permanently under the viewport edge. The shell is now a real column:
+   chrome wraps, the content column owns the scroll, the status bar always has a row. */
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; overflow: hidden; }
+.app { flex: 1 1 auto; min-height: 0; height: auto !important; min-width: 0; overflow: hidden; }
+.topbar { flex-wrap: wrap; row-gap: 4px; min-width: 0; }
+.topbar > * { min-width: 0; }
+.search-wrap { flex: 1 1 200px; min-width: 150px; max-width: 340px; }
+.search-wrap input { width: 100%; min-width: 0; box-sizing: border-box; }
+.content { min-width: 0; overflow: auto; }
+.statusbar { flex: 0 0 auto; flex-wrap: wrap; row-gap: 2px; }
+.statusbar > * { min-width: 0; }
+
+/* -- heatmap pro: the interactive layer over the depth map ------------------------------------- */
+.hm-pro-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0 0; }
+.hm-pro-bar .dim { font: 500 11px ui-monospace, monospace; }
+.hm-pro-stats { font: 500 11.5px ui-monospace, monospace; margin-top: 4px; }
+.hm-pro-tip { position: absolute; z-index: 5; pointer-events: none; background: rgba(8,12,20,.95);
+    border: 1px solid rgba(120,190,255,.45); border-radius: 6px; padding: 6px 8px;
+    font: 500 11px ui-monospace, monospace; color: #cfd8e6; white-space: nowrap; }
+
+.hm-pro-msg { font: 500 11px ui-monospace, monospace; color: #9fe0b8; margin-top: 4px; word-break: break-all; }
+
+/* -- workstream I: the cursor trace and the ladder highlight ----------------------------------- */
+.ofx-trace { position: absolute; left: 0; right: 0; height: 1px; background: rgba(140,200,255,.55);
+    pointer-events: none; z-index: 3; font: 600 10px ui-monospace, monospace; color: #cfe4ff;
+    text-align: right; line-height: 0; }
+.ofx-trace::after { content: ''; position: absolute; right: 0; top: -2px; width: 6px; height: 5px;
+    background: rgba(140,200,255,.9); }
+tr.ofx-traced, .ofx-traced { outline: 1px solid rgba(140,200,255,.8); outline-offset: -1px;
+    background: rgba(140,200,255,.10) !important; }
+
+/* -- intent: the hold chip. A held screen must never look like a broken one. --------------------- */
+.ofap-hold { display: none; font: 600 10.5px ui-monospace, monospace; letter-spacing: .2px;
+    padding: 2px 8px; border-radius: 2px; margin-left: 6px; color: #ffd98a;
+    background: rgba(255,205,90,.12); border: 1px solid rgba(255,205,90,.35); white-space: nowrap; }
+/* one status cluster: the pause chip and the hold chip read as a single unit, top right */
+.ofap-pause, .ofap-hold { flex: 0 0 auto; }
+.ofap-strip-chip { position: absolute; right: 8px; bottom: 8px; z-index: 6; cursor: pointer;
+    font: 600 10.5px ui-monospace, monospace; color: #0b1220; background: #ffcd5a;
+    border: 0; border-radius: 2px; padding: 3px 8px; }
+.ofap-hold.on { display: inline-block; }
+
+/* ── Engine legend panel ──────────────────────────────────────────────────
+   The engine's own account of the layout, the colour keys, the data it reads and the interactions.
+   Three columns on a wide window, two when it narrows, scrollable so the ribbon and the stage keep
+   their space. Every swatch is painted from the colour the renderer actually uses (math.theme), so a
+   key here cannot disagree with the picture. */
+.ofx-legend-panel { margin: 10px 0 14px; border: 1px solid rgba(120,150,190,.28); border-radius: 8px;
+  background: rgba(10,14,22,.72); }
+.ofx-leg-head { display: flex; align-items: center; gap: 10px; padding: 6px 8px;
+  border-bottom: 1px solid rgba(120,150,190,.22); }
+.ofx-leg-sub { font: 500 10px ui-monospace, monospace; color: #8b9bb4; font-variant-numeric: tabular-nums; }
+.ofx-leg-body { max-height: 300px; overflow: auto; padding: 8px; }
+.ofx-leg-cols { display: grid; grid-template-columns: minmax(230px, 1fr) minmax(320px, 1.5fr) minmax(300px, 1.4fr); gap: 14px; }
+.ofx-leg-col h4 { margin: 2px 0 6px; font: 700 10px ui-monospace, monospace; letter-spacing: .07em;
+  text-transform: uppercase; color: #9fb4d0; }
+.ofx-leg-layout { margin: 0 0 10px; padding-left: 16px; font: 500 10.5px/1.55 ui-monospace, monospace; color: #cfd8e6; }
+.ofx-leg-row { display: flex; gap: 8px; padding: 3px 0; border-top: 1px solid rgba(120,150,190,.10); }
+.ofx-leg-row:first-of-type { border-top: 0; }
+.ofx-leg-text { min-width: 0; font: 500 10.5px/1.45 ui-monospace, monospace; color: #b9c6d8; }
+.ofx-leg-text b { display: block; color: #e6edf7; font-weight: 700; }
+.ofx-leg-text em { display: block; color: #8b9bb4; font-style: normal; font-variant-numeric: tabular-nums; }
+.ofx-leg-key { display: grid; grid-template-columns: 138px 1fr; gap: 8px; padding: 2px 0;
+  font: 500 10.5px/1.5 ui-monospace, monospace; color: #b9c6d8; align-items: center; }
+.ofx-leg-key kbd { background: rgba(120,150,190,.14); border: 1px solid rgba(120,150,190,.30);
+  border-radius: 4px; padding: 1px 5px; text-align: center; color: #e6edf7; }
+.ofx-sw { flex: 0 0 26px; width: 26px; height: 14px; border-radius: 3px; margin-top: 3px; box-sizing: border-box; }
+.ofx-sw-split, .ofx-sw-rail { display: flex; overflow: hidden; background: transparent; }
+.ofx-sw-split b { flex: 1 1 50%; }
+.ofx-sw-rail { flex-direction: column; gap: 2px; }
+.ofx-sw-rail b { flex: 1 1 50%; border-radius: 2px; }
+.ofx-sw-out { background: transparent; border: 2px solid currentColor; }
+.ofx-sw-line { height: 3px; margin-top: 8px; }
+.ofx-sw-glyph { display: flex; align-items: center; justify-content: center; font: 700 11px ui-monospace, monospace;
+  background: rgba(120,150,190,.10); }
+.ofx-sw-text { flex-basis: 78px; width: 78px; display: flex; align-items: center; justify-content: center;
+  font: 500 9px ui-monospace, monospace; background: rgba(120,150,190,.10); }
+.ofx-legend-panel.ofx-leg-collapsed .ofx-leg-body { display: none; }
+html.ui-compact .ofx-leg-sub { display: none; }
+html.ui-compact .ofx-leg-body { max-height: 240px; font-size: 10px; }
+
+
+/* ══════════════════════════════════════════════════════════════════
+   Terminal shell (desktop/ui/shell.js) — the widget arrangement of the
+   same panels. Every rule here is scoped to body.term-mode or to
+   elements only the shell creates, so Classic is untouched.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* the way in, from the rail footer */
+.rail-term {
+    display: block; width: 100%; margin: 6px 0 4px; padding: 5px 8px; text-align: left;
+    font: inherit; font-size: 11px; cursor: pointer; color: var(--text-secondary);
+    background: rgba(79,140,255,.10); border: 1px solid var(--border); border-radius: 6px;
+}
+.rail-term:hover { border-color: var(--border-active); color: var(--text-primary); }
+
+/* ── the workspace switch in the top bar (one click, no menu) ─────────────────────────────────── */
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg-btn {
+    padding: 5px 12px; font: inherit; font-size: 11.5px; cursor: pointer; border: 0;
+    background: rgba(34,48,73,.45); color: var(--text-secondary); letter-spacing: .02em;
+}
+.seg-btn + .seg-btn { border-left: 1px solid var(--border); }
+.seg-btn:hover { color: var(--text-primary); background: rgba(79,140,255,.12); }
+.seg-btn.on { background: var(--blue-bg); color: var(--text-primary); box-shadow: inset 0 -2px 0 var(--border-active); }
+
+/* A panel that is not on the active tab is hidden, never detached: it stays in the document so
+   every querySelector-based poller keeps finding it (a detached section reads as "no such view"). */
+body.term-mode main.views > section.view { display: none; }
+
+.term-shell { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
+
+.term-bar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 6px;
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px;
+}
+.term-name { font-size: 12px; font-weight: 600; color: var(--text-primary); letter-spacing: .02em; }
+.term-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.term-tab {
+    display: inline-flex; align-items: center; border-radius: 999px; cursor: pointer;
+    background: rgba(34,48,73,.55); border: 1px solid var(--border); color: var(--text-secondary);
+}
+.term-tab.on { background: var(--blue-bg); border-color: var(--border-active); color: var(--text-primary); }
+.term-tab.tt-over { border-color: var(--border-active); }
+.term-tab .tt-name {
+    background: transparent; border: 0; border-radius: 999px; cursor: pointer;
+    color: inherit; font: inherit; font-size: 11.5px; padding: 3px 9px;
+}
+.term-tab .tt-x {
+    background: transparent; border: 0; cursor: pointer; padding: 0 7px 0 0;
+    color: var(--text-muted); font: inherit; font-size: 12px; line-height: 1;
+}
+.term-tab .tt-x:hover { color: var(--red); }
+.term-tab.tt-add { padding: 3px 10px; font-size: 12px; background: rgba(79,140,255,.10); }
+.term-tab .tt-input {
+    width: 96px; padding: 2px 6px; border-radius: 6px; background: rgba(12,18,30,.92);
+    border: 1px solid var(--border-active); color: var(--text-primary); font: inherit; font-size: 11.5px;
+}
+.term-note { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.term-add {
+    margin-left: auto; padding: 3px 6px; font-size: 11.5px; border-radius: 6px;
+    background: rgba(12,18,30,.9); color: var(--text-primary); border: 1px solid var(--border-strong);
+}
+.term-btn {
+    padding: 3px 10px; font-size: 11.5px; border-radius: 6px; cursor: pointer;
+    background: rgba(79,140,255,.12); border: 1px solid var(--border); color: var(--text-secondary);
+}
+.term-btn:hover { border-color: var(--border-active); color: var(--text-primary); }
+
+/* The grid is the same 12×8 the layout store clamps against: a widget's cell coordinates ARE its
+   grid placement, so what the store kept is what the screen shows. Rows are a share of the frame's
+   height (min 56px) so a full board fits the window instead of always scrolling. */
+.term-grid {
+    flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; gap: 8px;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    grid-template-rows: repeat(8, minmax(56px, 1fr));
+}
+
+.widget-frame {
+    display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden;
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px;
+    container-type: inline-size;      /* a widget is a viewport of its own — see the queries below */
+    position: relative;               /* the resize grip anchors to the frame, not to the scrolling body */
+}
+.widget-frame.wf-off { display: none; }
+.widget-frame.wf-focus { border-color: var(--border-active); box-shadow: 0 0 0 1px rgba(79,140,255,.22); }
+/* While a drag or resize is in flight: the frame lifts, the page cannot select text, and the panel
+   underneath stops receiving the pointer (a gesture over a chart must move the widget, not pan it). */
+.widget-frame.wf-moving { z-index: 5; box-shadow: 0 8px 22px rgba(0,0,0,.5); }
+.widget-frame.wf-max { z-index: 4; }
+body.wf-gesture { user-select: none; cursor: grabbing; }
+body.wf-gesture .wf-body { pointer-events: none; }
+.wf-bar {
+    display: flex; align-items: center; gap: 8px; flex: 0 0 auto; padding: 3px 8px;
+    background: linear-gradient(180deg, rgba(79,140,255,.10), rgba(79,140,255,.02));
+    border-bottom: 1px solid var(--border); cursor: grab;
+}
+.wf-title { font-size: 11px; font-weight: 600; color: var(--text-secondary); letter-spacing: .04em;
+    text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wf-tools { margin-left: auto; display: flex; gap: 2px; }
+.wf-btn {
+    width: 19px; height: 19px; padding: 0; line-height: 1; font-size: 12px; cursor: pointer;
+    background: transparent; border: 1px solid transparent; border-radius: 4px; color: var(--text-muted);
+}
+.wf-btn:hover { color: var(--text-primary); border-color: var(--border); background: rgba(79,140,255,.10); }
+.wf-btn:last-child:hover { color: var(--red); }
+/* The link chip is wider than a glyph button: it shows the group pair at a glance (⇄ A·B, ⇄ –·–). */
+.wf-link { width: auto; min-width: 19px; padding: 0 5px; font-size: 10px; letter-spacing: .02em; }
+.wf-link.on { color: var(--accent); border-color: rgba(79,140,255,.35); background: rgba(79,140,255,.10); }
+.wf-links {
+    position: absolute; top: 26px; right: 6px; z-index: 40; min-width: 172px; padding: 6px 8px 7px;
+    background: var(--panel, #12161d); border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: 0 8px 22px rgba(0,0,0,.45);
+}
+.wf-links-row { display: flex; align-items: center; gap: 3px; margin-top: 3px; }
+.wf-links-row:first-child { margin-top: 0; }
+.wf-links-k { flex: 0 0 62px; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.wf-opt {
+    flex: 1 1 auto; min-width: 20px; padding: 2px 0; font-size: 10px; cursor: pointer;
+    background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary);
+}
+.wf-opt:hover { color: var(--text-primary); border-color: var(--border-active); }
+.wf-opt.on { color: var(--accent); border-color: var(--accent); background: rgba(79,140,255,.14); }
+.wf-links-note { margin-top: 5px; font-size: 10px; line-height: 1.35; color: var(--text-muted); }
+.wf-grip {
+    position: absolute; right: 1px; bottom: 1px; width: 14px; height: 14px; cursor: nwse-resize;
+    background:
+        linear-gradient(135deg, transparent 0 44%, rgba(120,150,190,.55) 44% 52%, transparent 52% 68%,
+                        rgba(120,150,190,.55) 68% 76%, transparent 76%);
+}
+.wf-grip:hover {
+    background:
+        linear-gradient(135deg, transparent 0 44%, var(--border-active) 44% 52%, transparent 52% 68%,
+                        var(--border-active) 68% 76%, transparent 76%);
+}
+.wf-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 8px 10px; }
+/* The panel inside a frame is always laid out — the frame decides whether it is on screen, and the
+   section's .active class (set by shell.js) says the same thing to the module that owns it. */
+.widget-frame .view { display: flex; flex-direction: column; gap: 14px; }
+.widget-frame .view-head { position: sticky; top: -8px; z-index: 2; background: var(--bg-panel); padding-bottom: 4px; }
+
+/* The Engine view is built for a full-window stage with a 238px readout beside it; inside a 327px
+   frame that readout starved the stage to 79px (measured in the live round-trip probe). These
+   queries size the panel by the FRAME's width, not the window's. */
+@container (max-width: 720px) {
+    .ofx-readout { flex-basis: 168px; width: 168px; font-size: 9.5px; }
+    .ofx-flex { flex: 1 1 auto; min-height: 0; }
+    .ofx-flex .ofx-stage { height: auto; min-height: 150px; }
+}
+@container (max-width: 470px) {
+    .ofx-flex { flex-direction: column; }
+    .ofx-readout { flex: 0 0 auto; width: auto; max-height: 42%; }
+}
