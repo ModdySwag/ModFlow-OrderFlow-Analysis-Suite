@@ -141,13 +141,14 @@ next gate run: `dist/` matches are only CPython's own `unicodedata.pyd`, not our
 
 ### P1 — the interaction canon and spec alignment
 
-**Status 2026-09-16: P1-1, P1-2 and P1-3 are done** (handoff §33, §34, §35) — the token block,
-`themes/`, `theme.js`, the Appearance card and the brief's grep gate at **0** (P1-1); the cursor spine
-adopted by six panels, measured live, one heatmap hover lighting the engine, the ladder, the tape and
-the profile with eight badges on one text (P1-2); and a shift+drag on the engine producing the
-statistics strip and a real CSV on disk (volume 86.39, delta +14.58, resting +4.83 over 4 bars),
-plus markers remembered per symbol (P1-3). **Next: P1-4, strips — keyboard stepping and
-click-to-locate.**
+**Status 2026-09-16: P1-1 through P1-4 are done** (handoff §33–§36) — the token block, `themes/`,
+`theme.js`, the Appearance card and the brief's grep gate at **0** (P1-1); the cursor spine adopted by
+six panels, measured live, one heatmap hover lighting the engine, the ladder, the tape and the profile
+with eight badges on one text (P1-2); a shift+drag on the engine producing the statistics strip and a
+real CSV on disk (volume 86.39, delta +14.58, resting +4.83 over 4 bars) plus markers remembered per
+symbol (P1-3); and the strips given keys, pause-on-hover and click-to-locate, with the tape's own
+auto-scroll made to defer to a held reader (P1-4). **Next: P1-5, the token-driven feedback
+cosmetics.**
 
 **P1-1 · Theme and token layer first (brief A). — do this before any visual polish below.** L
 Unstarted: `atlas.css` contains **zero** `--of-` tokens (`grep -c -- '--of-'` → 0) and there is no
@@ -201,6 +202,18 @@ not yet include the fresh-walls table.
 `strips.js` already holds the reader's place and counts arrivals; add keyboard stepping through a strip and
 wire click-to-locate so a tape print seeks the linked panels. Gate: live — pause on hover, step with the
 keyboard, click a print, assert the linked panels moved and the chip cleared.
+
+**Done 2026-09-16 (§36).** ArrowUp/ArrowDown step a row, PageUp/PageDown a screenful, Home/End either
+end; stepping engages the hold and the chip says "held" even with nothing to count. Pause on hover is
+in (it did not exist: a fast tape pulled rows out from under a parked pointer). A click on a row
+carrying `data-time`/`data-price` publishes that print to the shared cursor and calls the engine's new
+`OFX.seekToTime()`, then releases the hold. Measured: 3 steps → 72 px held with 1 arrival counted and
+the status chip naming the hold; a real click → `locate {price 76223.9, bar 9}`, the viewport moved,
+the chip cleared. Three defects found live and fixed in the pass: a pixel threshold that swallowed a
+row-step (28 px against a 24 px row), a scroll event deciding against a re-resolved anchor (the tbody's
+rebuild walked it up to the parent, whose offset 0 read as "on the newest line"), and the tape's own
+auto-scroll fighting the strip for the offset (it now asks `OFAPSTRIPS.holds(el)` first). No Escape
+binding: the shell owns that key.
 
 **P1-5 · Spec-alignment cosmetics, redesigned as token-driven feedback.** S each
 From report1's minor lists, each re-argued rather than copied:

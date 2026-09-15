@@ -1,15 +1,16 @@
 # Resume here — ModFlow OrderFlow Analysis Suite
 
 One page for picking this up cold. The full trail lives in `docs/SESSION_HANDOFF.md`
-(§24–§35 cover the terminal-mode build, the bus, the panels, the commit series, the P0 trust pass, the
-theme/token layer, the cursor spine and selection-as-measurement); `docs/DX_TERMINAL_AND_QUANTOWER_PLAN.md`
-is the phase plan with the decisions behind it, and `docs/UPGRADE_ACTION_PLAN.md` is the prioritised plan
-of action — from `report1.txt`, corrected against the tree. **P0 (§32), P1-1 (§33), P1-2 (§34) and P1-3
-(§35) are done; the next work item is P1-4, strips — keyboard stepping and click-to-locate.**
+(§24–§36 cover the terminal-mode build, the bus, the panels, the commit series, the P0 trust pass, the
+theme/token layer, the cursor spine, selection-as-measurement and the strips' keys);
+`docs/DX_TERMINAL_AND_QUANTOWER_PLAN.md` is the phase plan with the decisions behind it, and
+`docs/UPGRADE_ACTION_PLAN.md` is the prioritised plan of action — from `report1.txt`, corrected against
+the tree. **P0 (§32) and P1-1 through P1-4 (§33–§36) are done; the next work item is P1-5, the
+token-driven feedback cosmetics.**
 
 ## Where it stands
 
-- **Branch `master`, HEAD = the `docs:` commit that closes P1-3** (top of the branch, tree clean,
+- **Branch `master`, HEAD = the `docs:` commit that closes P1-4** (top of the branch, tree clean,
   nothing pushed; `git log -1` names it). Recent work, by area: the four P0 fixes (`443008d` desktop,
   `7a81bf6` the cursor-trace contract, `65672f2` book integrity, `d83e7a0` broadcast queues), then the
   theme layer — the token block + `themes/` + `theme.js` + the Appearance card.
@@ -21,7 +22,7 @@ of action — from `report1.txt`, corrected against the tree. **P0 (§32), P1-1 
 
 ```bash
 unset PYTHONPATH
-.venv/Scripts/python.exe -m pytest orderflow_system -q        # expect 504 passed / 2 skipped
+.venv/Scripts/python.exe -m pytest orderflow_system -q        # expect 508 passed / 2 skipped
 .venv/Scripts/python.exe scripts/audit_ui_refs.py             # expect AUDIT CLEAN
 node orderflow_system/desktop/ui/shell.selftest.js            # 22   (also: bus 13, links 10,
 node orderflow_system/desktop/ui/bus.selftest.js              # 13    watchlist 17, news 17,
@@ -39,7 +40,7 @@ check `orderflow.log` for `client error:` lines.
 
 | What | Where |
 |---|---|
-| The upgrade plan's **P1** work: P1-1 (tokens), P1-2 (the cursor spine) and P1-3 (selection as measurement — shift+drag on the engine, the strip, the export, markers per symbol) are done — continue with P1-4 (strips: keyboard stepping + click-to-locate), then P1-5 to P1-10. | plan §2, handoff §35 |
+| The upgrade plan's **P1** work: P1-1 through P1-4 are done (tokens, the cursor spine, selection as measurement, the strips' keys and click-to-locate) — continue with P1-5 (token-driven feedback cosmetics), then P1-6 to P1-10. | plan §2, handoff §36 |
 | Watchlist: configured-instrument rows ("—" rows beside the demo list) — wired to the 2 s beat, not re-checked live. Recipe: add `ZZZTEST` to the config's instrument list, reload, expect a row. | handoff §27 |
 | Bus chip's `sub` count disagrees with `telemetry().subscribers` (measured `1 sub · 2 ch` vs 3) — two counters, one mis-named. | handoff §29 |
 | Fundamentals supply cell and the options gamma precision — both fixed, cosmetic residue noted. | handoff §25 |

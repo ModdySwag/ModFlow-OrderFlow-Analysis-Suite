@@ -1212,3 +1212,78 @@ Gates after the pass: **504 passed / 2 skipped** (`test_markers.py` adds 8), AUD
 **134 ok**, cursor-link selftest **7 ok**, every touched JS parses.
 
 Next: **P1-4, strips — keyboard stepping and click-to-locate completion** (brief C).
+
+
+---
+
+## §36 — P1-4: the reader's hands on a strip (2026-09-16)
+
+**What this closes.** `strips.js` could hold a reader's place but not move it, and a print could not
+be acted on. Now the strips have keys and a locate.
+
+**Keys.** ArrowUp/ArrowDown step one row (measured 24 px on the tape), PageUp/PageDown a screenful,
+Home/End jump to the newest/oldest end. The handler is a document-level capture listener guarded like
+the shell's own hotkeys (never while a field has focus; only when a strip is hovered or the event came
+from inside one), and it `preventDefault`s what it uses. **No Escape binding on purpose**: `shell.js`
+owns that key (menus, restoring from maximise), and a strip stealing it would close the wrong thing —
+the release paths are the chip's own click and Home. Stepping engages the hold deliberately, so the
+chip now shows even with nothing new to count ("↑ prints held · jump to newest"): a keystroke that
+looked like it did nothing was worse.
+
+**Pause on hover.** The gate's phrase, and it did not exist: a fast tape kept pulling rows out from
+under a pointer parked on them — the same jump the module exists to prevent, one gesture earlier. While
+the pointer is on a strip the follow branch counts arrivals and leaves the rows alone; when the pointer
+leaves, a reader who never scrolled resumes following (their hover was transient) and a reader who had
+scrolled keeps their place and their chip.
+
+**Click-to-locate.** A click on any row carrying `data-time`/`data-price` publishes that print to the
+shared cursor (source `locate`) and calls `OFX.seekToTime()` — the engine's new viewport seek, which
+centres the bar containing that moment, clamps a live print to the newest drawn bar, and returns null
+for a moment older than the session rather than inventing a place. The click also releases the hold:
+the reader has picked the line they were reading.
+
+**Three defects found live, and this is the interesting part of the phase.**
+
+1. **"On the newest line" was measured in pixels, not rows.** `NEAR_BOTTOM_PX = 28` against a 24 px
+   row meant a single ArrowDown step still read as "at the end": `step()` released the hold it had just
+   engaged and the next arriving print followed, snapping the reader back by the very keystroke they
+   used to escape. Measured: three steps landed at 48 px instead of 72. The epsilon is now at most half
+   a row (`nearEnd()`), in both the scroll handler and the step.
+2. **A scroll event decided against a re-resolved anchor, not its own scroller.** The tape's tbody is
+   emptied for a frame while its rows rebuild; `scrollerOf()` then walked up to the PARENT and the
+   parent's offset (0) read as "the reader is on the newest line", silently releasing the hold. The
+   anchor is now sticky (`keepScroller()`: keep it while it is still the strip's own node).
+   Both were found with a property trap on the strip's state that recorded a stack on every `held`
+   transition — the stack pointed at the exact line, twice, after guessing had failed.
+3. **The tape had its own auto-scroll and it fought the strip.** `tape.js` pins `scrollTop = 0` on
+   every render and every batch ("pinned to the newest print"), which released every hold the strip
+   engaged. Two owners of one offset. The tape now asks `OFAPSTRIPS.holds(el)` first and leaves the
+   offset alone while a reader is parked; the strip's chip is the way back. (Same family as the
+   scroll-anchoring fight recorded in the skill — the offset belongs to whoever the reader is
+   interacting with.)
+
+**The gate, measured live.** Hover the tape (spin paused, rows steady while prints arrive), two to
+three ArrowDown steps → `top` 72 px, `held: true`, `pending: 1` after five seconds of live arrivals,
+chip shown ("↑ 1 print · jump to newest"), `OFAPSTRIPS.holding()` 1, and the status chip reads
+`✋ held — feed live · 1 tick/s · 1 strip holding your place`. A real click on a print row →
+`locate: {price: 76223.9, time: 1789492506772, bar: 9, reached: 2}`, the cursor took that price and
+time (`source: 'locate'`), the engine's viewport moved to bar 9, and the strip cleared: chip hidden,
+`holding()` 0, offset back to 0. Screenshot: `docs/screenshots/p14-strip-held.png` (the held tape with
+the located print marked and the status chip naming the hold).
+
+**Files.** `strips.js` (keys, hover-pause, locate, the held chip, `holds()`, `math.stepTarget`),
+`strips.selftest.js` (new: 9 checks on the step arithmetic and the ends), `test_strips.py` (new gate:
+selftest green, registered with the audit, renderer-agnostic, no Escape binding, typing guard present),
+`ofx.js` (`seekToTime`), `tape.js` (the ownership guard), `atlas.css` (the held chip).
+
+**Not covered, plainly.** The locate path seeks the engine when its module is loaded, whatever view is
+on screen; a strip whose rows carry no `data-time` (alerts, the log) has nothing to locate and says
+nothing — the wiring for those is theirs to add. Stepping has been exercised on the tape only, and the
+"one row" step assumes rows of a uniform height (a wrapped row steps by the first row's height).
+
+Gates after the pass: **508 passed / 2 skipped** (`test_strips.py` adds 7), AUDIT CLEAN (now auditing
+`strips.js`), strips selftest **9 ok**, ofx **134 ok**, cursor-link **7 ok**, all twelve others
+unchanged, every touched JS parses.
+
+Next: **P1-5, spec-alignment cosmetics redesigned as token-driven feedback** (ghost brightness by size,
+imbalance-cell glow, and the rest of report1's minor list, each re-argued rather than copied).
