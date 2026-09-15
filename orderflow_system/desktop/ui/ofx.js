@@ -957,6 +957,7 @@
             { keys: '● live (chip)', action: 'snap to the newest bar and follow' },
             { keys: 'P', action: 'hold updates while you work (feed keeps ingesting)' },
             { keys: 'hover', action: 'cursor tag on the canvas + full metric panel beside the stage' },
+            { keys: 'click a print (tape)', action: 'locate it — the cursor takes that price and time, the viewport seeks to its bar' },
         ];
         const layout = [
             'depth heat — behind the matrix, one column per bar',
@@ -1701,6 +1702,32 @@
         return st;
     }
 
+
+    /* P1-4: put the viewport on the bar that contains a moment (a print the reader clicked). A moment
+       newer than the newest drawn bar - a live print, and the footprint payload publishes closed bars
+       only - seeks to that newest bar, which is the closest real position there is. A moment older
+       than the session returns null rather than inventing a place for it. */
+    function seekToTime(time) {
+        const bars = state.data.bars;
+        const raw = Number(time) || 0;
+        const ts = raw > 1e11 ? raw / 1000 : raw;
+        if (!bars.length || ts <= 0) return null;
+        const sec = (typeof barSeconds === 'function' && barSeconds()) || 60;
+        let idx = -1;
+        for (let i = bars.length - 1; i >= 0; i -= 1) {
+            if (bars[i].time <= ts) { idx = i; break; }
+        }
+        if (idx < 0) return null;
+        if (ts >= bars[bars.length - 1].time + sec) idx = bars.length - 1;
+        const perScreen = Math.max(1, state.view.width / state.view.scaleX);
+        state.view.offX = idx - perScreen / 2;
+        state.autoFit = false;
+        clampView();
+        state.dirty.base = state.dirty.live = state.dirty.heat = state.dirty.ribbon = true;
+        applyMode();
+        return idx;
+    }
+
     function clearSelection() {
         selection = null;
         selDrag = null;
@@ -2050,6 +2077,7 @@
         selection: () => (selection ? Object.assign({}, selection) : null),
         selectionStats: selectionStats,
         clearSelection: clearSelection,
+        seekToTime: seekToTime,
     };
 
     if (typeof module !== 'undefined' && module.exports) module.exports = ofx;

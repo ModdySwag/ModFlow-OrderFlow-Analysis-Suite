@@ -273,7 +273,11 @@ class TimeAndSales {
     _afterAppend(added) {
         this._updateStats();
         if (!this.bodyEl) return;
-        if (this.options.autoScroll) {
+        if (window.OFAPSTRIPS && OFAPSTRIPS.holds && OFAPSTRIPS.holds(this.bodyEl)) {
+            /* A reader parked here (a keystroke, a scroll, a paused hover): the strip owns the offset
+               until they return, and its chip is the way back. Pinning to 0 would yank the row they
+               are reading out from under them - the exact jump this widget already learned to avoid. */
+        } else if (this.options.autoScroll) {
             this.bodyEl.scrollTop = 0;                       // pinned to the newest print
         } else {
             this.bodyEl.scrollTop += added || 0;             // hold the reader's lines where they are
@@ -366,7 +370,8 @@ class TimeAndSales {
         }
         this.tbody.innerHTML = html;
         this._updateStats();
-        if (this.options.autoScroll && this.bodyEl) this.bodyEl.scrollTop = 0;
+        const parked = window.OFAPSTRIPS && OFAPSTRIPS.holds && OFAPSTRIPS.holds(this.bodyEl);
+        if (this.options.autoScroll && this.bodyEl && !parked) this.bodyEl.scrollTop = 0;
     }
 
     _updateStats() {

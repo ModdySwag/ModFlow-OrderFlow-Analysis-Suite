@@ -341,6 +341,7 @@ tr.ofx-traced, .ofx-traced { outline: 1px solid rgba(var(--of-trace-rgb),.8); ou
     background: rgba(var(--of-gold-2-rgb),.12); border: 1px solid rgba(var(--of-gold-2-rgb),.35); white-space: nowrap; }
 /* one status cluster: the pause chip and the hold chip read as a single unit, top right */
 .ofap-pause, .ofap-hold { flex: 0 0 auto; }
+.ofap-strip-chip.held { border-color: rgba(var(--of-steel-hi-rgb),.55); color: var(--of-ink-2); }
 .ofap-strip-chip { position: absolute; right: 8px; bottom: 8px; z-index: 6; cursor: pointer;
     font: 600 10.5px ui-monospace, monospace; color: var(--of-canvas); background: rgb(var(--of-gold-2-rgb));
     border: 0; border-radius: 2px; padding: 3px 8px; }
