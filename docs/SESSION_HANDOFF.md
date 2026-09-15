@@ -1125,3 +1125,90 @@ fundamentals 18 · market-pressure 12 · intent 7 · study-api 45.
 
 Next: **P1-3, selection is measurement everywhere** — a drag over bars, a level, a time range or
 markers yields the statistics strip, with the `selection` slot that P1-2 put in the store.
+
+
+---
+
+## §35 — P1-3: a selection on the engine is a measurement (2026-09-16)
+
+**What this closes.** P1-3 asked for a drag over bars, a level, a time range or markers to yield the
+statistics strip and an export, with markers remembered per symbol. The heatmap already had the
+mechanism; the engine had none, and markers were session-only.
+
+**The gesture.** Shift+drag on the engine stage boxes a time × price region. A plain drag still pans,
+so nothing existing changed; the box is drawn on the live layer (`drawSelection`, above the crosshair
+HUD), so it survives every repaint and camera move, and the outside dims rather than hides.
+
+**The arithmetic is pure and pinned.** `math.selectionStats({bars, levels, prints, i0, i1, p0, p1})`
+does the sums — volume, delta, buy/sell, prints (count + size), VWAP by size, largest trade with its
+price, and the resting-depth change (last bar minus first bar, in the band). `math.selectionRange`
+clips *and* orders the two cursor positions. Both are selftested in Node: the ofx selftest went
+**119 → 134** checks. `OFX.selection()`, `OFX.selectionStats()` and `OFX.clearSelection()` are the
+module's own surface; `legend()` does not carry them (the first attempt anchored on the wrong
+`return { symbol: state.symbol,` and the methods landed on the legend object — caught by probing the
+page, not by reading the diff).
+
+**The strip and the file.** `ofx-view.js` paints `#ofxSelFloat` — its own line beside the stage, so a
+hover repaint cannot wipe it — with volume, delta, buy/sell, prints, VWAP, largest and the resting
+change, plus `Export CSV` and `Clear`. The export POSTs `/api/control/export/save` and the path the
+server returns is printed on the strip's own note line. The strip is `pointer-events: none` with
+`pointer-events: auto` on its two buttons: a measurement readout must not eat the gesture that makes
+the next one (found live — the strip, sitting over the stage's bottom-left, blocked re-selection
+through it).
+
+**The gate, measured.** Shift+drag over the traded band on live Bybit data: a 4-bar selection at
+76346.11–76461.95 read **volume 86.39, delta +14.58, buy/sell 50.48/35.91, resting +4.83**, and the
+file landed on disk under the sandbox's exports folder —
+`ofx-selection-BTCUSDT-20260915T165000.csv`, 22 lines: a header block (symbol, window, price band,
+each figure, exported stamp) then one row per bar (ts, iso, OHLC, volume, delta) and a prints section.
+A second export from the first pass (164900) is there too. Screenshot:
+`docs/screenshots/p13-engine-selection.png`.
+
+**The selection rides the shared cursor.** `OFAPCURSOR.select({t0, t1, p0, p1, bars})` — the slot P1-2
+put in the store — so any panel can answer the window without knowing the engine exists.
+`publish()` now distinguishes *not mentioned* from *explicit null*: `select()` carries no price, and
+the old comparison treated that absence as "cleared", which would have wiped the cursor every panel
+was reading. Pinned in `cursor-link.selftest.js` (now **7 ok**).
+
+**Two defects found live, both fixed in the pass.**
+
+1. **A one-sided index clamp.** Dragging from mid-stage to the right edge resolved to `i0 = 11,
+   i1 = 4` — the start index was clamped only at 0, the end index only at `bars.length - 1`. An
+   inverted range reads as "the strip measures nothing". `math.selectionRange` now clips both ends
+   and orders the pair; five selftest checks cover past-the-edge, reversed, negative and empty-data
+   drags.
+2. **The strip blocked its own gestures** (above).
+
+**A token read that should have been a triple.** `--of-trace`/`--of-trace-2` exist only as `-rgb`
+triples, so `color: var(--of-trace-2)` on the badge was invalid at computed-value time (it fell back
+to inherited ink) and the heatmap's canvas cursor line never left its hard-coded fallback. Both now
+build the colour from the triple.
+
+**Markers are remembered per symbol.** New store block `markers` (`{SYM: {markers: [{price, bucket,
+size, note}]}}`), sanitised in `config_store` (price finite and positive, bucket/size finite, note ≤
+120 chars, 500 per symbol, an empty list leaves no slot, the key upper-cased and clamped) behind
+`GET/POST /api/control/markers`; the route answers with the block the store *accepted*. The panel
+loads them once per symbol on its own poll and saves on mark/clear, and a stored row (data space,
+never pixels) is placed back on the map by a **bounded** nearest — a marker whose price is outside the
+drawn rows is not pinned to the edge row pretending to be there.
+
+**`window.prompt` is gone from the mark action.** The packaged WebView is not guaranteed to render
+one, and a Mark button that silently does nothing is worse than no button; the note is now a field in
+the pro toolbar (cleared after each mark), with a `clear markers` button beside it.
+
+Measured live: `POST /api/control/markers` stored the valid row and dropped a junk price; the panel
+restored **2** rows after a reload — the one inside the drawn range placed at y=121, the one 67 points
+outside it left unplaced and honest.
+
+**Not covered, plainly.** The plan's "extend it to walls" half is not done: the heatmap's region
+stats and CSV still carry cells and markers, not the fresh-walls table (**open**). The tape buffer
+holds only the last few seconds while the footprint payload publishes closed bars, so a selection over
+closed bars legitimately holds no prints — the strip now names that on its own line ("tape buffer
+02:24:54–02:24:55 is outside the selected window (closed bars only)") instead of leaving a dash
+that reads as a bug. The CVD canvas and the imbalance strip still carry the badge without a drawn
+cursor line, and the symbol-switch half of P1-2's gate remains unproven (one symbol in the sandbox).
+
+Gates after the pass: **504 passed / 2 skipped** (`test_markers.py` adds 8), AUDIT CLEAN, ofx selftest
+**134 ok**, cursor-link selftest **7 ok**, every touched JS parses.
+
+Next: **P1-4, strips — keyboard stepping and click-to-locate completion** (brief C).

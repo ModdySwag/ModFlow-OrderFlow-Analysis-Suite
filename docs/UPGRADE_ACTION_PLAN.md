@@ -141,12 +141,13 @@ next gate run: `dist/` matches are only CPython's own `unicodedata.pyd`, not our
 
 ### P1 — the interaction canon and spec alignment
 
-**Status 2026-09-16: P1-1 and P1-2 are done** (handoff §33, §34) — the token block, `themes/`,
-`theme.js`, the Appearance card and the brief's grep gate at **0** (P1-1); and the cursor spine adopted
-by six panels, measured live with a real pointer (P1-2): one heatmap hover at 76332.12 lit the engine's
-readout, the ladder rung and 10 tape rows with four badges on one text, a hover at 76398.84 marked 9
-profile rows with 8/8 badges agreeing, and both survived a 1366×900 resize and a forced rebuild.
-**Next: P1-3, selection as measurement.**
+**Status 2026-09-16: P1-1, P1-2 and P1-3 are done** (handoff §33, §34, §35) — the token block,
+`themes/`, `theme.js`, the Appearance card and the brief's grep gate at **0** (P1-1); the cursor spine
+adopted by six panels, measured live, one heatmap hover lighting the engine, the ladder, the tape and
+the profile with eight badges on one text (P1-2); and a shift+drag on the engine producing the
+statistics strip and a real CSV on disk (volume 86.39, delta +14.58, resting +4.83 over 4 bars),
+plus markers remembered per symbol (P1-3). **Next: P1-4, strips — keyboard stepping and
+click-to-locate.**
 
 **P1-1 · Theme and token layer first (brief A). — do this before any visual polish below.** L
 Unstarted: `atlas.css` contains **zero** `--of-` tokens (`grep -c -- '--of-'` → 0) and there is no
@@ -181,6 +182,20 @@ depth change, VWAP, count, largest trade) + export — the mechanism exists in `
 (select → isolate → stats → CSV); extend it to walls and markers, and persist markers per symbol (they are
 session-only today, brief §6). Gate: live selection on the engine view producing the strip and a file on
 disk under `%APPDATA%\OrderFlowAnalysisPro\exports\`.
+
+**Done 2026-09-16 (§35).** Shift+drag on the engine stage boxes a time × price region; the box is drawn
+on the live layer and survives repaint and camera moves, the outside dims rather than hides.
+`math.selectionStats` (pure, selftested — ofx selftest 119 → 134) computes volume, delta, buy/sell,
+prints (count + size), VWAP by size, the largest trade with its price and the resting-depth change;
+`math.selectionRange` clips AND orders the two positions (a one-sided clamp produced `i0 = 11,
+i1 = 4` live). `#ofxSelFloat` prints them beside the stage with `Export CSV` and `Clear`, and the file
+lands in the exports folder (`ofx-selection-<SYM>-<stamp>.csv`, header + one row per bar + a prints
+section). The selection rides `OFAPCURSOR.select()`, so any panel can answer it. **Markers are
+remembered per symbol** (store block `markers`, sanitised, `GET/POST /api/control/markers`, the route
+answering with what the store accepted, placed back on the map by a bounded nearest; measured: 2 rows
+restored after a reload). The mark action no longer uses `window.prompt` (the frozen WebView is not
+guaranteed to render one) — the note is a toolbar field. Open from this line: the region stats/CSV do
+not yet include the fresh-walls table.
 
 **P1-4 · Strips: keyboard stepping and click-to-locate completion (brief C).** M
 `strips.js` already holds the reader's place and counts arrivals; add keyboard stepping through a strip and
