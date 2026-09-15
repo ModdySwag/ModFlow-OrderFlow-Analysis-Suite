@@ -1,0 +1,18 @@
+{
+ "status": 400,
+ "body": {
+  "jsonrpc": "2.0",
+  "error": {
+   "code": -32602,
+   "data": {
+    "reason": "instrument not found",
+    "param": "instrument_name"
+   },
+   "message": "Invalid params"
+  },
+  "testnet": false,
+  "usIn": 1789478543932788,
+  "usOut": 1789478543932869,
+  "usDiff": 81
+ }
+}

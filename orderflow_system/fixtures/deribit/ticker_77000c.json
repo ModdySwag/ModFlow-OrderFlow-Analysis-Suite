@@ -1,0 +1,44 @@
+{
+ "jsonrpc": "2.0",
+ "result": {
+  "timestamp": 1789478537607,
+  "state": "open",
+  "stats": {
+   "high": 0.024,
+   "low": 0.006,
+   "price_change": -56.25,
+   "volume": 293.1,
+   "volume_usd": 207057.22
+  },
+  "greeks": {
+   "delta": 0.48952,
+   "gamma": 0.00021,
+   "vega": 14.14906,
+   "theta": -380.4349,
+   "rho": 0.78558
+  },
+  "index_price": 76912.46,
+  "instrument_name": "BTC-16SEP26-77000-C",
+  "last_price": 0.0105,
+  "settlement_price": 0.00734688,
+  "min_price": 0.0001,
+  "max_price": 0.0415,
+  "open_interest": 287.8,
+  "mark_price": 0.0094,
+  "interest_rate": 0.0,
+  "estimated_delivery_price": 76912.46,
+  "best_ask_price": 0.01,
+  "best_bid_price": 0.009,
+  "mark_iv": 53.78,
+  "bid_iv": 51.46,
+  "ask_iv": 56.89,
+  "underlying_price": 76926.19,
+  "underlying_index": "BTC-16SEP26",
+  "best_ask_amount": 51.3,
+  "best_bid_amount": 32.8
+ },
+ "usIn": 1789478537672138,
+ "usOut": 1789478537672392,
+ "usDiff": 254,
+ "testnet": false
+}

@@ -1,0 +1,33 @@
+{
+ "source": "deribit",
+ "instrument": "BTC-16SEP26-77000-C",
+ "at": 1789478921922,
+ "ok": true,
+ "cached": false,
+ "requests": {
+  "ok": 1,
+  "failed": 0,
+  "recent_errors": []
+ },
+ "expiry_instrument": "BTC-16SEP26",
+ "ts": 1789478912113,
+ "state": "open",
+ "bid": 0.009,
+ "ask": 0.01,
+ "mid": 0.0095,
+ "mark": 0.0095,
+ "last": 0.0105,
+ "iv": 53.74,
+ "bid_iv": 50.98,
+ "ask_iv": 56.44,
+ "oi": 287.8,
+ "volume": 293.1,
+ "volume_usd": 207057.22,
+ "underlying": 76944.8,
+ "index": 76932.62,
+ "delta": 0.49335,
+ "gamma": 0.00021,
+ "theta": -379.17289,
+ "vega": 14.11102,
+ "rho": 0.78694
+}

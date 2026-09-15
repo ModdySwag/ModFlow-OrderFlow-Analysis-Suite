@@ -1,0 +1,2605 @@
+{
+  "all_configs": [
+    {
+      "session": "ny_cash",
+      "symbol": "NAS100USDT",
+      "tick_size": 0.1,
+      "vp_tick": 1.0
+    },
+    {
+      "session": "ny_cash",
+      "symbol": "SP500",
+      "tick_size": 0.1,
+      "vp_tick": 1.0
+    },
+    {
+      "session": "ny_cash",
+      "symbol": "DJ30",
+      "tick_size": 1.0,
+      "vp_tick": 5.0
+    },
+    {
+      "session": "london",
+      "symbol": "UK100",
+      "tick_size": 0.1,
+      "vp_tick": 1.0
+    },
+    {
+      "session": "london",
+      "symbol": "DAX40",
+      "tick_size": 0.1,
+      "vp_tick": 2.0
+    },
+    {
+      "session": "asian",
+      "symbol": "NIKKEI225",
+      "tick_size": 1.0,
+      "vp_tick": 50.0
+    },
+    {
+      "session": "london",
+      "symbol": "CAC40",
+      "tick_size": 0.1,
+      "vp_tick": 1.0
+    },
+    {
+      "session": "asian",
+      "symbol": "ASX200",
+      "tick_size": 0.1,
+      "vp_tick": 1.0
+    },
+    {
+      "session": "asian",
+      "symbol": "HK50",
+      "tick_size": 1.0,
+      "vp_tick": 5.0
+    },
+    {
+      "session": "ny_cash",
+      "symbol": "XAUUSDT",
+      "tick_size": 0.01,
+      "vp_tick": 0.5
+    },
+    {
+      "session": "full_day",
+      "symbol": "XAGUSD",
+      "tick_size": 0.001,
+      "vp_tick": 0.05
+    },
+    {
+      "session": "ny_cash",
+      "symbol": "USOIL",
+      "tick_size": 0.01,
+      "vp_tick": 0.1
+    },
+    {
+      "session": "london",
+      "symbol": "UKOIL",
+      "tick_size": 0.01,
+      "vp_tick": 0.1
+    },
+    {
+      "session": "full_day",
+      "symbol": "EURUSD",
+      "tick_size": 1e-05,
+      "vp_tick": 0.0005
+    },
+    {
+      "session": "full_day",
+      "symbol": "GBPUSD",
+      "tick_size": 1e-05,
+      "vp_tick": 0.0005
+    },
+    {
+      "session": "full_day",
+      "symbol": "USDJPY",
+      "tick_size": 0.001,
+      "vp_tick": 0.05
+    },
+    {
+      "session": "full_day",
+      "symbol": "AUDUSD",
+      "tick_size": 1e-05,
+      "vp_tick": 0.0005
+    },
+    {
+      "session": "full_day",
+      "symbol": "USDCAD",
+      "tick_size": 1e-05,
+      "vp_tick": 0.0005
+    },
+    {
+      "session": "full_day",
+      "symbol": "USDCHF",
+      "tick_size": 1e-05,
+      "vp_tick": 0.0005
+    },
+    {
+      "session": "full_day",
+      "symbol": "NZDUSD",
+      "tick_size": 1e-05,
+      "vp_tick": 0.0005
+    },
+    {
+      "session": "full_day",
+      "symbol": "EURGBP",
+      "tick_size": 1e-05,
+      "vp_tick": 0.0005
+    },
+    {
+      "session": "full_day",
+      "symbol": "EURJPY",
+      "tick_size": 0.001,
+      "vp_tick": 0.05
+    },
+    {
+      "session": "full_day",
+      "symbol": "GBPJPY",
+      "tick_size": 0.001,
+      "vp_tick": 0.05
+    },
+    {
+      "session": "ny_cash",
+      "symbol": "AAPL",
+      "tick_size": 0.01,
+      "vp_tick": 0.5
+    },
+    {
+      "session": "ny_cash",
+      "symbol": "TSLA",
+      "tick_size": 0.01,
+      "vp_tick": 0.5
+    },
+    {
+      "session": "ny_cash",
+      "symbol": "AMZN",
+      "tick_size": 0.01,
+      "vp_tick": 0.5
+    },
+    {
+      "session": "ny_cash",
+      "symbol": "MSFT",
+      "tick_size": 0.01,
+      "vp_tick": 0.5
+    },
+    {
+      "session": "ny_cash",
+      "symbol": "NVDA",
+      "tick_size": 0.01,
+      "vp_tick": 0.5
+    },
+    {
+      "session": "ny_cash",
+      "symbol": "META",
+      "tick_size": 0.01,
+      "vp_tick": 0.5
+    },
+    {
+      "session": "ny_cash",
+      "symbol": "GOOGL",
+      "tick_size": 0.01,
+      "vp_tick": 0.5
+    },
+    {
+      "session": "full_day",
+      "symbol": "BTCUSDT",
+      "tick_size": 0.01,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "ETHUSDT",
+      "tick_size": 0.01,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "SOLUSDT",
+      "tick_size": 0.01,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "XRPUSDT",
+      "tick_size": 0.0001,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "BNBUSDT",
+      "tick_size": 0.1,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "DOGEUSDT",
+      "tick_size": 1e-05,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "ADAUSDT",
+      "tick_size": 0.0001,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "AVAXUSDT",
+      "tick_size": 0.001,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "LINKUSDT",
+      "tick_size": 0.001,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "LTCUSDT",
+      "tick_size": 0.01,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "DOTUSDT",
+      "tick_size": 0.001,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "TRXUSDT",
+      "tick_size": 1e-05,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "SUIUSDT",
+      "tick_size": 0.0001,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "APTUSDT",
+      "tick_size": 0.001,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "NEARUSDT",
+      "tick_size": 0.001,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "ARBUSDT",
+      "tick_size": 0.0001,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "OPUSDT",
+      "tick_size": 0.0001,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "POLUSDT",
+      "tick_size": 0.0001,
+      "vp_tick": 10.0
+    },
+    {
+      "session": "full_day",
+      "symbol": "TONUSDT",
+      "tick_size": 0.001,
+      "vp_tick": 10.0
+    }
+  ],
+  "crypto_majors": {
+    "ADAUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "ADAUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.0001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "APTUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "APTUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "ARBUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "ARBUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.0001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "AVAXUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "AVAXUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "BNBUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "BNBUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.1,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "DOGEUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "DOGEUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 1e-05,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "DOTUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "DOTUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "ETHUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "ETHUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "LINKUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "LINKUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "LTCUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "LTCUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "NEARUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "NEARUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "OPUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "OPUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.0001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "POLUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "POLUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.0001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "SOLUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "SOLUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "SUIUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "SUIUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.0001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "TONUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "TONUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "TRXUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "TRXUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 1e-05,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "XRPUSDT": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "XRPUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.0001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    }
+  },
+  "factories": {
+    "get_aapl_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "AAPL",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "ny_cash",
+        "tick_size": 0.5,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_amzn_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "AMZN",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "ny_cash",
+        "tick_size": 0.5,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_asx200_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 25,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 18,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "ASX200",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 10,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.1,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "asian",
+        "tick_size": 1.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_audusd_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.4
+      },
+      "instrument": "AUDUSD",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 1e-05,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 0.0005,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_btcusd_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "BTCUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 10.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_cac40_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 25,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 18,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "CAC40",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 10,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.1,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "london",
+        "tick_size": 1.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_dax40_config": {
+      "absorption": {
+        "big_trade_filter": 4,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 30,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 20,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "DAX40",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 12,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 6
+      },
+      "tick_size": 0.1,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "london",
+        "tick_size": 2.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_dj30_config": {
+      "absorption": {
+        "big_trade_filter": 5,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 40,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 25,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "DJ30",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 15,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 8
+      },
+      "tick_size": 1.0,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "ny_cash",
+        "tick_size": 5.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_eurgbp_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.4
+      },
+      "instrument": "EURGBP",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 1e-05,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 0.0005,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_eurjpy_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.4
+      },
+      "instrument": "EURJPY",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 0.05,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_eurusd_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.4
+      },
+      "instrument": "EURUSD",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 1e-05,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 0.0005,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_gbpjpy_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.4
+      },
+      "instrument": "GBPJPY",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 0.05,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_gbpusd_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.4
+      },
+      "instrument": "GBPUSD",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 1e-05,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 0.0005,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_gold_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 30,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 20,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "XAUUSDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 3000,
+        "max_volume_per_level": 10,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "ny_cash",
+        "tick_size": 0.5,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_googl_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "GOOGL",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "ny_cash",
+        "tick_size": 0.5,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_hk50_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 25,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 18,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "HK50",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 10,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 1.0,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "asian",
+        "tick_size": 5.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_meta_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "META",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "ny_cash",
+        "tick_size": 0.5,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_msft_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "MSFT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "ny_cash",
+        "tick_size": 0.5,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_nas100_config": {
+      "absorption": {
+        "big_trade_filter": 5,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 50,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 30,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "NAS100USDT",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 15,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 8
+      },
+      "tick_size": 0.1,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "ny_cash",
+        "tick_size": 1.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_nikkei225_config": {
+      "absorption": {
+        "big_trade_filter": 4,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 30,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 20,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "NIKKEI225",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 12,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 6
+      },
+      "tick_size": 1.0,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "asian",
+        "tick_size": 50.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_nvda_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "NVDA",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "ny_cash",
+        "tick_size": 0.5,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_nzdusd_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.4
+      },
+      "instrument": "NZDUSD",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 1e-05,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 0.0005,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_silver_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 25,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "XAGUSD",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 3000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 0.05,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_sp500_config": {
+      "absorption": {
+        "big_trade_filter": 5,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 40,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 25,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "SP500",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 15,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 8
+      },
+      "tick_size": 0.1,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "ny_cash",
+        "tick_size": 1.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_tsla_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "TSLA",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "ny_cash",
+        "tick_size": 0.5,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_uk100_config": {
+      "absorption": {
+        "big_trade_filter": 4,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 30,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.3
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 20,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "UK100",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 12,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 6
+      },
+      "tick_size": 0.1,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "london",
+        "tick_size": 1.0,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_ukoil_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 30,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 20,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "UKOIL",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 10,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "london",
+        "tick_size": 0.1,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_usdcad_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.4
+      },
+      "instrument": "USDCAD",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 1e-05,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 0.0005,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_usdchf_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.4
+      },
+      "instrument": "USDCHF",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 1e-05,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 0.0005,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_usdjpy_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 2,
+        "min_aggressive_volume": 20,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 15,
+        "min_price_displacement_ticks": 3,
+        "volume_acceleration_min": 1.4
+      },
+      "instrument": "USDJPY",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 8,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.001,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "full_day",
+        "tick_size": 0.05,
+        "value_area_pct": 0.68
+      }
+    },
+    "get_usoil_config": {
+      "absorption": {
+        "big_trade_filter": 3,
+        "max_price_displacement_ticks": 3,
+        "min_aggressive_volume": 30,
+        "min_attempts": 2,
+        "rolling_window_seconds": 30
+      },
+      "divergence": {
+        "delta_failure_pct": 0.8,
+        "lookback_bars": 10,
+        "min_price_new_extreme_ticks": 2.0
+      },
+      "exhaustion": {
+        "min_bars_declining": 3,
+        "requires_contrarian_imbalance": true,
+        "volume_decline_pct": 0.25
+      },
+      "initiative": {
+        "delta_price_alignment": true,
+        "min_delta_threshold": 20,
+        "min_price_displacement_ticks": 4,
+        "volume_acceleration_min": 1.5
+      },
+      "instrument": "USOIL",
+      "risk": {
+        "break_even_after_initiative": true,
+        "max_rr_ratio": 5.0,
+        "min_rr_ratio": 2.0,
+        "signal_cooldown_seconds": 60.0,
+        "trail_on_initiative_prints": true
+      },
+      "sweep": {
+        "max_time_ms": 2000,
+        "max_volume_per_level": 10,
+        "min_levels_swept": 3,
+        "thin_book_threshold": 5
+      },
+      "tick_size": 0.01,
+      "volume_profile": {
+        "lvn_stddev_factor": 1.5,
+        "merge_max_days": 3,
+        "session": "ny_cash",
+        "tick_size": 0.1,
+        "value_area_pct": 0.68
+      }
+    }
+  }
+}

@@ -1,0 +1,47 @@
+[
+ {
+  "id": "bitcoin",
+  "symbol": "btc",
+  "name": "Bitcoin",
+  "market_cap_rank": 1,
+  "current_price": 76915,
+  "market_cap": 1544774036544,
+  "total_volume": 31748243164,
+  "circulating_supply": 20084731.0,
+  "total_supply": 20084731.0,
+  "max_supply": 21000000.0,
+  "price_change_percentage_24h": -1.08356,
+  "last_updated": "2026-09-15T13:22:20.000Z",
+  "ath_date": "2025-10-06T10:57:42.000Z"
+ },
+ {
+  "id": "ethereum",
+  "symbol": "eth",
+  "name": "Ethereum",
+  "market_cap_rank": 2,
+  "current_price": 2478.14,
+  "market_cap": 302452014732,
+  "total_volume": 15999922704,
+  "circulating_supply": 122050160.83564284,
+  "total_supply": 122050160.8356428,
+  "max_supply": null,
+  "price_change_percentage_24h": -0.84986,
+  "last_updated": "2026-09-15T13:22:20.000Z",
+  "ath_date": "2025-08-24T11:21:03.000Z"
+ },
+ {
+  "id": "solana",
+  "symbol": "sol",
+  "name": "Solana",
+  "market_cap_rank": 7,
+  "current_price": 100.98,
+  "market_cap": 59270614491,
+  "total_volume": 3301794794,
+  "circulating_supply": 587028029.4368175,
+  "total_supply": 634111585.7612511,
+  "max_supply": null,
+  "price_change_percentage_24h": -0.15385,
+  "last_updated": "2026-09-15T13:22:20.000Z",
+  "ath_date": "2025-01-19T03:15:27.000Z"
+ }
+]

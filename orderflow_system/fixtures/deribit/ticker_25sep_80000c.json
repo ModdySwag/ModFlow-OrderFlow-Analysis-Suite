@@ -1,0 +1,44 @@
+{
+ "jsonrpc": "2.0",
+ "result": {
+  "timestamp": 1789478538172,
+  "state": "open",
+  "stats": {
+   "high": 0.0225,
+   "low": 0.0095,
+   "price_change": -21.0526,
+   "volume": 565.8,
+   "volume_usd": 643845.37
+  },
+  "greeks": {
+   "delta": 0.29176,
+   "gamma": 7e-05,
+   "vega": 43.26143,
+   "theta": -88.79414,
+   "rho": 5.77765
+  },
+  "index_price": 76906.4,
+  "instrument_name": "BTC-25SEP26-80000-C",
+  "last_price": 0.012,
+  "settlement_price": 0.01117697,
+  "min_price": 0.0001,
+  "max_price": 0.039,
+  "open_interest": 7121.0,
+  "mark_price": 0.0117,
+  "interest_rate": 0.0,
+  "estimated_delivery_price": 76906.4,
+  "best_ask_price": 0.012,
+  "best_bid_price": 0.011,
+  "mark_iv": 40.13,
+  "bid_iv": 38.99,
+  "ask_iv": 40.77,
+  "underlying_price": 77004.3,
+  "underlying_index": "BTC-25SEP26",
+  "best_ask_amount": 85.2,
+  "best_bid_amount": 195.1
+ },
+ "usIn": 1789478538322909,
+ "usOut": 1789478538323132,
+ "usDiff": 223,
+ "testnet": false
+}
