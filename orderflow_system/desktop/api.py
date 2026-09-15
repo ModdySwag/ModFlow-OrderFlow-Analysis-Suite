@@ -1522,7 +1522,7 @@ async def client_error(payload: dict = Body(default={})) -> dict[str, Any]:
 
     The UI has no console of its own on a frozen build, and the on-screen toast carries only the
     message — so a crash used to be unreadable after the fact. This puts the file:line and the
-    stack in the server log, where `hermes logs`-style tooling (and I) can read it.
+    stack in the server log, where log tooling (and I) can read it.
     """
     data = payload or {}
     message = str(data.get("message") or "")[:500]

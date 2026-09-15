@@ -106,6 +106,46 @@ function boot() {
         assert.strictEqual(w.__calls.length, afterStop, 'and nothing polls once everybody left');
     });
 
+    await check('the bus events carry the real counts, and they match telemetry at that instant', async () => {
+        const events = [];
+        if (typeof CustomEvent !== 'function') {
+            global.CustomEvent = function (type, init) { this.type = type; this.detail = init && init.detail; };
+        }
+        const doc = { dispatchEvent: (ev) => { events.push(ev); return true; } };
+        const win = { performance: { now: () => Date.now() } };
+        const calls = [];
+        const fakeFetch = (url) => {
+            calls.push(url);
+            const response = {
+                status: 200, statusText: 'OK', ok: true,
+                headers: { get: () => 'application/json' },
+                json: () => Promise.resolve({ ok: true }),
+                clone: () => response,
+            };
+            return Promise.resolve(response);
+        };
+        win.fetch = fakeFetch;
+        new Function('window', 'document', 'fetch', 'setInterval', 'clearInterval', 'Response', src)(
+            win, doc, fakeFetch, setInterval, clearInterval, function Response() {});
+        const bus = win.OFAPBUS;
+
+        const off1 = bus.subscribe({ url: '/api/events-a', intervalMs: 5000 }, () => {});
+        assert.strictEqual(events.length, 1, 'one open event for one new channel');
+        assert.strictEqual(events[0].detail.action, 'open');
+        assert.strictEqual(events[0].detail.channels, bus.telemetry().channels,
+            'the event and telemetry agree on channels');
+        assert.strictEqual(events[0].detail.subscribers, bus.telemetry().subscribers,
+            'and on subscribers, at the same instant');
+        assert.strictEqual(events[0].detail.subscribers, 1, 'the subscriber that caused the open is counted');
+        assert.strictEqual(typeof events[0].detail.subscribers, 'number', 'never undefined');
+        off1();
+        assert.strictEqual(events.length, 2, 'and one close event when the last one leaves');
+        assert.strictEqual(events[1].detail.action, 'close');
+        assert.strictEqual(events[1].detail.channels, 0);
+        assert.strictEqual(events[1].detail.subscribers, bus.telemetry().subscribers);
+        assert.strictEqual(bus.telemetry().channels, 0);
+    });
+
     await check('three symbols are three channels and three fetches per interval', async () => {
         const w = boot();
         const bus = w.OFAPBUS;

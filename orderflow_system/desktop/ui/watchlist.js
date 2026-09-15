@@ -127,7 +127,7 @@
        before, and a missing list must never turn into an error on screen — just no rows. */
     async function configuredSymbols() {
         try {
-            const data = await api(BOOTSTRAP_URL);
+            const data = await getJson(BOOTSTRAP_URL);
             const cfg = (data && (data.config || data)) || {};
             /* Measured: config.instruments is the instrument LIST itself (49 objects under numeric keys),
                not a settings block holding a `symbols` key — so read the list first and fall back to the
@@ -257,6 +257,7 @@
     const state = {
         instruments: null,      /* last /api/instruments payload, null until one arrives */
         placeholders: [],       /* configured symbols shown as — rows when the server is demoing */
+        engineState: null,      /* last engine state seen: the instrument list follows it */
         status: null,           /* last status payload */
         instrumentError: '',
         statusError: '',
@@ -285,7 +286,10 @@
     /* The user's configured instruments, as rows with no numbers, for the engine-stopped case: the board
        still answers "what am I watching" while the demo rows answer "what could the feed look like". */
     function placeholderRows() {
-        return (state.placeholders || []).map((item) => ({
+        /* The dedupe is applied here as well as when the list is read: the list and the placeholders
+           can land in either order, and a symbol must never be on the board twice. */
+        const have = new Set((state.instruments || []).map((i) => String((i && i.symbol) || '').toUpperCase()));
+        return (state.placeholders || []).filter((item) => !have.has(String(item.symbol || '').toUpperCase())).map((item) => ({
             symbol: item.symbol,
             active: false,
             title: item.symbol + ' — configured instrument, no feed while the engine is stopped',
@@ -383,10 +387,22 @@
         return state.instruments;
     }
 
+    /* The board follows the engine's state. The server answers its demo list while the engine is
+       stopped and the live set while it runs, so the instrument list is re-read on each transition;
+       the configured-instrument rows only exist in the stopped case and are re-derived when they can
+       have changed (a transition, or nothing derived yet) — never as a per-beat config read. */
+    async function afterStatus() {
+        const now = state.status ? String(state.status.state || '') : '';
+        const changed = !!(now && state.engineState && now !== state.engineState);
+        if (now) state.engineState = now;
+        if (changed) await loadInstruments();
+        if (changed || !state.placeholders.length) await refreshPlaceholders();
+        return render();
+    }
+
     async function refresh() {
         await Promise.all([loadInstruments(), loadStatus()]);
-        await refreshPlaceholders();
-        return render();
+        return afterStatus();
     }
 
     /* ── polling: the shared channel first, our own timer only when there is no bus ─────────────── */
@@ -395,16 +411,20 @@
         if (state.polling !== 'idle') return false;
         const bus = win().OFAPBUS;
         if (bus && typeof bus.subscribe === 'function') {
-            state.unsubscribe = bus.subscribe({ url: STATUS_URL, intervalMs: INTERVAL_MS }, onStatus);
+            state.unsubscribe = bus.subscribe({ url: STATUS_URL, intervalMs: INTERVAL_MS }, (payload) => {
+                const row = onStatus(payload);
+                void afterStatus();          /* the list and the configured rows follow the state */
+                return row;
+            });
             state.polling = 'bus';
             return true;
         }
         state.polling = 'timer';
-        void loadStatus();
+        void loadStatus().then(() => afterStatus());
         /* the 2 s beat reloads the engine status; the configured-instrument rows depend on it
            (they only exist while the engine is stopped), so they are refreshed on the same beat */
         state.timer = setInterval(() => {
-            void loadStatus().then(() => refreshPlaceholders()).then(() => render());
+            void loadStatus().then(() => afterStatus());
         }, INTERVAL_MS);
         return true;
     }
@@ -529,7 +549,7 @@
         orderSymbols, buildRow, buildRows, rowHtml,
         loadingHtml, emptyHtml, errorHtml, noteRow, bodyHtml, subText,
         render, rows: rowsNow, state: stateNow,
-        getJson, getStatus, onStatus, loadStatus, loadInstruments, refresh,
+        getJson, getStatus, onStatus, loadStatus, loadInstruments, refresh, afterStatus,
         startPoll, stopPoll, sync, activate, rowClick, bindControls, injectStyles,
         boot, watch,
     };

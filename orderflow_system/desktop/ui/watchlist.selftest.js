@@ -110,7 +110,8 @@ function makeWorld(spec) {
     };
     const world = {
         nodes, section, doc,
-        calls: [], requested: { instruments: 0, status: 0 },
+        calls: [], requested: { instruments: 0, status: 0, bootstrap: 0 },
+        bootstrap: spec.bootstrap || {},
         fails: {}, timers: [], cleared: [], observers: [],
         instruments: spec.instruments === undefined ? LIVE_LIST : spec.instruments,
         status: spec.status === undefined ? LIVE_STATUS : spec.status,
@@ -122,10 +123,13 @@ function makeWorld(spec) {
 
     const fakeFetch = (url) => {
         world.calls.push(url);
-        const which = String(url).indexOf('/api/instruments') === 0 ? 'instruments' : 'status';
-        world.requested[which] += 1;
+        const u = String(url);
+        const which = u.indexOf('/api/instruments') === 0 ? 'instruments'
+            : u.indexOf('/api/control/bootstrap') === 0 ? 'bootstrap' : 'status';
+        world.requested[which] = (world.requested[which] || 0) + 1;
         if (world.fails[which]) return Promise.reject(new Error(world.fails[which]));
-        const body = which === 'instruments' ? world.instruments : world.status;
+        const body = which === 'instruments' ? world.instruments
+            : which === 'bootstrap' ? (world.bootstrap || {}) : world.status;
         return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
     };
     const fakeSetInterval = (fn, ms) => {
@@ -167,7 +171,7 @@ function bare() {
         for (const name of ['esc', 'price', 'compact', 'signed', 'phase', 'orderSymbols', 'buildRow',
                             'buildRows', 'rowHtml', 'loadingHtml', 'emptyHtml', 'errorHtml', 'noteRow',
                             'bodyHtml', 'subText', 'render', 'rows', 'state', 'getJson', 'getStatus',
-                            'onStatus', 'loadStatus', 'loadInstruments', 'refresh', 'startPoll',
+                            'onStatus', 'loadStatus', 'loadInstruments', 'refresh', 'afterStatus', 'startPoll',
                             'stopPoll', 'sync', 'activate', 'rowClick', 'bindControls', 'injectStyles',
                             'boot', 'watch']) {
             assert.strictEqual(typeof api[name], 'function', name + ' must be a function');
@@ -408,6 +412,46 @@ function bare() {
             'nor does it dress a stopped engine as a live one');
         assert(html.indexOf('€') < 0 && html.indexOf('NaN') < 0 && html.indexOf('undefined') < 0,
             'no placeholder garbage on the board');
+    });
+
+    await check('a stopped engine shows the configured instruments beside the demo list', async () => {
+        const world = makeWorld({
+            instruments: DEMO_LIST, status: IDLE_STATUS,
+            bootstrap: { config: { instruments: [{ symbol: 'ZZZTEST' }, { symbol: 'EURUSD' }] } },
+        });
+        const panel = world.win.OFAPWATCHLIST;
+        assert(await until(() => panel.state().rows === 3), 'two demo rows plus the configured one');
+        const html = world.nodes.watchlistBody.innerHTML;
+        assert(html.indexOf('data-symbol="ZZZTEST"') >= 0, 'the configured instrument has a row: ' + html);
+        assert(html.indexOf('data-symbol="EURUSD"') >= 0, 'beside the demo rows');
+        assert(html.indexOf('>configured<') >= 0, 'and the row says where it came from');
+        assert((html.match(/data-symbol="EURUSD"/g) || []).length === 1,
+            'a demo row is not duplicated by a placeholder of the same symbol');
+        assert(world.nodes.watchlistSub.textContent.indexOf('configured instrument') >= 0,
+            'the sub line admits they have no feed: ' + world.nodes.watchlistSub.textContent);
+        assert(html.indexOf('NaN') < 0 && html.indexOf('undefined') < 0, 'and no number is invented');
+    });
+
+    await check('the beat catches the engine stopping: the list is re-read and the configured rows appear', async () => {
+        const world = makeWorld({
+            bus: true, instruments: LIVE_LIST, status: LIVE_STATUS,
+            bootstrap: { config: { instruments: [{ symbol: 'ZZZTEST' }, { symbol: 'BTCUSDT' }] } },
+        });
+        const panel = world.win.OFAPWATCHLIST;
+        assert(await until(() => panel.state().polling === 'bus' && world.requested.status >= 1));
+        await sleep(10);
+        assert(world.nodes.watchlistBody.innerHTML.indexOf('ZZZTEST') < 0,
+            'while the engine runs there are no configured placeholder rows');
+        const reads = world.requested.instruments;
+        world.status = IDLE_STATUS;              /* the engine stops */
+        world.instruments = DEMO_LIST;           /* and the server answers its demo list */
+        assert(await until(() => world.requested.status >= 2, 2600), 'a bus beat landed');
+        await sleep(30);
+        assert(world.requested.instruments > reads, 'the instrument list was re-read on the transition');
+        const html = world.nodes.watchlistBody.innerHTML;
+        assert(html.indexOf('data-symbol="ZZZTEST"') >= 0, 'the configured instrument now has a row: ' + html);
+        assert(html.indexOf('data-symbol="EURUSD"') >= 0, 'beside the demo list');
+        world.win.OFAPBUS.stopAll();
     });
 
     console.log('watchlist selftest: ' + ok + ' ok, ' + failed + ' failed');

@@ -132,13 +132,22 @@
     /* Channels open and close as views come and go, and the status bar's chip is painted by the shell —
        which only hears about shell events, so the chip used to lag a channel that a view switch started
        (measured: chip '3 sub · 2 ch' while telemetry said 1 channel / 1 subscriber). Announce the
-       transition where it happens; the document is optional (this module loads headless too). */
+       transition where it happens, with a count the observer can check: the event used to carry
+       `state.subscribers`, a field this module never maintained — so every event said `undefined`, and
+       the one number nobody could verify was the one that appeared to disagree with telemetry(). The
+       document is optional (this module loads headless too). */
+    function subscriberCount() {
+        let n = 0;
+        state.channels.forEach((channel) => { n += channel.refs; });
+        return n;
+    }
+
     function announce(action, key) {
         try {
             if (typeof document !== 'undefined' && document && document.dispatchEvent) {
                 document.dispatchEvent(new CustomEvent('ofap:bus', { detail: {
                     action: action, key: key || '', channels: state.channels.size,
-                    subscribers: state.subscribers, version: VERSION,
+                    subscribers: subscriberCount(), version: VERSION,
                 } }));
             }
         } catch (e) { /* a missing CustomEvent is not a data problem */ }
@@ -149,6 +158,7 @@
         if (!spec.url) throw new Error('OFAPBUS.subscribe needs a url');
         const key = channelKey(spec);
         let channel = state.channels.get(key);
+        let created = false;
         if (!channel) {
             const intervalMs = Math.max(100, Number(spec.intervalMs) || 2000);
             channel = {
@@ -159,12 +169,14 @@
                 inFlight: false, lastAt: 0, last: null, startedAt: now(), timer: null,
             };
             state.channels.set(key, channel);
-            announce('open', key);
+            created = true;
             state.counters.started += 1;
             if (spec.immediate !== false) tick(channel);
             channel.timer = setInterval(() => tick(channel), intervalMs);
         }
         channel.refs += 1;
+        /* announced after the join, so the event's counts are the post-join truth (and match telemetry) */
+        if (created) announce('open', key);
         if (typeof listener === 'function') {
             channel.listeners.push(listener);
             if (channel.last) {
@@ -301,7 +313,7 @@
             lastAt: channel.lastAt ? Math.round(channel.lastAt) : 0,
             lastOk: !!(channel.last && !(channel.last && channel.last.error)),
         }));
-        const subscribers = rows.reduce((n, row) => n + row.refs, 0);
+        const subscribers = subscriberCount();
         const fetched = state.counters.fetches;
         const wouldHaveBeen = fetched + state.counters.coalesced;
         return {
