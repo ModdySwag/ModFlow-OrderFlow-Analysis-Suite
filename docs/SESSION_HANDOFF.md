@@ -1420,3 +1420,83 @@ AUDIT CLEAN, `node --check` on every touched module.
 
 Next: **P1-7, alerts — manage, scope and read like sentences** (rule editor, every rule rendered with
 its scope in words, a "created from heatmap" filter, and a log that names symbol, level, size and why).
+
+
+## §39 — P1-7 recon: where the alerts stand, and what to build
+
+Scoped from the tree on 2026-09-16, read-only: no code changed for this entry. It exists so the next
+session starts from the measurements instead of re-deriving them.
+
+**What exists now.** The Alerts view is `index.html:522-542` (view `alerts`), rendered by `atlas.js`
+(~534-590) with `atlas-v2.js` doing the persisted-history card (`loadHistory`, ~170). Four routes, all
+real: `GET /api/atlas/alerts?limit&symbol` → `{alerts, stats}`; `POST /api/atlas/alerts/clear`;
+`GET /api/atlas/alert-rules` → `{rules}`; `POST /api/atlas/alert-rules` (upsert by `id`) and
+`DELETE /api/atlas/alert-rules/{id}` (`atlas/api.py:445-470`). The engine side is
+`atlas/alerts.py`: `AlertRule {id, name, kind, params, enabled, cooldown_s, channels, fired,
+last_fired_ms}` and `Alert {rule_id, name, kind, symbol, ts_ms, message, severity, data, channels}`,
+with `evaluate()` checking every enabled rule of that kind, the generic level scope at
+`alerts.py:179-182` (`at_price`/`at_tol`), per-rule cooldown, and `_message()` (line ~320) writing one
+English sentence per kind with `{symbol}: {rule.name}` as the fallback.
+
+**Kinds the engine emits** (from `_message()`'s branches plus the severity list): `big_trade`,
+`block_trade`, `sweep`, `stop_run`, `iceberg`, `speed_spike`, `cvd_divergence`, `heat_pull`,
+`heat_stack`, `vwap_cross`, `depth_execution`, `depth_refill`, `stacked_imbalance`, `intent_pressure`,
+`pulled_size`, `trapped_traders`, and `wall_age` (from the depth map — the kind the heatmap's level
+alerts create; it is not in the severity list, so it reads `info`).
+
+**Params the evaluator actually reads** (`evaluate()`, lines 277-316): `min_multiple`, `sides`;
+`min_size`; `min_levels`; `min_ticks`; `min_fills`; `min_zscore`; `kinds` (cvd); `min_strength`;
+`min_share`; `min_volume`; `min_pct`; `max_distance_ticks`; `min_beyond_ticks` — plus the generic
+`at_price` / `at_tol` scope and `min_age_s` where the emitting detector uses it.
+
+**Three defects in the alerts UI, measured:**
+1. `alClear` (`atlas.js:585`) writes the row `cleared locally` and never calls the server. The route
+   `POST /api/atlas/alerts/clear` exists and is wired to nothing. A button that says it cleared a log
+   it did not clear is worse than no button (canon: the UI may not claim what it did not do).
+2. `Params (JSON)` is an editable text input of raw JSON (`atlas.js:556`) — every rule is read and
+   written in the engine's vocabulary, and a typo is accepted silently by `JSON.parse` failure paths
+   (`continue` — the rule is simply not saved, with no message).
+3. There is no editor for the fields that make a rule a rule — level scope (`at_price`/`at_tol`),
+   hold time, channels — no "created from heatmap" filter (the heatmap's rules are the `hm-` ids), and
+   the log table has no Level or Size column: `data.price`/`data.size` are in the payload of every
+   fired alert and the table renders only the pre-written message.
+
+**Build spec (decisions taken, so the next session does not re-open them):**
+- A pure module `orderflow_system/desktop/ui/alert-format.js` (global `OFAPALERTS`), the one place that
+  turns a rule into words: `kindLabel(kind)`, `paramSpec(kind)` (each field's key, label, unit,
+  default, min), `sentence(rule)` (e.g. *"Big trade — a single print ≥ 3× the block threshold · any
+  level · UI · 30 s cooldown"*), `scopeWords(rule)` (`any level` vs `at 77070.24 ± 3.96`), and
+  `why(row)` (the log row's reason, from `data.detail`/`note` with the kind's own sentence as the
+  fallback). The editor's fields and the sentence both read `paramSpec`/`sentence`, so the form and
+  the words cannot disagree — the same one-source rule as `HEAT_INSET` and the cursor store.
+- The Rules card: Keep the On toggle and the Fired count; replace the JSON input with the sentence plus
+  an inline **Edit** row built from `paramSpec` (named inputs with units), the level scope (price +
+  tolerance), channels (ui / telegram / webhook checkboxes — the channels are the rule's, and
+  `dispatch_webhooks` only forwards rules that opt in), and the cooldown. Save posts the whole rule
+  back (the route already upserts), reads the rules back, and reports what the store kept.
+- A filter row on the Rules card: `created from heatmap` (id starts with `hm-`) and `enabled only`,
+  with an honest count line — *"3 of 16 rules · 3 from the heatmap"*, computed from the list, not
+  asserted.
+- The log table gains **Level** and **Size** columns read from `data.price` / `data.size` (a `—` when
+  the detection has none: `speed_spike` and `cvd_divergence` carry no level), and the message column
+  becomes the row's *why*, so every row names symbol, level, size and why regardless of kind.
+- `alClear` calls `POST /api/atlas/alerts/clear`, re-reads, and says what came back (the count the
+  server reports, not "cleared locally").
+- Gates for this phase: a `alert-format.selftest.js` (sentences, scopes, the per-kind spec coverage,
+  blank-field defaults) + `orderflow_system/test_alert_format.py` (run the selftest under pytest like
+  `test_strips.py` does), plus registering `alert-format.js` in `scripts/audit_ui_refs.py`.
+
+**The plan's gate (P1-7)**: live — edit a rule, fire it, read it in the log naming the level, delete it.
+
+**Live recipe that works here** (paid for in P1-2…P1-6): sandbox
+`APPDATA="$LOCALAPPDATA/Temp/ofap_p0_sandbox" .venv/Scripts/python.exe -m orderflow_system.desktop
+--headless --port 8093`, `POST /api/control/engine/start`, then CDP to
+`http://127.0.0.1:8093/desktop/`. Set `Network.setCacheDisabled` before believing any edit, dismiss
+`#wizOverlay` and hide `#mt5Notice` (the notice swallows pointer events), and remember the sandbox's
+instrument list holds `ZZZTEST` as its marker. Stop the app and leave the sandbox in place afterwards.
+
+**State at this writing.** Branch `master`, clean, **29 ahead of origin**, nothing pushed. Gates:
+pytest **509 passed / 2 skipped**; `audit_ui_refs.py` **AUDIT CLEAN**; the fifteen UI selftests —
+shell 22, bus 13, links 10, watchlist 17, news 17, options 21, fundamentals 18, market-pressure 12,
+indicators 25, intent 7, study-api 45, search-ops all-pass, **ofx 139**, **cursor-link 7**,
+**strips 9**.

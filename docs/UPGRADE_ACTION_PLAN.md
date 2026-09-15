@@ -150,8 +150,8 @@ click-to-locate (P1-4); and the cosmetics rebuilt as feedback — density-tracke
 glow with the POC keeping the strong one, a labelled zone projection, `carry_forward` on the panel and
 the hidden-block count beside its control (P1-5); and the map answering duration — `held_ms` on the
 walls the map draws, a Held column, a cursor line and an optional age tint, with the 74/22 px insets
-shared between the map and its overlay (P1-6). **Next: P1-7, alerts that manage, scope and read like
-sentences.**
+shared between the map and its overlay (P1-6). **P1-7 (alerts: manage, scope, read like sentences) is
+next — recon and build spec at §39 / the P1-7 item below.**
 
 **P1-1 · Theme and token layer first (brief A). — do this before any visual polish below.** L
 Unstarted: `atlas.css` contains **zero** `--of-` tokens (`grep -c -- '--of-'` → 0) and there is no
@@ -272,6 +272,27 @@ existed. Three `window.prompt` sites remain outside this phase
 Rule editor (kind, threshold, level scope, hold time, channels, cooldown) in the UI; every rule rendered
 with its scope in words; a "created from heatmap" filter; the log naming symbol, level, size and why.
 Gate: live — edit a rule, fire it, read it in the log naming the level, delete it.
+
+**Recon done 2026-09-16 (§39), read-only — the next session starts from this.**
+Exists: the Alerts view (`index.html:522`, rendered by `atlas.js` ~534-590 + `atlas-v2.js`'s history
+card), four real routes (`GET /alerts`, `POST /alerts/clear`, `GET /alert-rules`, `POST` upsert +
+`DELETE /alert-rules/{id}`), the engine's `AlertRule`/`Alert` records and a per-kind `_message()`.
+Kinds offered to the editor (16 + `wall_age`): `big_trade, block_trade, sweep, stop_run, iceberg,
+speed_spike, cvd_divergence, heat_pull, heat_stack, vwap_cross, depth_execution, depth_refill,
+stacked_imbalance, intent_pressure, pulled_size, trapped_traders`. Params the evaluator reads:
+`min_multiple, sides, min_size, min_levels, min_ticks, min_fills, min_zscore, kinds, min_strength,
+min_share, min_volume, min_pct, max_distance_ticks, min_beyond_ticks` plus the generic `at_price` /
+`at_tol` / `min_age_s`.
+Defects to fix in this phase: `alClear` claims a clear it never sends; rules are edited as raw JSON in a
+text input; no level/hold/channel editor, no heatmap filter, and no Level/Size in the log although the
+payload carries both.
+Decisions taken (do not re-open): a pure `alert-format.js` (global `OFAPALERTS`) as the single source
+for `kindLabel`/`paramSpec`/`sentence`/`scopeWords`/`why`, read by both the editor's fields and the
+rendered sentence; keep On + Fired; an inline Edit row instead of the JSON cell; channels as
+checkboxes (the route already carries them, and only opted-in rules reach the webhook); a filter with an
+honest count line; Level/Size columns from `data.price`/`data.size` with `—` where a kind has none.
+Gates: `alert-format.selftest.js` + `test_alert_format.py` (the `test_strips.py` pattern) and
+`alert-format.js` registered in `scripts/audit_ui_refs.py`.
 
 **P1-8 · Bar/candle expression modes and accessible palettes (brief D).** M
 The five modes (delta-tinted candles, split candle, heat-gradient body, wick-only + footprint, plus the
