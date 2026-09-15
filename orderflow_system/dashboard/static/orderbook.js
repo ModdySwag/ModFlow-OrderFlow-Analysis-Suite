@@ -79,6 +79,29 @@ class OrderbookLadder {
         `;
         
         this.bodyEl = document.getElementById('obLadderBody');
+        /* The cursor spine: hovering a rung publishes its price, and the shared cursor highlights the
+           rung every panel is reading — including one published by the heatmap or the engine. */
+        if (this.bodyEl && this.bodyEl.addEventListener) {
+            this.bodyEl.addEventListener('mouseover', (ev) => {
+                const row = ev.target && ev.target.closest ? ev.target.closest('[data-price]') : null;
+                if (row && window.OFAPCURSOR) {
+                    OFAPCURSOR.move(Number(row.getAttribute('data-price')), null, 'depth');
+                }
+            });
+            this.bodyEl.addEventListener('mouseleave', () => {
+                if (window.OFAPCURSOR) OFAPCURSOR.clear('depth');
+            });
+        }
+        if (window.OFAPCURSOR) {
+            this._cursorOff = OFAPCURSOR.subscribe(() => {
+                if (!this.bodyEl) return;
+                const prices = [...this.bodyEl.querySelectorAll('[data-price]')]
+                    .map((r) => Number(r.getAttribute('data-price'))).filter((p) => Number.isFinite(p));
+                this.setTrace(OFAPCURSOR.nearest(prices, OFAPCURSOR.step(prices)));
+            });
+            const head = this.container && this.container.querySelector ? this.container.querySelector('.ob-header') : null;
+            OFAPCURSOR.badge(head || this.container);
+        }
         this.imbBarEl = document.getElementById('obImbBar');
         this.bidTotalEl = document.getElementById('obBidTotal');
         this.askTotalEl = document.getElementById('obAskTotal');
@@ -221,7 +244,9 @@ class OrderbookLadder {
      *  rows are rebuilt each update — a class painted by someone else is wiped by the next poll. */
     setTrace(price) {
         const next = (price === null || price === undefined) ? null : Number(price);
-        this._tracePrice = Number.isFinite(next) ? next : null;
+        const clean = Number.isFinite(next) ? next : null;
+        if (clean === this._tracePrice) return this._tracePrice;      /* same level: nothing to redraw */
+        this._tracePrice = clean;
         this._render();
         return this._tracePrice;
     }

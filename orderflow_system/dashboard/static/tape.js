@@ -108,6 +108,27 @@ class TimeAndSales {
     _initControls() {
         // Auto-scroll toggle
         const autoScrollBtn = document.getElementById('tapeAutoScroll');
+        /* The spine: hovering a print publishes it, and the shared cursor marks the prints at its
+           level. The badge sits in the header beside the controls. */
+        if (this.tbody && this.tbody.addEventListener) {
+            this.tbody.addEventListener('mouseover', (ev) => {
+                const tr = ev.target && ev.target.closest ? ev.target.closest('tr[data-price]') : null;
+                if (!tr || !window.OFAPCURSOR) return;
+                const price = Number(tr.getAttribute('data-price'));
+                const time = Number(tr.getAttribute('data-time'));
+                OFAPCURSOR.move(price, Number.isFinite(time) ? time : null, 'tape');
+            });
+        }
+        if (this.container && this.container.addEventListener) {
+            this.container.addEventListener('mouseleave', () => {
+                if (window.OFAPCURSOR) OFAPCURSOR.clear('tape');
+            });
+        }
+        if (window.OFAPCURSOR) {
+            OFAPCURSOR.subscribe(() => this.applyCursor());
+            OFAPCURSOR.badge(this.container.querySelector('.tape-header') || this.container);
+        }
+
         autoScrollBtn.addEventListener('click', () => {
             this.options.autoScroll = !this.options.autoScroll;
             autoScrollBtn.classList.toggle('active', this.options.autoScroll);
@@ -164,11 +185,42 @@ class TimeAndSales {
         return true;
     }
 
+    /* The shared cursor's mark: the tape is a price + time stream, so "at this price" is a class on
+       the rows that traded there — applied at build time and re-applied whenever the cursor moves. */
+    _cursorTol() {
+        const p = Math.abs((window.OFAPCURSOR && OFAPCURSOR.state.price) || 0);
+        return p >= 1000 ? 0.5 : p >= 1 ? 0.01 : 0.0005;
+    }
+
+    _cursorClass(price) {
+        const cur = (window.OFAPCURSOR && OFAPCURSOR.state) ? OFAPCURSOR.state.price : null;
+        if (cur == null) return '';
+        return Math.abs(Number(price) - cur) <= this._cursorTol() ? 'ofap-cursor-row' : '';
+    }
+
+    /* Re-apply the mark over the rows on screen; rows are rebuilt wholesale, so a class painted once
+       would be gone by the next print. Skips the pass when the cursor's level has not changed. */
+    applyCursor() {
+        if (!this.tbody) return false;
+        const cur = (window.OFAPCURSOR && OFAPCURSOR.state) ? OFAPCURSOR.state.price : null;
+        const tol = this._cursorTol();
+        const key = cur == null ? null : Math.round(cur / tol);
+        if (key === this._cursorApplied) return false;
+        this._cursorApplied = key;
+        const rows = this.tbody.querySelectorAll('tr[data-price]');
+        for (const tr of rows) {
+            const p = Number(tr.getAttribute('data-price'));
+            tr.classList.toggle('ofap-cursor-row', cur != null && Math.abs(p - cur) <= tol);
+        }
+        return true;
+    }
+
     _rowHtml(trade) {
         const sideClass = trade.side === 'buy' ? 'tape-row-buy' : 'tape-row-sell';
         const bigClass = trade.isBig ? 'tape-row-big' : '';
+        const cursorClass = this._cursorClass(trade.price);
         return `
-                <tr class="tape-row ${sideClass} ${bigClass}">
+                <tr class="tape-row ${sideClass} ${bigClass} ${cursorClass}" data-price="${trade.price}" data-time="${trade.time}">
                     <td class="tape-time">${this._timeText(trade.time)}</td>
                     <td class="tape-price">${this._formatPrice(trade.price)}</td>
                     <td class="tape-size">${this._formatSize(trade.size)}</td>

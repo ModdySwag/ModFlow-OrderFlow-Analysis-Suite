@@ -537,3 +537,16 @@ body.wf-gesture .wf-body { pointer-events: none; }
     .ofx-flex { flex-direction: column; }
     .ofx-readout { flex: 0 0 auto; width: auto; max-height: 42%; }
 }
+
+/* ── P1-2: the shared cursor's badge and row mark ─────────────────────────────────────────────────
+   One badge per panel, driven by cursor-link.js from one store, so six panels cannot disagree about
+   what the cursor is on. The row mark is the same state applied as a class — a panel that rebuilds
+   its rows re-applies it, which is the ladder's lesson from P0-1. */
+.ofap-cursor-badge { display: inline-flex; align-items: center; margin-left: 8px; padding: 1px 7px;
+    border-radius: var(--of-radius); font: 600 10.5px ui-monospace, monospace; letter-spacing: .02em;
+    color: var(--of-ink-2); background: rgba(var(--of-steel-rgb),.10);
+    border: 1px solid rgba(var(--of-steel-rgb),.30); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ofap-cursor-badge.on { color: var(--of-trace-2); background: rgba(var(--of-trace-rgb),.10);
+    border-color: rgba(var(--of-trace-rgb),.45); }
+.ofap-cursor-row, tr.ofap-cursor-row > td { background: rgba(var(--of-trace-rgb),.10) !important;
+    outline: 1px solid rgba(var(--of-trace-rgb),.35); outline-offset: -1px; }

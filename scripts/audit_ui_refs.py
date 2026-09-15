@@ -28,7 +28,7 @@ JS_FILES = ["ui.js", "atlas.js", "atlas-v2.js", "guide.js",
             "platforms.js", "study-api.js", "studies.js",
             "ofx.js", "ofx-view.js", "pause.js", "menu.js", "menubar.js", "drawings.js", "shell.js",
             "links.js", "bus.js", "watchlist.js", "news.js", "options.js", "fundamentals.js",
-            "theme.js"]
+            "theme.js", "cursor-link.js"]
 
 
 def routes_from(py_file: Path, prefix: str) -> set[str]:

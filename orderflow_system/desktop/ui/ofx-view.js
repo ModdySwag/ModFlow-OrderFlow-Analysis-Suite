@@ -521,6 +521,12 @@
         if (stageEl) stageEl.addEventListener('dblclick', () => { OFX.fitSession(); paintChip(); });
         if (el('ofxApply')) el('ofxApply').addEventListener('click', () => void saveParams());
         wireCursorLink();
+        /* The spine's badge, beside the engine's own stats line: the engine is one of the panels that
+           reads the shared cursor, so it carries the same tag as the rest. */
+        if (window.OFAPCURSOR) {
+            const head = document.querySelector('.view[data-view="ofx"] .view-head');
+            if (head) OFAPCURSOR.badge(head);
+        }
         /* The ramp is a display preference, so it lives with the view, not the engine config: it is
            applied immediately and remembered across restarts without a server round-trip. */
         if (el('ofxRamp')) {

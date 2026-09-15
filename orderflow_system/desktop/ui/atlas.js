@@ -335,6 +335,26 @@ async function loadCvd(options) {
     } catch (e) { console.error(e); return false; }
 }
 
+/* The shared cursor on the profile's ladder: the row at the cursor's price. Re-applied after every
+   rebuild, because the profile redraws wholesale on its own beat. */
+function tpoCursorClass(price) {
+    const cur = (window.OFAPCURSOR && OFAPCURSOR.state) ? OFAPCURSOR.state.price : null;
+    if (cur == null) return '';
+    const tol = Math.abs(cur) >= 1000 ? 0.5 : Math.abs(cur) >= 1 ? 0.01 : 0.0005;
+    return Math.abs(Number(price) - cur) <= tol ? 'ofap-cursor-row' : '';
+}
+
+function applyTpoCursor() {
+    const rows = document.querySelectorAll('.tpo-row[data-price]');
+    const cur = (window.OFAPCURSOR && OFAPCURSOR.state) ? OFAPCURSOR.state.price : null;
+    const tol = cur == null ? 0 : (Math.abs(cur) >= 1000 ? 0.5 : Math.abs(cur) >= 1 ? 0.01 : 0.0005);
+    rows.forEach((row) => {
+        const p = Number(row.getAttribute('data-price'));
+        row.classList.toggle('ofap-cursor-row', cur != null && Math.abs(p - cur) <= tol);
+    });
+    return rows.length;
+}
+
 async function loadMarketProfile() {
     if (!S.symbol) return;
     try {
@@ -358,7 +378,8 @@ async function loadMarketProfile() {
         document.getElementById('tpoGrid').innerHTML = levels.map((row) => {
             const key = Number(row.price).toFixed(4);
             const cls = row.price === d.poc ? 'tpo-poc' : (row.price <= vah && row.price >= val) ? 'tpo-va' : '';
-            return '<div class="tpo-row ' + cls + '"><span class="tpo-price">' + row.price.toFixed(row.price > 100 ? 1 : 4) + '</span>' +
+            return '<div class="tpo-row ' + cls + ' ' + tpoCursorClass(row.price) + '" data-price="' + row.price + '">' +
+                '<span class="tpo-price">' + row.price.toFixed(row.price > 100 ? 1 : 4) + '</span>' +
                 '<span class="tpo-letters">' + esc(row.letters) + '</span>' +
                 '<span class="tpo-vol">' + compact(row.volume) + '</span>' +
                 (sp[key] ? '<span class="tag warn">single</span>' : '') + '</div>';
@@ -601,6 +622,30 @@ document.getElementById('hmAuto').onclick = () => {
     document.getElementById('hmAutoLabel').textContent = 'auto: ' + (A.heat.auto ? 'on' : 'off');
 };
 document.getElementById('frameSelect').onchange = loadFrames;
+
+/* atlas.js loads before cursor-link.js in index.html, so the spine's glue below waits for the module
+   to exist instead of quietly doing nothing — script order is a build detail, not behaviour. */
+function whenCursorReady(fn) {
+    if (window.OFAPCURSOR) return fn();
+    let tries = 0;
+    const tick = () => {
+        if (window.OFAPCURSOR) return fn();
+        if ((tries += 1) < 60) setTimeout(tick, 50);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tick, { once: true });
+    else setTimeout(tick, 50);
+}
+
+/* The spine's subscribers in this module: the profile rows follow the cursor, and each view that
+   reads a price or a time carries the badge. */
+whenCursorReady(() => {
+    OFAPCURSOR.subscribe(() => applyTpoCursor());
+    applyTpoCursor();
+    ['heatmap', 'cvd', 'profile', 'trackers'].forEach((view) => {
+        const head = document.querySelector('.view[data-view="' + view + '"] .view-head');
+        if (head) OFAPCURSOR.badge(head);
+    });
+});
 document.getElementById('cvdReanchor').onclick = async () => {
     if (!S.symbol) return;
     await api('/api/atlas/cvd/' + encodeURIComponent(S.symbol) + '/reanchor', { method: 'POST' });

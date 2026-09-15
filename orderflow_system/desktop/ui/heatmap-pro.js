@@ -24,6 +24,15 @@
         return String(b);
     };
 
+    /* Canvas colours cannot be `var(--of-...)`; read the token instead of hard-coding a colour the
+       light and contrast themes would leave behind. */
+    const tok = (name, fallback) => {
+        try {
+            const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+            return v || fallback;
+        } catch (e) { return fallback; }
+    };
+
     const stage = () => document.getElementById('heatmapCanvas');
     const view = () => document.querySelector('.view[data-view="heatmap"]');
     const active = () => !!(view() && view().classList.contains('active'));
@@ -143,6 +152,38 @@
             x.strokeStyle = 'rgba(120,190,255,0.95)';
             x.lineWidth = 1.5;
             x.strokeRect(s.x0 + 0.5, s.y0 + 0.5, s.x1 - s.x0, s.y1 - s.y0);
+        }
+
+        /* The shared cursor: whoever published it — this map, the engine, the tape — the level and
+           the moment it is on are drawn here, so leaving this panel does not lose the thread. */
+        const cur = (window.OFAPCURSOR && OFAPCURSOR.state) || null;
+        if (cur && cur.price != null && P.last && (P.last.prices || []).length) {
+            const prices = P.last.prices;
+            let ri = -1, bestD = Infinity;
+            for (let i = 0; i < prices.length; i += 1) {
+                const d = Math.abs(prices[i] - cur.price);
+                if (d < bestD) { bestD = d; ri = i; }
+            }
+            const step = OFAPCURSOR.step(prices);
+            if (ri >= 0 && (step == null || bestD <= step)) {
+                const y = Math.round((g.nr - 1 - ri) * g.chh + g.chh / 2) + 0.5;
+                x.save();
+                x.strokeStyle = tok('--of-trace', 'rgb(140,200,255)');
+                x.globalAlpha = 0.85;
+                x.lineWidth = 1;
+                x.beginPath(); x.moveTo(0, y); x.lineTo(g.plotW, y); x.stroke();
+                x.globalAlpha = 1;
+                const ct = OFAPCURSOR.text();
+                if (ct) {
+                    x.font = '600 10px ui-monospace, monospace';
+                    const wLab = x.measureText(ct).width + 8;
+                    x.fillStyle = tok('--of-deep', 'rgb(8,12,20)');
+                    x.fillRect(g.plotW - wLab - 2, y - 13, wLab, 12);
+                    x.fillStyle = tok('--of-trace-2', 'rgb(120,190,255)');
+                    x.fillText(ct, g.plotW - wLab + 2, y - 4);
+                }
+                x.restore();
+            }
         }
 
         (P.markers || []).forEach((m, i) => {
@@ -433,6 +474,12 @@
         c.addEventListener('mousemove', (ev) => {
             P.hud = cellAt(ev);
             hud();
+            /* Publish the level under the pointer: this is where the whole spine starts — the engine,
+               the ladder, the tape and the profile all follow what is published here. */
+            if (window.OFAPCURSOR) {
+                if (P.hud) OFAPCURSOR.move(P.hud.price, P.hud.bucket, 'heatmap');
+                else OFAPCURSOR.clear('heatmap');
+            }
             if (P.dragging && P.sel) {
                 const r = geom().rect;
                 P.sel.x1 = Math.max(0, Math.min(ev.clientX - r.left, geom().plotW));
@@ -440,7 +487,11 @@
                 draw();
             }
         });
-        c.addEventListener('mouseleave', () => { P.hud = null; hud(); });
+        c.addEventListener('mouseleave', () => {
+            P.hud = null;
+            hud();
+            if (window.OFAPCURSOR) OFAPCURSOR.clear('heatmap');
+        });
         c.addEventListener('wheel', (ev) => {
             if (!active()) return;
             ev.preventDefault();
@@ -483,6 +534,7 @@
             '<button class="btn small" data-hm-pro="alert-here">alert on cursor level</button>' +
             '<span class="dim" data-hm-pro-info="1"></span>';
         anchor.parentElement.appendChild(bar);
+        if (window.OFAPCURSOR) OFAPCURSOR.badge(bar);
         const stats = document.createElement('div');
         stats.setAttribute('data-hm-pro-stats', '1');
         stats.className = 'hm-pro-stats dim';
@@ -553,6 +605,27 @@
         if (ov && c) { ov.style.left = c.offsetLeft + 'px'; ov.style.top = c.offsetTop + 'px'; }
         paintStats();
         pull(true);
+    }
+
+    /* The cursor moving anywhere repaints this overlay only when the drawn level actually changed.
+       heatmap-pro.js loads before cursor-link.js, so this waits for the module rather than silently
+       skipping the subscription. */
+    const onCursor = () => {
+        const st = OFAPCURSOR.state;
+        const sig = String(st.price) + '|' + String(st.timeMs);
+        if (sig === P.cursorSig) return;
+        P.cursorSig = sig;
+        if (active()) draw();
+    };
+    if (window.OFAPCURSOR) OFAPCURSOR.subscribe(onCursor);
+    else {
+        let tries = 0;
+        const wait = () => {
+            if (window.OFAPCURSOR) return OFAPCURSOR.subscribe(onCursor);
+            if ((tries += 1) < 60) setTimeout(wait, 50);
+        };
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wait, { once: true });
+        else setTimeout(wait, 50);
     }
 
     document.addEventListener('ofap:relayout', () => setTimeout(refresh, 140));
