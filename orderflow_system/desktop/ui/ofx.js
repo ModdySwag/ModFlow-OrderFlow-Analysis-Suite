@@ -571,6 +571,82 @@
             }
             return out;
         },
+
+        /* A [i0, i1] bar range from two cursor positions: clipped to the drawn bars AND ordered.
+           Both halves matter - a drag past the last bar used to clamp only its END index, so the
+           start stayed out of range and the pair came back inverted (i0 = 11, i1 = 4). */
+        selectionRange(a, b, n) {
+            const last = Math.max(0, (Number(n) || 0) - 1);
+            const clip = (v) => Math.max(0, Math.min(last, Math.floor(Number(v) || 0)));
+            const x = clip(a), y = clip(b);
+            return [Math.min(x, y), Math.max(x, y)];
+        },
+
+        /* ── P1-3: the selection's arithmetic, pure ──────────────────────────────────────────────
+           Everything here reads arrays the engine already holds. `levels` is a Map of bar time ->
+           [{price, bid, ask}]; `prints` may carry second or millisecond stamps. A print outside the
+           drawn bars is not counted at all - the same rule the sweep layer uses - and the resting
+           change is null rather than zero when there is no depth history for the window. */
+        selectionStats({ bars, levels, prints, i0, i1, p0, p1, barSec, maxPrints }) {
+            const list = (bars || []).slice(Math.max(0, i0 | 0), (i1 | 0) + 1);
+            const lo = Math.min(p0, p1), hi = Math.max(p0, p1);
+            if (!list.length) return null;
+            const sec = Number(barSec) > 0 ? Number(barSec)
+                : (list.length > 1 ? Math.max(1, list[list.length - 1].time - list[list.length - 2].time) : 60);
+            let volume = 0, delta = 0, buy = 0, sell = 0;
+            for (const b of list) {
+                volume += Number(b.volume) || 0;
+                delta += Number(b.delta) || 0;
+                if (b.calc) { buy += Number(b.calc.buy) || 0; sell += Number(b.calc.sell) || 0; }
+            }
+            const t0 = list[0].time;
+            const t1 = list[list.length - 1].time;
+            const cap = Number(maxPrints) > 0 ? Number(maxPrints) : 5000;
+            let count = 0, total = 0, largest = 0, largestAt = null, num = 0, den = 0;
+            const rows = [];
+            for (const print of prints || []) {
+                const raw = Number(print.time) || 0;
+                const ts = raw > 1e11 ? raw / 1000 : raw;
+                if (ts < t0 || ts >= t1 + sec) continue;
+                const price = Number(print.price);
+                const size = Number(print.size);
+                if (!Number.isFinite(price) || price < lo || price > hi) continue;
+                if (!Number.isFinite(size) || size <= 0) continue;
+                count += 1;
+                total += size;
+                num += price * size;
+                den += size;
+                if (size > largest) { largest = size; largestAt = price; }
+                if (rows.length < cap) rows.push({ time: ts, price: price, size: size, side: print.side || '' });
+            }
+            const restingAt = (bar) => {
+                if (!bar || !levels || typeof levels.get !== 'function') return null;
+                const levelRows = levels.get(bar.time) || [];
+                if (!levelRows.length) return null;
+                let sum = 0;
+                for (const r of levelRows) {
+                    const price = Number(r.price) || 0;
+                    if (price < lo || price > hi) continue;
+                    sum += (Number(r.bid) || 0) + (Number(r.ask) || 0);
+                }
+                return sum;
+            };
+            const resting0 = restingAt(list[0]);
+            const resting1 = restingAt(list[list.length - 1]);
+            return {
+                bars: list.length, i0: Math.max(0, i0 | 0), i1: Math.max(0, i0 | 0) + list.length - 1,
+                t0: t0, t1: t1, barSec: sec, p0: lo, p1: hi,
+                volume: volume, delta: delta, buy: buy, sell: sell,
+                prints: count, printSize: total,
+                largest: largestAt == null ? null : { size: largest, price: largestAt },
+                vwap: den ? num / den : null,
+                resting0: resting0, resting1: resting1,
+                restingChange: (resting0 == null || resting1 == null) ? null : resting1 - resting0,
+                barRows: list.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close,
+                    volume: b.volume, delta: b.delta })),
+                printRows: rows,
+            };
+        },
     };
 
     /* ── state ───────────────────────────────────────────────────────────── */
@@ -875,6 +951,7 @@
             { keys: 'shift + wheel', action: 'time zoom (4–400 bars on screen)' },
             { keys: 'ctrl + wheel / pinch', action: 'price zoom' },
             { keys: 'drag', action: 'pan — clamped so the data cannot leave the stage' },
+            { keys: 'shift + drag', action: 'select a time × price region — the strip beside the stage measures it' },
             { keys: 'double-click', action: 'fit the whole session' },
             { keys: 'fit button', action: 'same as double-click' },
             { keys: '● live (chip)', action: 'snap to the newest bar and follow' },
@@ -1563,6 +1640,75 @@
 
     /* ── frame scheduler: one rAF loop, dirty layers, measured budget ────── */
 
+    /* ── P1-3: a selection is measurement ─────────────────────────────────────────────────────
+       Shift+drag boxes a time x price region. The box is drawn here so it survives every repaint
+       and camera move, and the numbers come from the payloads the engine already holds: bars for
+       volume/delta, the per-bar depth levels for the resting change, prints for VWAP/count/largest.
+       Nothing is re-fetched, so the strip cannot disagree with the pixels underneath it. */
+    let selection = null;      /* {x0,y0,x1,y1} stage coords + the resolved {i0,i1,p0,p1} at release */
+    let selDrag = null;        /* the live gesture */
+    let selSeq = 0;
+
+    function resolveSelection(a, b) {
+        const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
+        const y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+        const n = state.data.bars.length;
+        const [i0, i1] = math.selectionRange(xToIndex(x0), xToIndex(x1), n);
+        const bars = n ? state.data.bars.slice(i0, i1 + 1) : [];
+        return {
+            x0: x0, y0: y0, x1: x1, y1: y1,
+            i0: i0, i1: i1,
+            /* y grows downward, price upward */
+            p0: yToPrice(y1), p1: yToPrice(y0),
+            barCount: bars.length,
+            t0: bars.length ? bars[0].time : null,
+            t1: bars.length ? bars[bars.length - 1].time : null,
+        };
+    }
+
+    /* Isolate by dimming, never by hiding: the rest of the session stays readable while the
+       selection is measured. */
+    function drawSelection(ctx) {
+        if (!selection || selDrag == null && selection.barCount === 0) {
+            if (!selection) return;
+        }
+        const v = state.view;
+        const x0 = selection.x0, x1 = selection.x1, y0 = selection.y0, y1 = selection.y1;
+        const theme = (math && math.theme) || {};
+        ctx.save();
+        ctx.fillStyle = 'rgba(4,7,12,.55)';
+        if (y0 > 0) ctx.fillRect(0, 0, v.width, y0);
+        if (y1 < v.height) ctx.fillRect(0, y1, v.width, v.height - y1);
+        if (x0 > 0) ctx.fillRect(0, y0, x0, Math.max(0, y1 - y0));
+        if (x1 < v.width) ctx.fillRect(x1, y0, v.width - x1, Math.max(0, y1 - y0));
+        ctx.strokeStyle = theme.trace || theme.grid || '#6fc3ff';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(Math.round(x0) + 0.5, Math.round(y0) + 0.5,
+            Math.max(1, Math.round(x1 - x0)), Math.max(1, Math.round(y1 - y0)));
+        ctx.restore();
+    }
+
+    /* The selection's numbers, entirely from the loaded payloads. */
+    /* The gesture is the module's; the arithmetic is math.selectionStats (pure, selftested). */
+    function selectionStats() {
+        if (!selection || selection.i1 < selection.i0 || !state.data.bars.length) return null;
+        const st = math.selectionStats({
+            bars: state.data.bars, levels: state.data.levels, prints: state.data.prints,
+            i0: selection.i0, i1: selection.i1, p0: selection.p0, p1: selection.p1,
+        });
+        if (!st) return null;
+        st.seq = selSeq;
+        return st;
+    }
+
+    function clearSelection() {
+        selection = null;
+        selDrag = null;
+        selSeq += 1;
+        state.dirty.live = true;
+        if (typeof state.onSelection === 'function') state.onSelection(null);
+    }
+
     function renderLayers(force) {
         const t0 = performance.now();
         state.lastPaint = Date.now();
@@ -1594,6 +1740,7 @@
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 drawSweeps(ctx);
                 drawHud(ctx);
+                drawSelection(ctx);
             } else if (name === 'ribbon') {
                 drawRibbon();
             }
@@ -1685,9 +1832,36 @@
         }, { passive: false });
 
         let drag = null;
-        canvas.addEventListener('mousedown', (ev) => { drag = { x: ev.clientX, y: ev.clientY, ox: state.view.offX, oy: state.view.offY }; });
-        window.addEventListener('mouseup', () => { drag = null; });
+        canvas.addEventListener('mousedown', (ev) => {
+            if (ev.shiftKey) {
+                /* Shift+drag selects; a plain drag still pans, so nothing existing changes. */
+                const rect = canvas.getBoundingClientRect();
+                selDrag = { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+                selection = { x0: selDrag.x, y0: selDrag.y, x1: selDrag.x, y1: selDrag.y, i0: 0, i1: -1, barCount: 0 };
+                state.dirty.live = true;
+                ev.preventDefault();
+                return;
+            }
+            drag = { x: ev.clientX, y: ev.clientY, ox: state.view.offX, oy: state.view.offY };
+        });
+        window.addEventListener('mouseup', () => {
+            drag = null;
+            if (!selDrag) return;
+            selDrag = null;
+            selection = resolveSelection({ x: selection.x0, y: selection.y0 }, { x: selection.x1, y: selection.y1 });
+            selSeq += 1;
+            state.dirty.live = true;
+            if (typeof state.onSelection === 'function') state.onSelection(selectionStats());
+        });
         window.addEventListener('mousemove', (ev) => {
+            if (selDrag) {
+                const rect = canvas.getBoundingClientRect();
+                selection.x1 = Math.max(0, Math.min(state.view.width, ev.clientX - rect.left));
+                selection.y1 = Math.max(0, Math.min(state.view.height, ev.clientY - rect.top));
+                state.dirty.live = true;
+                renderLayers(false);
+                return;
+            }
             if (drag) {
                 const dx = (ev.clientX - drag.x) / state.view.scaleX;
                 const dy = (ev.clientY - drag.y) / state.view.scaleY;
@@ -1872,6 +2046,10 @@
             };
         },
         setParams(next) { Object.assign(state.params, next || {}); applyLod(); state.dirty.base = state.dirty.live = true; },
+        /* P1-3: the selection's own surface (the arithmetic lives in math.selectionStats). */
+        selection: () => (selection ? Object.assign({}, selection) : null),
+        selectionStats: selectionStats,
+        clearSelection: clearSelection,
     };
 
     if (typeof module !== 'undefined' && module.exports) module.exports = ofx;

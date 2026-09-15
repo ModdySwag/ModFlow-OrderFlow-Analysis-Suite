@@ -20,12 +20,14 @@
     let badgeId = 0;
 
     function publish(next) {
-        /* A field the caller did not mention is not a change: `move()` carries no selection, and
-           treating that undefined as "cleared" would wake every panel on every mouse move. */
-        const changed = (next.price !== state.price) || (next.timeMs !== state.timeMs)
+        /* A field the caller did NOT MENTION is not a change; an explicit null is a clear. Both
+           halves matter: `move()` carries no selection (P1-2), and `select()` carries no price, so
+           treating either absence as "cleared" would wipe what another panel is reading. */
+        const changed = (next.price !== undefined && next.price !== state.price)
+            || (next.timeMs !== undefined && next.timeMs !== state.timeMs)
             || (next.selection !== undefined && next.selection !== state.selection);
-        state.price = next.price == null ? null : next.price;
-        state.timeMs = next.timeMs == null ? null : next.timeMs;
+        if (next.price !== undefined) state.price = next.price == null ? null : next.price;
+        if (next.timeMs !== undefined) state.timeMs = next.timeMs == null ? null : next.timeMs;
         if (next.selection !== undefined) state.selection = next.selection;
         state.source = next.source || state.source;
         state.at = Date.now();

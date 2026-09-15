@@ -273,6 +273,52 @@ check('viewLimits: a one-bar dataset keeps its bar on screen at the left clamp',
 const limEmpty = math.viewLimits({ bars: [], view: { width: 100, height: 100 }, step: 0 });
 check('viewLimits: an empty book is inert', limEmpty.maxOffX === limEmpty.minOffX && limEmpty.lo === null);
 
+/* ── P1-3: the selection's arithmetic ─────────────────────────────────────────
+   A selection is measurement, so the sums are pinned here rather than trusted to the strip. */
+check('selectionRange: a range past the last bar clips to it', JSON.stringify(math.selectionRange(0, 11, 5)) === '[0,4]',
+    JSON.stringify(math.selectionRange(0, 11, 5)));
+check('selectionRange: a reversed drag comes back ordered', JSON.stringify(math.selectionRange(4, 1, 5)) === '[1,4]',
+    JSON.stringify(math.selectionRange(4, 1, 5)));
+check('selectionRange: a start past the end clips too', JSON.stringify(math.selectionRange(11, 2, 5)) === '[2,4]',
+    JSON.stringify(math.selectionRange(11, 2, 5)));
+check('selectionRange: negatives clamp to the first bar', JSON.stringify(math.selectionRange(-3, 0, 5)) === '[0,0]',
+    JSON.stringify(math.selectionRange(-3, 0, 5)));
+check('selectionRange: no bars is a degenerate range, not a crash', JSON.stringify(math.selectionRange(0, 9, 0)) === '[0,0]',
+    JSON.stringify(math.selectionRange(0, 9, 0)));
+
+const selBars = [{ time: 1000, volume: 10, delta: 4 }, { time: 1060, volume: 20, delta: -6 }, { time: 1120, volume: 5, delta: 1 }];
+const selLevels = new Map([
+    [1000, [{ price: 100, bid: 5, ask: 5 }, { price: 101, bid: 9, ask: 1 }]],
+    [1120, [{ price: 100, bid: 2, ask: 3 }, { price: 101, bid: 1, ask: 1 }]],
+]);
+const selPrints = [
+    { time: 1000, price: 100, size: 2, side: 'buy' },
+    { time: 1030, price: 101, size: 3, side: 'sell' },
+    { time: 1119, price: 500, size: 9, side: 'buy' },    // outside the price band
+    { time: 9999, price: 100, size: 7, side: 'buy' },    // outside the time range
+    { time: 1000 * 1000, price: 100, size: 4 },          // ms stamps must not leak into a seconds window
+];
+const sel = math.selectionStats({ bars: selBars, levels: selLevels, prints: selPrints, i0: 0, i1: 2, p0: 100, p1: 101 });
+check('selection: volume sums the bars in range', sel.volume === 35, String(sel.volume));
+check('selection: delta sums signed bar delta', sel.delta === -1, String(sel.delta));
+check('selection: prints outside the price band or the window are not counted',
+    sel.prints === 2 && sel.printSize === 5, JSON.stringify([sel.prints, sel.printSize]));
+check('selection: VWAP weights by size', near(sel.vwap, 100.6), String(sel.vwap));
+check('selection: the largest print is reported with its price',
+    sel.largest && sel.largest.size === 3 && sel.largest.price === 101, JSON.stringify(sel.largest));
+check('selection: resting depth change is last bar minus first, in the band',
+    sel.resting0 === 20 && sel.resting1 === 7 && sel.restingChange === -13,
+    JSON.stringify([sel.resting0, sel.resting1, sel.restingChange]));
+check('selection: the CSV detail carries one row per bar and per counted print',
+    sel.barRows.length === 3 && sel.printRows.length === 2, JSON.stringify([sel.barRows.length, sel.printRows.length]));
+const selNoDepth = math.selectionStats({ bars: selBars, levels: new Map(), prints: [], i0: 0, i1: 2, p0: 100, p1: 101 });
+check('selection: no depth history reads null, never a zero change', selNoDepth.restingChange === null);
+check('selection: a range with no bars is null, not an empty strip',
+    math.selectionStats({ bars: selBars, levels: selLevels, prints: [], i0: 5, i1: 7 }) === null);
+const selOne = math.selectionStats({ bars: selBars, levels: selLevels, prints: [], i0: 1, i1: 1, p0: 100, p1: 101 });
+check('selection: a single-bar range is legal (its own bar, no neighbours required)',
+    selOne.bars === 1 && selOne.t0 === 1060 && selOne.t1 === 1060, JSON.stringify([selOne.bars, selOne.t0]));
+
 console.log(`ofx selftest: ${ok} ok, ${failures.length} failed`);
 for (const f of failures) console.log('  FAIL', f);
 process.exit(failures.length ? 1 : 0);

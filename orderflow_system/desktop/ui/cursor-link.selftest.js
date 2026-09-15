@@ -107,6 +107,18 @@ function boot() {
         assert.strictEqual(a.classList.contains('on'), false);
     });
 
+    await check('a selection publish leaves the price cursor alone', () => {
+        const C = boot();
+        C.move(76500.5, 1789488000000, 'heatmap');
+        C.select({ t0: 1, t1: 2, p0: 100, p1: 101 }, { source: 'ofx-selection' });
+        assert.strictEqual(C.state.price, 76500.5, 'the price every panel is reading survives a selection');
+        assert.strictEqual(C.state.timeMs, 1789488000000);
+        assert.deepStrictEqual(C.state.selection, { t0: 1, t1: 2, p0: 100, p1: 101 });
+        C.select(null, { source: 'ofx-selection' });
+        assert.strictEqual(C.state.selection, null, 'an explicit null clears the selection');
+        assert.strictEqual(C.state.price, 76500.5, 'and still leaves the cursor where it was');
+    });
+
     await check('a selection rides with the cursor without waking the panels that ignore it', () => {
         const C = boot();
         const seen = [];

@@ -32,6 +32,11 @@
             return v || fallback;
         } catch (e) { return fallback; }
     };
+    /* The theme declares trace as an rgb triple, so build the colour from the triple. */
+    const traceInk = () => {
+        const t = tok('--of-trace-rgb', '') || tok('--of-cyan-rgb', '');
+        return t ? 'rgb(' + t + ')' : 'rgb(140,200,255)';
+    };
 
     const stage = () => document.getElementById('heatmapCanvas');
     const view = () => document.querySelector('.view[data-view="heatmap"]');
@@ -77,6 +82,7 @@
         try {
             const sym = await symbol();
             if (!sym) return;
+            if (P.markersFor !== sym) { P.markersFor = sym; P.markers = []; void markersLoad(sym); }
             P.last = await api('/api/atlas/heatmap/' + encodeURIComponent(sym) + '?columns=' + cols() + '&rows=' + rows());
             if ((!P.last || !(P.last.buckets || []).length) && !P.reResolved) {
                 P.reResolved = true;                 // one retry, then accept the empty map
@@ -168,7 +174,7 @@
             if (ri >= 0 && (step == null || bestD <= step)) {
                 const y = Math.round((g.nr - 1 - ri) * g.chh + g.chh / 2) + 0.5;
                 x.save();
-                x.strokeStyle = tok('--of-trace', 'rgb(140,200,255)');
+                x.strokeStyle = traceInk();
                 x.globalAlpha = 0.85;
                 x.lineWidth = 1;
                 x.beginPath(); x.moveTo(0, y); x.lineTo(g.plotW, y); x.stroke();
@@ -179,12 +185,17 @@
                     const wLab = x.measureText(ct).width + 8;
                     x.fillStyle = tok('--of-deep', 'rgb(8,12,20)');
                     x.fillRect(g.plotW - wLab - 2, y - 13, wLab, 12);
-                    x.fillStyle = tok('--of-trace-2', 'rgb(120,190,255)');
+                    const t2 = tok('--of-trace-2-rgb', '');
+                    x.fillStyle = t2 ? 'rgb(' + t2 + ')' : traceInk();
                     x.fillText(ct, g.plotW - wLab + 2, y - 4);
                 }
                 x.restore();
             }
         }
+
+        /* A restored marker has no pixels yet, and the map it belongs to may not have been loaded
+           when it arrived: place it from its price/bucket before painting (idempotent and cheap). */
+        projectMarkers();
 
         (P.markers || []).forEach((m, i) => {
             x.beginPath();
@@ -195,6 +206,58 @@
             x.fillStyle = 'rgba(255,225,150,0.95)';
             x.fillText(String(i + 1), m.x + 5, m.y - 13);
         });
+    }
+
+    /* ── markers: pinned levels, in data space, remembered per symbol ──────────────────────────────
+       They were session-only; they now live in the config's `markers` block as price/bucket/size/note
+       (never pixels), so a reload or a restart brings them back on the symbol they belong to. */
+    function markerRows() {
+        return (P.markers || []).map((m) => ({ price: m.price, bucket: m.bucket || 0, size: m.size || 0,
+            note: String(m.note || '').slice(0, 120) }));
+    }
+
+    /* A stored row has no pixels: put it back on the map from the price and the bucket it names. */
+    function projectMarkers() {
+        const d = P.last, g = geom();
+        if (!d || !g) return;
+        (P.markers || []).forEach((m) => {
+            if (Number.isFinite(m.x) && Number.isFinite(m.y)) return;
+            const prices = d.prices || [];
+            let ri = -1, bestD = Infinity;
+            for (let i = 0; i < prices.length; i += 1) {
+                const dd = Math.abs(prices[i] - m.price);
+                if (dd < bestD) { bestD = dd; ri = i; }
+            }
+            if (ri < 0) return;
+            /* Bounded, like every other nearest() in this app: a marker whose price is outside the
+               drawn rows is not pinned to the edge row pretending to be there. */
+            const step = prices.length > 1 ? Math.abs(prices[1] - prices[0]) : 0;
+            if (step > 0 && bestD > step) return;
+            let ci = -1, bestC = Infinity;
+            (d.buckets || []).forEach((b, i) => { const dd = Math.abs(b - m.bucket); if (dd < bestC) { bestC = dd; ci = i; } });
+            m.x = ci >= 0 ? (ci + 0.5) * g.cw : g.plotW * 0.5;
+            m.y = (g.nr - 1 - ri) * g.chh + g.chh / 2;
+        });
+    }
+
+    async function markersLoad(sym) {
+        try {
+            const res = await api('/api/control/markers?symbol=' + encodeURIComponent(sym));
+            const rows = ((res && res.block && res.block.markers) || [])
+                .filter((m) => m && Number.isFinite(Number(m.price)));
+            P.markers = rows.map((m) => ({ price: Number(m.price), bucket: Number(m.bucket) || 0,
+                size: Number(m.size) || 0, note: String(m.note || '') }));
+            projectMarkers();
+            draw(); hud(); paintStats();
+        } catch (err) { /* no stored markers for this symbol: nothing to restore */ }
+    }
+
+    async function markersSave() {
+        const sym = P.markersFor || null;
+        if (!sym) return;
+        try {
+            await api('/api/control/markers', { method: 'POST', body: { symbol: sym, markers: markerRows() } });
+        } catch (err) { /* the mark stays in this session either way; the store is the record */ }
     }
 
     /* ── the readout: what a depth map is asked for and normally does not show ───────────── */
@@ -502,9 +565,14 @@
             if (P.mode === 'mark') {
                 const cell = cellAt(ev);
                 if (!cell) return;
-                const note = window.prompt('Note for this level (optional):', '') || '';
+                /* No window.prompt in this app: the frozen WebView is not guaranteed to render one,
+                   and a mark that silently does nothing is worse than no mark button. */
+                const noteEl = document.querySelector('[data-hm-pro-note]');
+                const note = noteEl ? String(noteEl.value || '').slice(0, 120) : '';
+                if (noteEl) noteEl.value = '';
                 P.markers.push({ x: cell.x, y: cell.y, price: cell.price, bucket: cell.bucket, size: cell.size, note: note });
                 draw(); hud(); paintStats();
+                void markersSave();
                 return;
             }
             const r = geom().rect;
@@ -530,11 +598,21 @@
             '<button class="btn small" data-hm-pro="rows-up">rows +</button>' +
             '<button class="btn small" data-hm-pro="rows-down">rows &minus;</button>' +
             '<button class="btn small" data-hm-pro="mark">mark level</button>' +
+            '<input class="hm-note" data-hm-pro-note type="text" maxlength="120" placeholder="note (optional)" />' +
+            '<button class="btn small" data-hm-pro="clear-markers">clear markers</button>' +
             '<button class="btn small" data-hm-pro="fit">fit</button>' +
             '<button class="btn small" data-hm-pro="alert-here">alert on cursor level</button>' +
             '<span class="dim" data-hm-pro-info="1"></span>';
         anchor.parentElement.appendChild(bar);
         if (window.OFAPCURSOR) OFAPCURSOR.badge(bar);
+        const clearBtn = bar.querySelector('[data-hm-pro="clear-markers"]');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                P.markers = [];
+                draw(); hud(); paintStats();
+                void markersSave();
+            });
+        }
         const stats = document.createElement('div');
         stats.setAttribute('data-hm-pro-stats', '1');
         stats.className = 'hm-pro-stats dim';
