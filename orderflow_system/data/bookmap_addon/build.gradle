@@ -1,0 +1,43 @@
+// OFAP bridge add-on — build file.
+//
+// The API jars are taken from the Bookmap install itself, not from a Maven repository: the classes
+// this add-on compiles against are then exactly the ones the running Bookmap loaded, so a Bookmap
+// update cannot silently leave the add-on building against a different API.
+//
+//   compileOnly  → those jars are already in Bookmap's runtime; do not copy them into the jar
+//   fileTree     → every jar in the install's lib folder, minus the ones that clash (below)
+//
+// Build (needs a JDK — Bookmap ships only a JRE):
+//     gradle jar          →  build/libs/ofap-bridge.jar
+// or without gradle:
+//     javac -cp "C:\Program Files\Bookmap\lib\*" -d classes src\com\moddy\ofapbridge\OfapBridge.java
+//     jar --create --file ofap-bridge.jar -C classes .
+
+plugins {
+    id 'java'
+}
+
+def bookmapHome = System.getenv('BOOKMAP_HOME') ?: 'C:/Program Files/Bookmap'
+def bookmapLib = file(bookmapHome + '/lib')
+
+java {
+    // Build for the runtime Bookmap actually ships: its bundled jre is Temurin 25.0.2, so these are
+    // Java 25 class files on purpose — they only ever load inside Bookmap 7.8+.
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+}
+
+dependencies {
+    compileOnly fileTree(dir: bookmapLib, include: ['*.jar'])
+}
+
+jar {
+    archiveBaseName = 'ofap-bridge'
+    // No dependencies are bundled: everything it needs is inside Bookmap at runtime.
+    manifest {
+        attributes(
+            'Implementation-Title': 'OFAP bridge (Bookmap add-on)',
+            'Implementation-Version': '0.1',
+        )
+    }
+}
