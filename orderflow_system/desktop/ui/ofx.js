@@ -582,6 +582,20 @@
             return [Math.min(x, y), Math.max(x, y)];
         },
 
+        /* P1-5: the alpha a live cell leaves behind as a ghost. It tracks the cell's own density
+           bucket - the same log1p mapping the colour table uses - so a pulled wall leaves a strong
+           ghost and a thin level leaves a faint one. A uniform 0.92 said every level held the same
+           liquidity, which is exactly the claim the picture must not make. */
+        peakAlpha(size, scale, floor, top) {
+            const sc = Number(scale) > 0 ? Number(scale) : 1;
+            const v = Math.max(0, Number(size) || 0);
+            const span = Math.max(1e-9, Math.log1p(Math.max(sc, 1)));
+            const t = Math.min(1, Math.log1p(v) / span);
+            const lo = Number(floor) > 0 ? Number(floor) : 0.32;
+            const hi = Number(top) > 0 ? Number(top) : 0.92;
+            return Math.min(hi, lo + (hi - lo) * Math.sqrt(Math.max(0, t)));
+        },
+
         /* ── P1-3: the selection's arithmetic, pure ──────────────────────────────────────────────
            Everything here reads arrays the engine already holds. `levels` is a Map of bar time ->
            [{price, bid, ask}]; `prints` may carry second or millisecond stamps. A print outside the
@@ -1225,7 +1239,9 @@
                     alpha = 0.92;
                     cell.alpha = alpha;
                     cell.seen = now;
-                    cell.peak = Math.max(cell.peak || 0, alpha);
+                    /* The ghost this cell will leave is proportional to what it was (P1-5). */
+                    cell.peak = Math.max(cell.peak || 0,
+                        math.peakAlpha(cell.size, state.data.heatScale));
                     cell.lastSize = cell.size;
                 } else if ((cell.alpha || 0) > 0.004) {
                     /* liquidity left this level: keep the colour of the size that was there and
@@ -1246,6 +1262,17 @@
         return decayed;
     }
 
+    /* A tinted cell with a low glow, for the imbalanced rows only: the matrix stays quiet
+       everywhere else, and the POC keeps its stronger glow (accent scarcity, §3.3). */
+    function glowCell(ctx, x, y, w, h, key) {
+        ctx.save();
+        ctx.shadowColor = math.rgba(key, '.55');
+        ctx.shadowBlur = Math.max(3, math.glowRadius(w, h) * 0.35);
+        ctx.fillStyle = math.rgba(key, '.18');
+        ctx.fillRect(x, y, w, h);
+        ctx.restore();
+    }
+
     function drawFootprint(ctx) {
         const bars = state.data.bars;
         if (!bars.length) return;
@@ -1255,6 +1282,9 @@
         const end = Math.min(bars.length, Math.ceil(xToIndex(v.width)) + 2);
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
+        /* One label per distinct projected zone per pass: the bands are drawn per bar and stretch
+           to the right edge, so labelling each bar's pass would stack the same words. */
+        const zoneLabelled = new Set();
 
         /* Row height comes from the data (tick spacing) and the price scale. BTC quotes in 0.5
            steps: a session-wide fit would put ~470 rows in 520px, so the rows are grouped into
@@ -1361,9 +1391,10 @@
                 ctx.fillRect(x + half - bidW, y + Math.max(0, cellH * 0.18), bidW, Math.max(1, cellH * 0.64));
                 ctx.fillStyle = math.rgba('ask', '.30');
                 ctx.fillRect(x + half, y + Math.max(0, cellH * 0.18), Math.max(0, barW - bidW), Math.max(1, cellH * 0.64));
-                /* Imbalance tint stays on the text-bearing half only. */
-                if (buyHot) { ctx.fillStyle = math.rgba('imBuy', '.18'); ctx.fillRect(x, y, half, cellH); }
-                if (sellHot) { ctx.fillStyle = math.rgba('imSell', '.18'); ctx.fillRect(x + half, y, half, cellH); }
+                /* Imbalance tint stays on the text-bearing half only, and now carries a low glow so
+                   an imbalanced row reads at a glance rather than only in its digits. */
+                if (buyHot) glowCell(ctx, x, y, half, cellH, 'imBuy');
+                if (sellHot) glowCell(ctx, x + half, y, half, cellH, 'imSell');
                 if (!textHere) continue;
 
                 const size = Math.max(7, Math.min(13, cellH - 1));
@@ -1395,11 +1426,24 @@
                 const yTop = priceToY(zone.high) - cellH / 2;
                 const yBot = priceToY(zone.low) + cellH / 2;
                 const colour = zone.side === 'buy' ? '64,224,255' : '255,64,196';
-                ctx.fillStyle = `rgba(${colour},${(0.10 + Math.min(0.10, zone.count * 0.02)).toFixed(3)})`;
+                ctx.fillStyle = `rgba(${colour},${(0.12 + Math.min(0.12, zone.count * 0.025)).toFixed(3)})`;
                 ctx.fillRect(x, yTop, v.width - x, Math.max(2, yBot - yTop));
                 ctx.fillStyle = `rgba(${colour},.55)`;
                 ctx.fillRect(x, yTop, Math.min(46, colW), 1);
                 ctx.fillRect(x, yBot, Math.min(46, colW), 1);
+                /* The projection reaches the right edge now, so the band says what it is where it
+                   ends: "BUY 3L projected" is readable without tracing back to its first bar. */
+                const key = zone.side + '|' + zone.low + '|' + zone.high;
+                if (!zoneLabelled.has(key) && (yBot - yTop) >= 9) {
+                    zoneLabelled.add(key);
+                    ctx.save();
+                    ctx.textAlign = 'right';
+                    ctx.font = '600 9.5px ui-monospace, monospace';
+                    ctx.fillStyle = `rgba(${colour},.78)`;
+                    ctx.fillText((zone.side === 'buy' ? 'BUY ' : 'SELL ') + (zone.count || '') + 'L projected',
+                        v.width - 8, yTop + 10);
+                    ctx.restore();
+                }
             }
 
             const poc = math.poc(rows);

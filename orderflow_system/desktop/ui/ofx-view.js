@@ -53,8 +53,14 @@
         const adapted = OFX.math.adaptHeat(heat, bars.map((b) => b.time), barSec);
         OFX.state.symbol = s;
         OFX.setData({ bars, levelsByTime, prints: Array.isArray(tape) ? tape : [], heat: adapted || { rows: [], scale: 1 } });
+        /* The depth map carries liquidity forward between windows; ghost levels with no explanation
+           are a lie of omission, so the flag rides on the state and the note below says it. */
+        OFX.state.data.heatCarry = !!(heat && heat.carry_forward);
         const notes = [];
         if (!adapted) notes.push(heat && heat.note ? heat.note : 'no depth history yet — it builds while the feed runs');
+        if (OFX.state.data.heatCarry && adapted) {
+            notes.push('ghost liquidity carried forward — levels that left the drawn window are still shown');
+        }
         if (OFX.state.data.prints.length && !OFX.stats().printsMatched) {
             notes.push(`${OFX.state.data.prints.length} prints outside the drawn bar range — tape and bars are from different feeds right now`);
         }
@@ -242,6 +248,21 @@
             if (open) paintLegend();
             apply();
         });
+    }
+
+    /* A filter that hides data says how much: the engine's own tally, beside the control that set
+       the floor. Zero reads "nothing hidden" rather than an empty space, so an absent number is
+       never ambiguous. */
+    function paintHiddenBlocks() {
+        const out = el('ofxHiddenBlocks');
+        if (!out || !window.OFX) return;
+        const n = (OFX.stats() || {}).blocksFiltered || 0;
+        const floor = Number((OFX.state.params || {}).minBlock) || 0;
+        out.textContent = n ? n + ' hidden' : (floor > 0 ? 'nothing hidden' : '');
+        out.classList.toggle('on', n > 0);
+        out.title = n
+            ? n + ' execution blocks below the min-block floor of ' + floor + ' are not drawn'
+            : 'every execution block in view is drawn';
     }
 
     function paintStats() {
@@ -710,6 +731,7 @@
         let legendTicks = 0;
         setInterval(() => {
             paintStats();
+            paintHiddenBlocks();
             legendTicks += 1;
             if (legendTicks % 5 === 0) paintLegend();
         }, 1000);

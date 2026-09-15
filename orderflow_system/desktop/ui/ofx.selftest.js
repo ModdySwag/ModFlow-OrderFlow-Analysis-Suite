@@ -273,6 +273,22 @@ check('viewLimits: a one-bar dataset keeps its bar on screen at the left clamp',
 const limEmpty = math.viewLimits({ bars: [], view: { width: 100, height: 100 }, step: 0 });
 check('viewLimits: an empty book is inert', limEmpty.maxOffX === limEmpty.minOffX && limEmpty.lo === null);
 
+/* ── P1-5: the ghost's peak tracks the cell's density ─────────────────────────
+   A pulled wall must leave a strong ghost and a thin level a faint one; a uniform peak says every
+   level held the same liquidity. */
+check('peakAlpha: the largest cell in the window peaks at the top', math.peakAlpha(100, 100) === 0.92,
+    String(math.peakAlpha(100, 100)));
+check('peakAlpha: a small cell leaves a fainter ghost than a wall',
+    math.peakAlpha(1, 100) < math.peakAlpha(50, 100) && math.peakAlpha(50, 100) < math.peakAlpha(100, 100),
+    JSON.stringify([math.peakAlpha(1, 100), math.peakAlpha(50, 100), math.peakAlpha(100, 100)]));
+check('peakAlpha: never below the floor and never above the top',
+    math.peakAlpha(0, 100) === 0.32 && math.peakAlpha(1e9, 100) === 0.92,
+    JSON.stringify([math.peakAlpha(0, 100), math.peakAlpha(1e9, 100)]));
+check('peakAlpha: a nonsense scale is treated as 1, not as NaN', Number.isFinite(math.peakAlpha(5, 0))
+    && Number.isFinite(math.peakAlpha(5, null)), JSON.stringify([math.peakAlpha(5, 0), math.peakAlpha(5, null)]));
+check('peakAlpha: monotone in size, so "bigger" is never "fainter"',
+    [1, 5, 20, 60, 100].every((v, i, a) => i === 0 || math.peakAlpha(a[i - 1], 100) <= math.peakAlpha(v, 100)));
+
 /* ── P1-3: the selection's arithmetic ─────────────────────────────────────────
    A selection is measurement, so the sums are pinned here rather than trusted to the strip. */
 check('selectionRange: a range past the last bar clips to it', JSON.stringify(math.selectionRange(0, 11, 5)) === '[0,4]',

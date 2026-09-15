@@ -243,7 +243,7 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                     <label>stack <input id="ofxStack" type="number" step="1" min="2" max="8" style="width:52px"></label>
                     <label>lambda ms <input id="ofxLambda" type="number" step="50" min="100" max="5000" style="width:76px"></label>
                     <button id="ofxApply">Apply</button>
-                    <label>min block <input id="ofxMinBlock" type="number" step="5" min="0" style="width:70px" title="hide execution blocks below this size"></label>
+                    <label>min block <input id="ofxMinBlock" type="number" step="5" min="0" style="width:70px" title="hide execution blocks below this size"><span class="ofx-hidden" id="ofxHiddenBlocks"></span></label>
                     <label>VA % <input id="ofxVaPct" type="number" step="0.05" min="0.5" max="0.95" style="width:70px" title="share of the candle that counts as the value area"></label>
                     <label title="classic: blue-to-red by magnitude. thermal: slate-to-gold, monotonic in heat, with the baseline desaturated so sized cells stand out on their own.">ramp <select id="ofxRamp">
                         <option value="classic">classic</option><option value="thermal">thermal</option></select></label>

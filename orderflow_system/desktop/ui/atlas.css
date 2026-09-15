@@ -552,6 +552,12 @@ body.wf-gesture .wf-body { pointer-events: none; }
 .ofap-cursor-row, tr.ofap-cursor-row > td { background: rgba(var(--of-trace-rgb),.10) !important;
     outline: 1px solid rgba(var(--of-trace-rgb),.35); outline-offset: -1px; }
 
+/* ── P1-5: the hidden-block count beside the min-block floor ─────────────────────────────────────
+   Small, quiet at zero, warning-coloured when the filter is actually hiding executions. */
+.ofx-hidden { margin-left: 6px; font: 600 10px var(--of-font-mono), monospace; letter-spacing: .02em;
+    color: var(--of-ink-3); }
+.ofx-hidden.on { color: var(--of-warn); }
+
 /* ── P1-3: the selection strip ────────────────────────────────────────────────────────────────────
    Its own line beside the stage: what a shift+drag measured, a Clear and an Export. Tokens only, so
    the light and contrast shells theme it with everything else. */
