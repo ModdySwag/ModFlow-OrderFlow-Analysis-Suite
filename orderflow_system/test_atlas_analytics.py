@@ -547,3 +547,33 @@ def test_stop_run_window_drops_prints_older_than_the_window():
     assert ev.volume == pytest.approx(0.25 * ev.prints), "old prints leaked into the window"
     assert ev.from_price >= 100.0, "the window must not reach back to the 30 s old prints"
     assert ev.prints <= len(fresh)
+
+
+def test_wall_ages_ride_the_payload_the_map_draws():
+    """A wall the engine has watched hold past its threshold must say so where the map is read (P1-6).
+
+    The map could only ever show size; `wall_durations()` knew the streak all along and nothing carried
+    it. `attach_wall_ages` is the one place that joins the two, so the table, the cursor readout and the
+    age tint read one shape.
+    """
+    from orderflow_system.atlas.api import attach_wall_ages
+
+    hm = DepthHeatmap("T", tick_size=1.0, bucket_ms=1000, wall_quantile=0.85, wall_age_ms=120_000)
+    bids = [(100.0, 50.0), (99.0, 3.0)]
+    asks = [(101.0, 4.0)]
+    hm.on_orderbook(book(T0, bids, asks))
+    for i in range(1, 130):                                   # 130 one-second columns = 129 s of watch
+        hm.on_orderbook(book(T0 + i * 1000, bids, asks))
+
+    durs = hm.wall_durations()
+    assert durs, "a level held across the window must report a duration"
+    assert durs[0]["price"] == 100.0 and durs[0]["held_ms"] >= 120_000, durs[0]
+    assert all(r["held_ms"] > 0 for r in durs), "a zero-held row is not a duration"
+
+    snap = attach_wall_ages({}, hm)
+    assert snap["wall_age_ms"] == 120_000, "the engine's own threshold travels with the rows"
+    walls = {w["price"]: w for w in snap["walls"]}
+    assert walls and 100.0 in walls, walls
+    assert walls[100.0]["held_ms"] >= 120_000, "the wall the map draws carries how long it has held"
+    assert all("held_ms" in w for w in snap["walls"]), "every row carries the key, even at zero"
+    assert all(isinstance(w["held_ms"], int) for w in snap["walls"])

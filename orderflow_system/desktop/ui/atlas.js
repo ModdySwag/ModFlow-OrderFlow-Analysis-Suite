@@ -44,6 +44,22 @@ function heatColour(t) {
     return 'hsl(' + hue + ', ' + sat + '%, ' + light + '%)';
 }
 
+/* How strongly a held level tints the map: nothing until the engine's own "held" threshold, then a
+   linear ramp to 0.22 at ten minutes. Optional, and warm rather than one of the ramp's own colours, so
+   it cannot be read as density. */
+function ageTint01(heldMs, floorMs) {
+    const floor = Number(floorMs) > 0 ? Number(floorMs) : 120000;
+    const held = Number(heldMs) || 0;
+    if (held < floor) return 0;
+    const t = Math.min(1, (held - floor) / Math.max(1, 600000 - floor));
+    return 0.10 + 0.12 * t;
+}
+
+function ageTintOn() {
+    const box = document.getElementById('hmAgeTint');
+    return !!(box && box.checked);
+}
+
 function drawHeatmap(data) {
     const el = document.getElementById('heatmapCanvas');
     const c = prepCanvas(el, 520);
@@ -57,7 +73,11 @@ function drawHeatmap(data) {
         ctx.fillText('no depth history yet — start the engine or run a replay', 16, 30);
         return;
     }
-    const axisR = 74, axisB = 22;
+    /* The plot insets, in one place: the overlay (heatmap-pro.js) reads these off the window instead
+       of repeating the numbers, so the map and everything drawn over it cannot drift apart. */
+    const HEAT_INSET = { right: 74, bottom: 22 };
+    window.OFAPHEAT_INSET = HEAT_INSET;
+    const axisR = HEAT_INSET.right, axisB = HEAT_INSET.bottom;
     const plotW = w - axisR, plotH = h - axisB;
     const cw = plotW / cols, chh = plotH / rows;
 
@@ -99,6 +119,22 @@ function drawHeatmap(data) {
                 ctx.stroke();
             }
         }
+    }
+
+    /* The age tint sits under the overlays and the numbers: a warm wash on the rows whose level the
+       engine has seen held past its wall-age threshold, strongest for the longest-held (P1-6). */
+    if (ageTintOn() && (data.walls || []).length) {
+        (data.walls || []).forEach((w) => {
+            const a = ageTint01(w.held_ms, data.wall_age_ms);
+            if (!a) return;
+            let r = -1;
+            for (let i = 0; i < rows; i++) {
+                if (Math.abs(data.prices[i] - Number(w.price)) <= (Number(data.step) || 0.5) / 2 + 1e-9) { r = i; break; }
+            }
+            if (r < 0) return;
+            ctx.fillStyle = 'rgba(255,196,120,' + a.toFixed(3) + ')';
+            ctx.fillRect(0, plotH - (r + 1) * chh, plotW, Math.max(1, chh));
+        });
     }
 
     const evBox = document.getElementById('hmEvents');
@@ -212,13 +248,15 @@ async function loadHeatmap() {
         A.heat.last = d;
         drawHeatmap(d);
         const walls = (d.walls || []).slice(0, 12);
+        const heldLabel = (ms) => (ms >= 60000 ? (ms / 60000).toFixed(1) + ' min' : Math.max(0, Math.round(ms / 1000)) + ' s');
         const w0 = document.getElementById('hmWalls');
         w0.querySelector('.kpi-value').textContent = walls.length ? walls[0].size.toFixed(2) : '--';
         w0.querySelector('.kpi-sub').textContent = walls.length ? '@ ' + walls[0].price : '';
         document.getElementById('hmWallTable').querySelector('tbody').innerHTML =
-            walls.map((w) => '<tr><td>' + w.price + '</td><td>' + w.size.toFixed(3) + '</td><td>' +
-                (S.lastPrice ? ((w.price - S.lastPrice) / S.lastPrice * 100).toFixed(3) + '%' : '--') + '</td></tr>').join('')
-            || '<tr><td colspan="3" class="dim">no walls recorded yet</td></tr>';
+            walls.map((w) => '<tr><td>' + w.price + '</td><td>' + w.size.toFixed(3) + '</td><td>'
+                + (w.held_ms ? heldLabel(w.held_ms) : '&mdash;') + '</td><td>'
+                + (S.lastPrice ? ((w.price - S.lastPrice) / S.lastPrice * 100).toFixed(3) + '%' : '--') + '</td></tr>').join('')
+            || '<tr><td colspan="4" class="dim">no walls recorded yet</td></tr>';
         const evs = (d.events || []).filter((e) => e.kind === 'pull' || e.kind === 'stack').slice(-25).reverse();
         document.getElementById('hmEventTable').querySelector('tbody').innerHTML =
             evs.map((e) => '<tr><td>' + new Date(e.ts_ms).toLocaleTimeString() + '</td>' +
@@ -616,6 +654,16 @@ function atlasShareSync(name) {
 document.getElementById('hmColumns').onchange = loadHeatmap;
 document.getElementById('hmRows').onchange = loadHeatmap;
 document.getElementById('hmTrades').onchange = () => { if (A.heat.last) drawHeatmap(A.heat.last); };
+/* The age tint is this view's own display preference, remembered here and nowhere else. */
+(() => {
+    const box = document.getElementById('hmAgeTint');
+    if (!box) return;
+    try { box.checked = localStorage.getItem('ofap.hm.ageTint') === '1'; } catch (err) { /* private mode */ }
+    box.onchange = () => {
+        try { localStorage.setItem('ofap.hm.ageTint', box.checked ? '1' : '0'); } catch (err) { /* ignore */ }
+        if (A.heat.last) drawHeatmap(A.heat.last);
+    };
+})();
 document.getElementById('hmEvents').onchange = () => { if (A.heat.last) drawHeatmap(A.heat.last); };
 document.getElementById('hmAuto').onclick = () => {
     A.heat.auto = !A.heat.auto;

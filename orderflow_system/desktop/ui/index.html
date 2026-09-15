@@ -336,6 +336,7 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                             <option value="120">120</option><option value="200" selected>200</option><option value="300">300</option></select></div>
                         <div class="field"><label>Overlays</label><div class="row">
                             <label class="switch"><input type="checkbox" id="hmTrades" checked> trades</label>
+                            <label class="switch" title="tint levels the engine has seen held past its wall-age threshold (2 min by default)"><input type="checkbox" id="hmAgeTint"> wall age</label>
                             <label class="switch"><input type="checkbox" id="hmEvents" checked> spoof/stack</label></div></div>
                         <div class="field"><label>&nbsp;</label><button class="btn small" id="hmAuto"><span id="hmAutoLabel">auto: on</span></button></div>
                     </div>
@@ -356,7 +357,7 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                             <thead><tr><th>Time</th><th>Kind</th><th>Price</th><th>Size</th><th>Detail</th></tr></thead><tbody></tbody></table></div></div>
                     <div class="card"><div class="card-head"><span class="card-title">Fresh walls</span></div>
                         <div class="card-body" style="padding:0"><table class="data" id="hmWallTable">
-                            <thead><tr><th>Price</th><th>Resting size</th><th>Distance</th></tr></thead><tbody></tbody></table></div></div>
+                            <thead><tr><th>Price</th><th>Resting size</th><th>Held</th><th>Distance</th></tr></thead><tbody></tbody></table></div></div>
                 </div>
             </section>
 

@@ -121,6 +121,24 @@ async def atlas_capabilities() -> dict[str, Any]:
 
 # ── analyzers ───────────────────────────────────────────────────────────────
 
+def attach_wall_ages(snapshot: dict[str, Any], heatmap: Any) -> dict[str, Any]:
+    """The walls the map draws, each with how long it has held.
+
+    `wall_prices` answers size and freshness; `wall_durations` answers the streak the `wall_age` alert
+    fires on. The map could only ever show the first, so a level that had held for ten minutes looked
+    exactly like one that appeared a second ago. One shape here serves the walls table, the cursor
+    readout and the age tint, and the threshold travels with it so the UI can say "held" with the
+    engine's own definition rather than one of its own.
+    """
+    walls = heatmap.wall_prices(top=12)
+    held = {r["price"]: int(r.get("held_ms") or 0) for r in heatmap.wall_durations()}
+    for w in walls:
+        w["held_ms"] = int(held.get(w["price"], 0))
+    snapshot["walls"] = walls
+    snapshot["wall_age_ms"] = int(getattr(heatmap, "wall_age_ms", 120_000))
+    return snapshot
+
+
 @router.get("/heatmap/{symbol}")
 async def heatmap(symbol: str, columns: int = Query(default=300, le=900),
                   rows: int = Query(default=220, le=400)) -> dict[str, Any]:
@@ -129,8 +147,7 @@ async def heatmap(symbol: str, columns: int = Query(default=300, le=900),
         return {"symbol": symbol, "buckets": [], "prices": [], "values": [], "traded": [],
                 "events": [], "stats": {}, "note": "no data yet — start the engine or a replay"}
     snap = h.snapshot_heatmap(symbol, columns=columns, max_rows=rows)
-    snap["walls"] = h.ensure(symbol).heatmap.wall_prices(top=12)
-    return snap
+    return attach_wall_ages(snap, h.ensure(symbol).heatmap)
 
 
 @router.get("/tape/{symbol}")

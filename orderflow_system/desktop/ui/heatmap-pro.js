@@ -105,8 +105,12 @@
         const r = c.getBoundingClientRect();
         const nc = (P.last && P.last.buckets && P.last.buckets.length) || 1;
         const nr = (P.last && P.last.prices && P.last.prices.length) || 1;
-        return { rect: r, w: r.width, h: r.height, plotW: r.width - 74, plotH: r.height - 22,
-                 cw: (r.width - 74) / nc, chh: (r.height - 22) / nr, nc: nc, nr: nr };
+        /* The map owns its insets (atlas.js's HEAT_INSET): reading them off the window keeps this
+           overlay on exactly the same plot box, with the old numbers only as a fallback. */
+        const inset = window.OFAPHEAT_INSET || { right: 74, bottom: 22 };
+        const plotW = r.width - inset.right, plotH = r.height - inset.bottom;
+        return { rect: r, w: r.width, h: r.height, plotW: plotW, plotH: plotH,
+                 cw: plotW / nc, chh: plotH / nr, nc: nc, nr: nr };
     }
 
     function cellAt(ev) {
@@ -208,6 +212,25 @@
         });
     }
 
+    /* How long the level under the cursor has HELD, when it is one of the walls: size alone cannot
+       tell a level that just appeared from one defended for ten minutes (P1-6). */
+    function wallHeldLine(h) {
+        const d = P.last;
+        if (!d || !(d.walls || []).length || h.price == null) return '';
+        const step = (d.prices && d.prices.length > 1) ? Math.abs(d.prices[1] - d.prices[0]) : null;
+        let best = null, bestD = Infinity;
+        (d.walls || []).forEach((w) => {
+            const dd = Math.abs(Number(w.price) - h.price);
+            if (dd < bestD) { bestD = dd; best = w; }
+        });
+        if (!best || (step != null && bestD > step)) return '';
+        const ms = Number(best.held_ms) || 0;
+        if (!ms) return '<div>held <b>just now</b></div>';
+        const age = ms >= 60000 ? (ms / 60000).toFixed(1) + ' min' : Math.round(ms / 1000) + ' s';
+        const floor = Number(d.wall_age_ms) || 120000;
+        return '<div>held <b>' + age + '</b>' + (ms >= floor ? ' <span style="opacity:.75">(wall)</span>' : '') + '</div>';
+    }
+
     /* ── markers: pinned levels, in data space, remembered per symbol ──────────────────────────────
        They were session-only; they now live in the config's `markers` block as price/bucket/size/note
        (never pixels), so a reload or a restart brings them back on the symbol they belong to. */
@@ -282,7 +305,8 @@
             '<div>this price, whole window <b>' + h.row_depth.toFixed(1) + '</b></div>' +
             '<div>whole book, this bucket <b>' + h.bucket_depth.toFixed(1) + '</b></div>' +
             (h.traded ? '<div>executed here <b>' + h.traded.toFixed(2) + '</b></div>' : '') +
-            (h.events ? '<div>spoof/stack here <b>' + h.events.toFixed(2) + '</b></div>' : '');
+            (h.events ? '<div>spoof/stack here <b>' + h.events.toFixed(2) + '</b></div>' : '')
+            + wallHeldLine(h);
         const g = geom() || { plotW: 320 };
         tip.style.left = Math.max(4, Math.min(h.x + 14, g.plotW - 10)) + 'px';
         tip.style.top = Math.max(6, h.y - 70) + 'px';
@@ -409,12 +433,15 @@
         opts = opts || {};
         const minSize = Number(Math.max(0.01, (size || 0) * (opts.sizeShare || 0.8)).toFixed(4));
         /* Tolerance defaults to two drawn price steps, and the user can set their own: a level
-           alert on a 0.5-grid instrument and on a 0.0001 one should not share a number. */
+           alert on a 0.5-grid instrument and on a 0.0001 one should not share a number. It is asked
+           for in a FIELD, never with window.prompt: the frozen WebView is not guaranteed to render
+           one, and a button that silently does nothing is worse than no button. */
         let tol = levelTolerance();
-        const asked = window.prompt('Tolerance around ' + price + ' (price units):', String(tol));
-        if (asked === null) { say('alert cancelled'); return null; }
-        const parsed = Number(asked);
-        if (Number.isFinite(parsed) && parsed >= 0) tol = parsed;
+        const tolEl = document.querySelector('[data-hm-pro-tol]');
+        /* An EMPTY field means "use the default", not "zero": Number('') is 0, which would have
+           created a rule that fires only at the exact cent. */
+        const typed = (tolEl && String(tolEl.value).trim() !== '') ? Number(tolEl.value) : NaN;
+        if (Number.isFinite(typed) && typed > 0) tol = typed;
         const rule = {
             id: 'hm-' + String(P.symbol || 'sym') + '-' + String(price).replace('\.', '_') + '-' + Date.now().toString().slice(-6),
             name: (P.symbol || '') + ' ' + price + ' · ' +
@@ -505,6 +532,8 @@
         }
         box.innerHTML = 'selected <b>' + st.buckets + ' &times; ' + st.rows + '</b> cells · resting <b>' + st.total_depth.toFixed(1) +
             '</b> · heaviest <b>' + (st.heaviest.price == null ? '--' : st.heaviest.price) + '</b> (' + st.heaviest.size.toFixed(2) + ')' +
+            '<input class="hm-note" data-hm-pro-tol type="number" step="0.1" min="0" placeholder="± tol" title="price tolerance for the alert level — leave empty for the default, two drawn price steps">' +
+            '<input class="hm-note" data-hm-pro-mins type="number" step="1" min="1" placeholder="min" title="how many minutes the level must hold before the hold-alert fires (default 2)">' +
             ' <button class="btn small" data-hm-pro="alert-heavy">Alert: heaviest level</button>' +
             ' <button class="btn small" data-hm-pro="alert-hold">Alert: if this level holds</button>' +
             ' <button class="btn small" data-hm-pro="alert-stack">Alert: stacking here</button>' +
@@ -647,10 +676,10 @@
             const price = (st && st.heaviest.price != null) ? st.heaviest.price : (P.hud ? P.hud.price : null);
             const size = (st && st.heaviest.price != null) ? st.heaviest.size : (P.hud ? P.hud.size : 0);
             if (price == null) { say('box a region (or hover a level) first'); return; }
-            const asked = window.prompt('Alert when this level has held for how many minutes?', '2');
-            if (asked === null) return;
-            const mins = Number(asked);
-            if (!Number.isFinite(mins) || mins <= 0) { say('that is not a duration'); return; }
+            const minsEl = document.querySelector('[data-hm-pro-mins]');
+            const typedMins = minsEl ? Number(minsEl.value) : NaN;
+            const mins = Number.isFinite(typedMins) && typedMins > 0 ? typedMins : 2;
+            if (minsEl && !minsEl.value) minsEl.value = String(mins);
             alertOnLevel(price, size, 'wall_age', { minAgeS: Math.round(mins * 60), sizeShare: 0.5 });
             return;
         }
