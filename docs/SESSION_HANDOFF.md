@@ -895,3 +895,31 @@ listener) than what `telemetry()` reports (subscriber references). One of the tw
 one-line reconciliation so the number means one thing.
 
 Gates: 483 passed / 2 skipped, AUDIT CLEAN, shell selftest 22 ok, bus 12 ok.
+
+
+### 30. 2026-09-16 — the working tree is committed (local only, nothing pushed)
+
+`master` moved off `b2ff4ee` for the first time, in seven commits grouped by area — not by phase, because
+`api.py`, `ui.js` and `index.html` were each touched by several phases and a phase split would have needed
+`git add -p` to leave a file half-staged. Nothing here is pushed: `origin` is
+`github.com/mahmoud20138/OrderFlow-Analysis-Pro` (the original project), and the branch is 7 ahead of it.
+
+  `4b142f1` docs: session handoff, terminal/Quantower plan and audit report                  (58 files)
+  `639dd00` feat(desktop): terminal mode, panels, platform realm                             (76)
+  `d848421` feat(data): Alpaca and DTC feeds, enums, Bookmap reader and add-on                 (9)
+  `4776ac0` feat(atlas): analytics package and its gates                                      (23)
+  `bd3cbd5` test: the suite, fixtures and testdata                                            (54)
+  `a5d9909` chore(tooling): UI audit, exe packaging, workflows, assets                        (10)
+  `e967d02` chore: earlier-session work in settings, dashboard, analytics and data            (15)
+
+The last commit is the pre-existing uncommitted work from earlier sessions (~1,900 changed lines in
+`config/settings.py`, `main.py`, `dashboard/`, `analytics/`, `data/`, README, CONTRIBUTING), kept in its
+own commit so it stays separable from this work. Identity is repo-local: `ModdySwag
+<ModdySwag@users.noreply.github.com>` — no real address, and nothing global was changed.
+
+Verified after the last commit, against the committed tree: **483 passed / 2 skipped**, AUDIT CLEAN,
+`git status` empty, and no `*.db`, `*.log`, `.env`, `dist/`, `build/`, `.venv/` or `__pycache__` in the
+tracked files (largest tracked files are two docs screenshots and the vendored lightweight-charts bundle).
+
+Open, unchanged by this: the chip's `sub` count vs `telemetry().subscribers` disagreement (§29), the
+watchlist's configured-instrument rows (§27) and the two cosmetics in §25.
