@@ -1049,3 +1049,79 @@ colour-blind ramps are P1-8; and the light shell has been looked at on the two s
 
 Next: **P1-2, the cursor-link spine** — one hover lighting the profile, CVD, depth, tape and imbalance
 strip at once, surviving repaint, resize and a symbol switch.
+
+
+---
+
+## §34 — P1-2: the cursor spine adopted by six panels (2026-09-16)
+
+**What this closes.** P1-2 asked for one hover lighting the profile, CVD, depth, tape and imbalance at
+once, surviving repaint, resize and a symbol switch. The store (`cursor-link.js`) existed; what was
+missing was *adoption* — only the engine published, and only the ladder listened.
+
+**The module now carries the whole contract.** `move(price, timeMs, source)` / `clear(source)` /
+`set` / `select` / `subscribe(fn) → unsubscribe` / `nearest(prices, tol)` / `step(prices)` /
+`text()` / `badge(host)`, one `state` of `{price, timeMs, source, selection, at}`. Two of those are
+new and both matter:
+
+* **`unsubscribe`** — panels subscribe for their lifetime and a panel torn down in terminal mode has
+  to let go; the old `subscribe` returned the callback and there was no way out.
+* **`badge(host)`** — one badge element per host, driven by the one store, so six panels cannot
+  disagree about what the cursor is on. The badge reads `price · time` with `tabular-nums`, is
+  silent (`— · —`) when the cursor is clear, and takes the trace token's colour when it is not.
+
+A field the caller did not mention is *not* a change: `move()` carries no `selection`, and treating
+that `undefined` as "cleared" woke every panel on every mouse move (caught by the new selftest).
+
+**Six panels, one price.**
+
+| Panel | Publishes | Follows |
+|---|---|---|
+| Heatmap (`heatmap-pro.js`) | level + bucket under the pointer; clears on leave | draws the shared level as a line + price tag at both edges; repaints only when the drawn level changed |
+| Depth ladder (`orderbook.js`) | the rung under the pointer | `setTrace(nearest)` — now with an early-out on an unchanged level |
+| Tape (`tape.js`) | the print under the pointer (price + time) | marks rows at the cursor's price; rows carry `data-price`/`data-time`; re-applied on every insert, skipping the pass when the level has not moved |
+| Profile (`atlas.js`) | — | marks TPO rows at the cursor's price; re-applied after each rebuild |
+| Engine (`ofx.js` / `ofx-view.js`) | already did | already did; now carries the badge |
+| CVD / trackers / heatmap / profile heads | — | badge |
+
+**Script order is a build detail, not behaviour.** `atlas.js` and `heatmap-pro.js` load *before*
+`cursor-link.js` in `index.html`, so their subscriptions and badges were silently skipped (found
+live: 4 badges instead of 8). Both now wait for the module (`whenCursorReady`), and the live pass
+shows 8/8.
+
+**The gate, measured.** Hovering the heatmap canvas with a real pointer event:
+
+* at **76332.12** — the engine's readout `cursor 76332.12 · on the ladder`; the ladder rung at
+  `76332` traced; **10** tape rows marked (76332.3, 76332.2, 76332.2 …); four badges reading
+  `76332.12 · 02:05:02`.
+* at **76398.84** — **9** profile rows marked (76399.3 … 76398.4), `8/8` badges agreeing on one text;
+  the engine says `outside the drawn ladder levels`, which is true — the ladder draws ~15 levels
+  around the mid, the profile's published bracket is 76388.4–76411.6, and a panel that is not
+  showing the level says so instead of inventing a match.
+* Persistence: the same marks and the same price survived a **1366×900** resize and a forced
+  `loadMarketProfile()` rebuild (both panels re-derive the mark from the store — canon #3).
+
+Screenshot: `docs/screenshots/p12-cursor-spine.png` (the map carrying the shared level + badge).
+
+**Decisions on the record**
+
+1. **The cursor is transient; the pointer leaving the owning panel clears its claim.** Verified: a
+   view switch away from the heatmap leaves every badge at `— · —` rather than a stale level. A
+   *sticky* level (park it and walk to the ladder) is a selection, and that is P1-3's click model —
+   two different intents should not share one state.
+2. **A panel marks only what it draws.** Out-of-window hovers produce an explicit "outside the drawn
+   ladder levels" note, not a nearest-row fudge.
+
+**Not covered, plainly.** The CVD canvas and the imbalance strip carry the badge but no drawn cursor
+line yet (they need the series→time index mapping, which belongs with P1-3's selection maths); the
+sandbox has one symbol, so the **symbol-switch** half of the gate is unproven; and the terminal-mode
+grid overlapped frames in the sandbox layout, which is why the four-panels-at-once pass was measured
+in a 6-widget composition and the visual record is the classic view.
+
+Gates after the pass: **496 passed / 2 skipped**, AUDIT CLEAN (now auditing `cursor-link.js` too),
+`node --check` on every module, and all **thirteen** selftests green — the new `cursor-link` one at
+**6 ok**, ofx 119 · shell 22 · bus 13 · links 10 · watchlist 17 · news 17 · options 21 ·
+fundamentals 18 · market-pressure 12 · intent 7 · study-api 45.
+
+Next: **P1-3, selection is measurement everywhere** — a drag over bars, a level, a time range or
+markers yields the statistics strip, with the `selection` slot that P1-2 put in the store.

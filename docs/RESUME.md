@@ -1,15 +1,15 @@
 # Resume here — ModFlow OrderFlow Analysis Suite
 
 One page for picking this up cold. The full trail lives in `docs/SESSION_HANDOFF.md`
-(§24–§33 cover the terminal-mode build, the bus, the panels, the commit series, the P0 trust pass and
-the theme/token layer); `docs/DX_TERMINAL_AND_QUANTOWER_PLAN.md` is the phase plan with the decisions
-behind it, and `docs/UPGRADE_ACTION_PLAN.md` is the prioritised plan of action — from `report1.txt`,
-corrected against the tree. **P0 is done (§32) and P1-1, the theme/token layer, is done (§33); the next
-work item is P1-2, the cursor-link spine.**
+(§24–§34 cover the terminal-mode build, the bus, the panels, the commit series, the P0 trust pass, the
+theme/token layer and the cursor spine); `docs/DX_TERMINAL_AND_QUANTOWER_PLAN.md` is the phase plan with
+the decisions behind it, and `docs/UPGRADE_ACTION_PLAN.md` is the prioritised plan of action — from
+`report1.txt`, corrected against the tree. **P0 is done (§32), P1-1 (§33) and P1-2 (§34) are done; the
+next work item is P1-3, selection as measurement everywhere.**
 
 ## Where it stands
 
-- **Branch `master`, HEAD = the `docs:` commit that closes P1-1** (top of the branch, tree clean,
+- **Branch `master`, HEAD = the `docs:` commit that closes P1-2** (top of the branch, tree clean,
   nothing pushed; `git log -1` names it). Recent work, by area: the four P0 fixes (`443008d` desktop,
   `7a81bf6` the cursor-trace contract, `65672f2` book integrity, `d83e7a0` broadcast queues), then the
   theme layer — the token block + `themes/` + `theme.js` + the Appearance card.
@@ -39,7 +39,7 @@ check `orderflow.log` for `client error:` lines.
 
 | What | Where |
 |---|---|
-| The upgrade plan's **P1** work: start with P1-1, the theme/token layer (`atlas.css` holds zero `--of-` tokens today — its grep gate is cheap and every colour decision below it needs the tokens), then the cursor-link spine and the strips. | plan §2 |
+| The upgrade plan's **P1** work: P1-1 (tokens) and P1-2 (the cursor spine) are done — continue with P1-3, selection as measurement everywhere (the store's `selection` slot is in place), then the strips. | plan §2, handoff §34 |
 | Watchlist: configured-instrument rows ("—" rows beside the demo list) — wired to the 2 s beat, not re-checked live. Recipe: add `ZZZTEST` to the config's instrument list, reload, expect a row. | handoff §27 |
 | Bus chip's `sub` count disagrees with `telemetry().subscribers` (measured `1 sub · 2 ch` vs 3) — two counters, one mis-named. | handoff §29 |
 | Fundamentals supply cell and the options gamma precision — both fixed, cosmetic residue noted. | handoff §25 |

@@ -141,10 +141,12 @@ next gate run: `dist/` matches are only CPython's own `unicodedata.pyd`, not our
 
 ### P1 — the interaction canon and spec alignment
 
-**Status 2026-09-16: P1-1 is done** (handoff §33) — the token block, `themes/`, `theme.js`, the
-Appearance card, and the brief's grep gate at **0** across `atlas.css`, `ui.css`, `modules.css` and the
-five theme files; the dark default moved no pixel, and light/contrast/dense/accents were measured live at
-1024×640 and 2560×1440. **Next: P1-2, the cursor-link spine.**
+**Status 2026-09-16: P1-1 and P1-2 are done** (handoff §33, §34) — the token block, `themes/`,
+`theme.js`, the Appearance card and the brief's grep gate at **0** (P1-1); and the cursor spine adopted
+by six panels, measured live with a real pointer (P1-2): one heatmap hover at 76332.12 lit the engine's
+readout, the ladder rung and 10 tape rows with four badges on one text, a hover at 76398.84 marked 9
+profile rows with 8/8 badges agreeing, and both survived a 1366×900 resize and a forced rebuild.
+**Next: P1-3, selection as measurement.**
 
 **P1-1 · Theme and token layer first (brief A). — do this before any visual polish below.** L
 Unstarted: `atlas.css` contains **zero** `--of-` tokens (`grep -c -- '--of-'` → 0) and there is no
@@ -162,6 +164,16 @@ canon's test is *four panels at once*: profile, CVD, depth, tape and the imbalan
 the same hover/selection, and the highlight must survive repaint, resize and symbol switch. Norm:
 recognition over recall (§3.4). Gate: one live pass — hover a level, count the panels that light, resize,
 confirm the highlight is still there at the same price.
+
+**Done 2026-09-16 (§34).** `cursor-link.js` owns `move`/`clear`/`set`/`select`/`subscribe` (now with a
+real unsubscribe) plus `nearest`/`step`/`text`/`badge`; the heatmap publishes and draws the shared
+level, the ladder publishes and traces, the tape publishes and marks its rows at the cursor's price,
+the profile marks its TPO rows, the engine does both, and eight badges across six panels read from the
+one store. Gate measured: 76332.12 → engine "on the ladder" + rung 76332 traced + 10 tape rows + four
+badges on `76332.12 · 02:05:02`; 76398.84 → 9 profile rows + 8/8 badges; both survived a 1366×900
+resize and a forced `loadMarketProfile()` rebuild. Limits: clear-on-leave by design (a sticky level is
+P1-3's click-selection), no drawn cursor line in the CVD/imbalance canvases yet, symbol switch
+unproven (one symbol in the sandbox).
 
 **P1-3 · Selection is measurement everywhere (brief E).** M
 A drag over bars, a level, a time range or markers yields the statistics strip (volume, delta, resting
