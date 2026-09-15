@@ -1,14 +1,16 @@
 # Resume here — ModFlow OrderFlow Analysis Suite
 
 One page for picking this up cold. The full trail lives in `docs/SESSION_HANDOFF.md`
-(§24–§30 cover the terminal-mode build, the bus, the panels and the commit series);
-`docs/DX_TERMINAL_AND_QUANTOWER_PLAN.md` is the phase plan with the decisions behind it.
+(§24–§31 cover the terminal-mode build, the bus, the panels and the commit series);
+`docs/DX_TERMINAL_AND_QUANTOWER_PLAN.md` is the phase plan with the decisions behind it, and
+`docs/UPGRADE_ACTION_PLAN.md` is the prioritised plan of action — from `report1.txt`, corrected against the
+tree — so start there for what to do next.
 
 ## Where it stands
 
-- **Branch `master`, HEAD `c41c450`** — the tree is committed and clean. It was stuck at `b2ff4ee` for the
-  whole build; the seven commits are grouped by area (docs, desktop, data, atlas, tests, tooling, and the
-  earlier-session work in `settings.py`/`dashboard`/`analytics`).
+- **Branch `master`, HEAD `bcb94ea`** — the tree is committed and clean. It was stuck at `b2ff4ee` for the
+  whole build; the nine commits are grouped by area (docs, desktop, data, atlas, tests, tooling, the
+  earlier-session work in `settings.py`/`dashboard`/`analytics`, and the resume doc).
 - **Nothing is pushed.** `origin` is `github.com/mahmoud20138/OrderFlow-Analysis-Pro` — the original
   project, not Moddy's. Putting this on his own GitHub is a remote/fork decision, one command when asked.
 - Local identity is `ModdySwag <ModdySwag@users.noreply.github.com>` (repo-local, nothing global changed).
@@ -35,6 +37,7 @@ check `orderflow.log` for `client error:` lines.
 
 | What | Where |
 |---|---|
+| The upgrade plan's **P0 trust pass**: the three unverified visuals, the watchlist configured rows, the bus counter, sweep R2/R3, and the single `hermes` string in `desktop/api.py:1525`. | plan §2 |
 | Watchlist: configured-instrument rows ("—" rows beside the demo list) — wired to the 2 s beat, not re-checked live. Recipe: add `ZZZTEST` to the config's instrument list, reload, expect a row. | handoff §27 |
 | Bus chip's `sub` count disagrees with `telemetry().subscribers` (measured `1 sub · 2 ch` vs 3) — two counters, one mis-named. | handoff §29 |
 | Fundamentals supply cell and the options gamma precision — both fixed, cosmetic residue noted. | handoff §25 |

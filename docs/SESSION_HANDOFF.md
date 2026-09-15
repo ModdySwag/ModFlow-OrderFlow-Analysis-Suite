@@ -923,3 +923,31 @@ tracked files (largest tracked files are two docs screenshots and the vendored l
 
 Open, unchanged by this: the chip's `sub` count vs `telemetry().subscribers` disagreement (§29), the
 watchlist's configured-instrument rows (§27) and the two cosmetics in §25.
+
+
+### 31. 2026-09-16 — report1.txt reconciled, and the upgrade plan written
+
+The owner asked for a plan of action built from `report1.txt` (the audit comparing `ai prompt.txt` to the
+build). It was re-verified against the tree before planning, because it was written before the engine view's
+wiring landed and two of its three headline gaps no longer exist:
+
+| report1 said | the tree says |
+|---|---|
+| no DOM tooltip panel consuming `state.hover` | `ofx-view.js:492` → `paintTip` (:401, `#ofxTip`) + `paintReadout` (:320, `#ofxReadout`, the full metric set) |
+| no "snap to live" sparkline widget | `#ofxSnapFloat` + `#ofxSpark2` (`index.html:248`), `paintSpark` (`ofx-view.js:277`), shown in historical mode only, click = `snapToLive()` |
+| no lambda control; no perf HUD | `#ofxLambda` (`index.html:230`); the stats line (`ofx-view.js:256`) carries frames · EMA · p95 · max · LOD · col width · levels |
+| `footprint.js` looks dead — remove | it is `orderflow_system/dashboard/static/footprint.js`, still loaded by `index.html:764` and built by `ui.js ensurePanel('orderflow')` — the keep/retire call is sweep R7, not a delete |
+
+What report1 had right and is still open: `hover()` costs O(prints + heat cells + bars) per mousemove
+(`ofx.js:1778` — and `:1774` re-scans the whole depth matrix, `:1763` re-sums CVD from bar 0, neither of
+which the audit saw); `cell.peak`'s flat 0.92 ghost (`:1150`); the stacked-zone projection and
+imbalance-glow cosmetics; `carry_forward` has no on-screen indicator. One new compliance find:
+`desktop/api.py:1525` is the only `hermes` match in source (non-negotiable #7).
+
+Plan: **`docs/UPGRADE_ACTION_PLAN.md`** — P0 trust pass (the three unverified visuals, watchlist rows, bus
+counter, sweep R2/R3, the hermes string), P1 the interaction canon and spec alignment (theme/token layer
+first — `atlas.css` holds zero `--of-` tokens today), P2 measured performance, P3 backend/packaging/
+deferred, each with its gate, the design principles the ordering follows, and the evidence appendix.
+Gates at writing: 483 passed / 2 skipped, AUDIT CLEAN; selftests ofx 119, shell 22, bus 12, links 10,
+watchlist 15, news 17, options 21, fundamentals 18, market-pressure 12, intent 7, study-api 45,
+search-ops pass.
