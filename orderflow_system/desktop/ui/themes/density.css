@@ -1,0 +1,25 @@
+/* themes/density.css — comfortable / compact / dense, bound to one token.
+ *
+ * `--of-row-h` is the row unit: the rules below are the shell's rows measured in it, so a density is
+ * a number rather than a rewrite of every panel. The height-driven `ui-compact` mode (scale.js) is
+ * orthogonal and still applies — a short window tightens the chrome whatever density is chosen.
+ */
+:root[data-density="comfortable"] { --of-row-h: 32px; }
+:root[data-density="compact"]     { --of-row-h: 26px; }
+:root[data-density="dense"]       { --of-row-h: 22px; }
+
+/* the rows that read from it */
+:root[data-density] .nav-item { min-height: var(--of-row-h); }
+:root[data-density] table.data td { height: var(--of-row-h); }
+:root[data-density] .log-line { min-height: calc(var(--of-row-h) - 6px); }
+:root[data-density] .wl-row { min-height: var(--of-row-h); }
+
+:root[data-density="compact"] .nav-item { padding-top: 4px; padding-bottom: 4px; }
+:root[data-density="compact"] table.data td { padding: 4px 11px; }
+:root[data-density="compact"] .card-body { padding: 12px; }
+
+:root[data-density="dense"] .nav-item { padding-top: 2px; padding-bottom: 2px; font-size: 12px; }
+:root[data-density="dense"] table.data td { padding: 2px 10px; font-size: 12px; }
+:root[data-density="dense"] .card-body { padding: 10px; }
+:root[data-density="dense"] .view { gap: 10px; }
+:root[data-density="dense"] .log-list { font-size: 11px; }

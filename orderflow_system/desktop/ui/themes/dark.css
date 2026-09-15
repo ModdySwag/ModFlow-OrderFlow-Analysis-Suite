@@ -1,0 +1,11 @@
+/* themes/dark.css — the default shell.
+ *
+ * The base token block in atlas.css already carries the dark values, so this file is the explicit
+ * anchor of the set: `[data-theme="dark"]` re-states the values that the other two themes change
+ * *outside* the triples (elevation), so switching light → dark → contrast → dark is complete without
+ * depending on attribute removal.
+ */
+:root[data-theme="dark"] {
+    --of-shadow:       0 8px 22px rgba(var(--of-black-rgb),.5);
+    --of-shadow-sheet: 0 18px 60px rgba(var(--of-black-rgb),.55);
+}

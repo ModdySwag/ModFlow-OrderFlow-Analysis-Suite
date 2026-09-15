@@ -1,0 +1,91 @@
+/* themes/contrast.css — the high-contrast shell.
+ *
+ * Built for a trading desk in bad light and for anyone who needs the screen to shout: black ground,
+ * white ink, hard borders, saturated signals, no soft tints. Same token set as every other theme, so
+ * nothing in the shell has to know this file exists.
+ */
+:root[data-theme="contrast"] {
+    --of-bg-rgb:          0,0,0;
+    --of-bg-deep-rgb:     0,0,0;
+    --of-canvas-rgb:      0,0,0;
+    --of-surface-rgb:     8,10,14;
+    --of-surface-2-rgb:   4,5,8;
+    --of-elevated-rgb:    14,17,24;
+    --of-input-rgb:       0,0,0;
+    --of-float-rgb:       4,5,8;
+    --of-deep-rgb:        0,0,0;
+    --of-panel-alt-rgb:   6,8,12;
+    --of-track-rgb:       40,46,58;
+    --of-scroll-rgb:      70,80,98;
+    --of-scroll-hi-rgb:   110,124,148;
+    --of-input-2-rgb:     0,0,0;
+    --of-surface-3-rgb:   6,8,12;
+    --of-deep-2-rgb:      2,3,5;
+    --of-void-rgb:        0,0,0;
+
+    --of-line-rgb:        120,132,152;
+    --of-line-strong-rgb: 168,180,200;
+    --of-steel-rgb:       190,204,224;
+    --of-steel-hi-rgb:    226,236,250;
+    --of-grey-rgb:        150,158,172;
+
+    --of-ink-rgb:         255,255,255;
+    --of-ink-2-rgb:       245,248,252;
+    --of-ink-3-rgb:       255,255,255;
+    --of-ink-hi-rgb:      250,252,255;
+    --of-ink-bright-rgb:  255,255,255;
+    --of-ink-soft-rgb:    232,238,246;
+    --of-ink-dim-rgb:     214,222,234;
+    --of-ink-dim2-rgb:    206,215,229;
+    --of-ink-slate-rgb:   222,230,240;
+    --of-ink-head-rgb:    240,245,252;
+    --of-ink-rail-rgb:    226,233,243;
+    --of-ink-tab-rgb:     216,224,236;
+    --of-ink-muted-rgb:   198,208,222;
+    --of-ink-muted2-rgb:  204,213,227;
+    --of-ink-faint-rgb:   190,200,216;
+    --of-ink-ghost-rgb:   182,192,210;
+    --of-ink-grey-rgb:    196,203,214;
+    --of-on-accent-rgb:   0,0,0;
+
+    --of-ok-rgb:          0,255,140;
+    --of-ok-2-rgb:        60,255,160;
+    --of-ok-soft-rgb:     90,255,180;
+    --of-ok-ink-rgb:      170,255,210;
+    --of-ok-bright-rgb:   220,255,238;
+    --of-err-rgb:         255,70,90;
+    --of-err-2-rgb:       255,96,110;
+    --of-err-ink-rgb:     255,205,212;
+    --of-warn-rgb:        255,190,60;
+    --of-warn-2-rgb:      255,200,80;
+    --of-warn-ink-rgb:    255,235,190;
+    --of-info-ink-rgb:    210,235,255;
+    --of-amber-rgb:       255,205,60;
+    --of-gold-rgb:        255,230,120;
+    --of-gold-2-rgb:      255,224,90;
+    --of-gold-3-rgb:      255,238,170;
+    --of-cyan-rgb:        60,240,255;
+    --of-cyan-2-rgb:      130,246,255;
+    --of-cyan-3-rgb:      90,240,255;
+    --of-cyan-deep-rgb:   0,180,230;
+    --of-trace-rgb:       120,220,255;
+    --of-trace-2-rgb:     170,235,255;
+    --of-link-rgb:        120,200,255;
+    --of-link-2-rgb:      150,215,255;
+    --of-violet-rgb:      220,170,255;
+
+    --of-accent-rgb:      90,170,255;
+    --of-accent-2-rgb:    60,140,255;
+    --of-accent-3-rgb:    150,140,255;
+
+    --of-shadow:          0 0 0 1px rgba(var(--of-line-strong-rgb),.9);
+    --of-shadow-sheet:    0 0 0 2px rgba(var(--of-line-strong-rgb),1);
+}
+
+/* Hard edges and thicker separators are part of the mode, not decoration. */
+:root[data-theme="contrast"] .card,
+:root[data-theme="contrast"] .widget-frame,
+:root[data-theme="contrast"] .menu-panel,
+:root[data-theme="contrast"] .overlay-sheet,
+:root[data-theme="contrast"] .kpi { border-width: 2px; }
+:root[data-theme="contrast"] .nav-item.active { outline: 2px solid var(--of-accent); }

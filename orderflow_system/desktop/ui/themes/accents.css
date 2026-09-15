@@ -1,0 +1,18 @@
+/* themes/accents.css — the eight accents (the Windows 8 palette the owner's reference uses).
+ *
+ * One accent drives selection, focus rings, the active rail item and the primary button — and because
+ * every tint in the shell is derived (`rgba(var(--of-accent-rgb),.13)`), changing the triple changes
+ * the whole system, including the soft backgrounds, in one line.
+ */
+:root[data-accent="cobalt"]  { --of-accent-rgb: 79,140,255;  --of-accent-2-rgb: 61,123,245; --of-accent-3-rgb: 90,103,232; }
+:root[data-accent="teal"]    { --of-accent-rgb: 0,171,169;   --of-accent-2-rgb: 0,150,148;  --of-accent-3-rgb: 0,190,188; }
+:root[data-accent="green"]   { --of-accent-rgb: 96,169,23;   --of-accent-2-rgb: 82,148,18;  --of-accent-3-rgb: 118,186,40; }
+:root[data-accent="lime"]    { --of-accent-rgb: 164,196,0;   --of-accent-2-rgb: 142,172,0;  --of-accent-3-rgb: 186,214,30; }
+:root[data-accent="amber"]   { --of-accent-rgb: 240,163,10;  --of-accent-2-rgb: 214,142,6;  --of-accent-3-rgb: 255,186,50; }
+:root[data-accent="orange"]  { --of-accent-rgb: 250,104,0;   --of-accent-2-rgb: 220,88,0;   --of-accent-3-rgb: 255,132,40; }
+:root[data-accent="magenta"] { --of-accent-rgb: 216,0,115;   --of-accent-2-rgb: 190,0,100;  --of-accent-3-rgb: 236,40,148; }
+:root[data-accent="violet"]  { --of-accent-rgb: 170,0,255;   --of-accent-2-rgb: 148,0,224;  --of-accent-3-rgb: 196,60,255; }
+
+/* Text sitting on a filled accent: dark ink for the light accents, white for the deep ones. */
+:root[data-accent="lime"] { --of-on-accent-rgb: 22,26,0; }
+:root[data-accent="amber"] { --of-on-accent-rgb: 32,22,0; }

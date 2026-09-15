@@ -65,6 +65,38 @@ def test_the_cursor_link_and_the_ladder_agree_on_the_price_attribute():
         "distance, so a price well outside the drawn band was announced as 'on the ladder'")
 
 
+def test_the_appearance_layer_is_wired():
+    """Theme, accent and density: the stylesheets, the pre-paint mirror, the module and its controls.
+
+    The appearance is applied by an attribute on <html> and painted before the body exists (an
+    appearance that lands a frame late is a flash), so all four parts have to be present: the files
+    that define the tokens, the script that reads the mirror before paint, the module that reads the
+    config, and the switches that write both.
+    """
+    html = _html()
+    for name in ("dark", "light", "contrast", "accents", "density"):
+        assert (UI / "themes" / f"{name}.css").is_file(), f"themes/{name}.css is missing"
+        assert f'href="/desktop/themes/{name}.css"' in html, f"themes/{name}.css is not loaded"
+        text = (UI / "themes" / f"{name}.css").read_text(encoding="utf-8", errors="replace")
+        assert "--of-" in text, f"themes/{name}.css declares no tokens"
+    assert (UI / "theme.js").is_file() and '<script src="/desktop/theme.js"></script>' in html
+    assert "ofap.appearance" in html, "the pre-paint mirror is not read in <head>"
+    for control in ("setTheme", "setAccent", "setDensity"):
+        assert f'id="{control}"' in html, f"{control} is not in Settings"
+
+
+def test_no_raw_colour_lives_outside_the_token_block():
+    """The brief's grep gate as a test: the shell themes by swapping tokens, so a rule that hard-codes
+    a colour is a rule that stays dark in the light shell."""
+    files = [UI / "atlas.css", UI / "ui.css", UI / "modules.css"] + sorted((UI / "themes").glob("*.css"))
+    offenders = []
+    for path in files:
+        for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if re.search(r"#[0-9a-fA-F]{3,8}\b", line) and "--of-" not in line:
+                offenders.append(f"{path.name}:{number}: {line.strip()[:90]}")
+    assert not offenders, "raw colours outside the token block:\n" + "\n".join(offenders[:10])
+
+
 def test_every_script_tag_resolves_to_a_file():
     """A tag with no file behind it is the one thing that empties the UI — so it is a test, not a habit."""
     html = _html()

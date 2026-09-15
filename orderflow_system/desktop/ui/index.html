@@ -7,6 +7,20 @@
 <link rel="stylesheet" href="/desktop/ui.css">
 <link rel="stylesheet" href="/desktop/modules.css">
 <link rel="stylesheet" href="/desktop/atlas.css">
+<link rel="stylesheet" href="/desktop/themes/dark.css">
+<link rel="stylesheet" href="/desktop/themes/light.css">
+<link rel="stylesheet" href="/desktop/themes/contrast.css">
+<link rel="stylesheet" href="/desktop/themes/accents.css">
+<link rel="stylesheet" href="/desktop/themes/density.css">
+<script>
+/* appearance before the first paint: the config file is the record, this mirror only kills the flash
+   (theme.js reads the config on load and the config wins where the two disagree) */
+(function () { try { var v = JSON.parse(localStorage.getItem('ofap.appearance') || 'null') || {};
+var d = document.documentElement;
+if (v.theme) d.dataset.theme = v.theme;
+if (v.accent) d.dataset.accent = v.accent;
+if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: the defaults stand */ } })();
+</script>
 </head>
 <body>
 <div class="app">
@@ -579,6 +593,27 @@
                 <div class="view-head"><div class="view-title">Settings</div>
                     <div class="view-sub" id="setSub">stored in your user config directory — no source edits</div></div>
                 <div class="grid cols-2">
+                    <div class="card"><div class="card-head"><span class="card-title">Appearance</span>
+                        <div class="spacer"></div><span class="dim">the config is the record — applied before the first paint</span></div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="field"><label>Theme</label><select id="setTheme">
+                                    <option value="dark">Dark</option>
+                                    <option value="light">Light</option>
+                                    <option value="contrast">High contrast</option></select></div>
+                                <div class="field"><label>Accent</label><select id="setAccent">
+                                    <option value="cobalt">Cobalt</option><option value="teal">Teal</option>
+                                    <option value="green">Green</option><option value="lime">Lime</option>
+                                    <option value="amber">Amber</option><option value="orange">Orange</option>
+                                    <option value="magenta">Magenta</option><option value="violet">Violet</option></select></div>
+                                <div class="field"><label>Density</label><select id="setDensity">
+                                    <option value="comfortable">Comfortable</option>
+                                    <option value="compact">Compact</option>
+                                    <option value="dense">Dense</option></select></div>
+                            </div>
+                            <div class="hint">Every colour in the shell reads from the token block in atlas.css: these three switches swap the tokens, never the layout.</div>
+                        </div></div>
+
                     <div class="card"><div class="card-head"><span class="card-title">Data &amp; engine</span></div>
                         <div class="card-body">
                             <div class="field"><label>Data source</label><select id="setSource">
@@ -768,6 +803,7 @@
 <script src="/static/performance.js"></script>
 <script src="/static/microstructure.js"></script>
 <script src="/desktop/ui.js"></script>
+<script src="/desktop/theme.js"></script>
 <script src="/desktop/atlas.js"></script>
 <!-- The arbiter must be parsed BEFORE atlas-v2.js runs its loader: that loader injects the rest of
      the modules (intent.js among them) and its guard looks for this exact attribute. With the tag

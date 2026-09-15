@@ -1,0 +1,90 @@
+/* themes/light.css — the light shell.
+ *
+ * Only the token triples change; every rule in the shell reads them, so nothing else has to know.
+ * The canvases keep their dark ground on purpose: the engine's own palette (ofx.js `math.theme`) is
+ * drawn for a dark surface — labels, grid and ramps are light-on-dark there — so a light stage would
+ * make them unreadable. Re-theming the canvas palette is expression work (plan P1-8), not this file.
+ */
+:root[data-theme="light"] {
+    /* surfaces */
+    --of-bg-rgb:          242,245,250;
+    --of-bg-deep-rgb:     7,11,18;          /* canvas ground — stays dark, see the header */
+    --of-canvas-rgb:      236,240,247;
+    --of-surface-rgb:     255,255,255;
+    --of-surface-2-rgb:   249,251,254;
+    --of-elevated-rgb:    238,242,248;
+    --of-input-rgb:       255,255,255;
+    --of-float-rgb:       252,253,255;
+    --of-deep-rgb:        246,248,252;
+    --of-panel-alt-rgb:   250,251,254;
+    --of-track-rgb:       213,219,231;
+    --of-scroll-rgb:      201,209,222;
+    --of-scroll-hi-rgb:   178,189,208;
+    --of-input-2-rgb:     255,255,255;
+    --of-surface-3-rgb:   246,248,252;
+    --of-deep-2-rgb:      250,251,254;
+    --of-void-rgb:        252,253,255;
+
+    /* lines */
+    --of-line-rgb:        208,216,229;
+    --of-line-strong-rgb: 186,196,212;
+    --of-steel-rgb:       122,142,172;
+    --of-steel-hi-rgb:    92,112,146;
+    --of-grey-rgb:        198,204,214;
+
+    /* ink */
+    --of-ink-rgb:         20,26,38;
+    --of-ink-2-rgb:       38,48,64;
+    --of-ink-3-rgb:       28,36,50;
+    --of-ink-hi-rgb:      32,41,56;
+    --of-ink-bright-rgb:  14,19,29;
+    --of-ink-soft-rgb:    60,72,92;
+    --of-ink-dim-rgb:     82,94,114;
+    --of-ink-dim2-rgb:    88,100,120;
+    --of-ink-slate-rgb:   64,76,96;
+    --of-ink-head-rgb:    68,81,102;
+    --of-ink-rail-rgb:    94,106,126;
+    --of-ink-tab-rgb:     100,112,132;
+    --of-ink-muted-rgb:   106,118,138;
+    --of-ink-muted2-rgb:  112,124,144;
+    --of-ink-faint-rgb:   118,130,150;
+    --of-ink-ghost-rgb:   126,138,158;
+    --of-ink-grey-rgb:    116,124,138;
+    --of-on-accent-rgb:   255,255,255;
+
+    /* semantics — the hues stay, darkened to hold contrast on white */
+    --of-ok-rgb:          20,146,84;
+    --of-ok-2-rgb:        28,144,80;
+    --of-ok-soft-rgb:     26,138,78;
+    --of-ok-ink-rgb:      16,110,64;
+    --of-ok-bright-rgb:   10,88,48;
+    --of-err-rgb:         202,44,58;
+    --of-err-2-rgb:       196,48,58;
+    --of-err-ink-rgb:     138,24,34;
+    --of-warn-rgb:        190,118,8;
+    --of-warn-2-rgb:      186,115,16;
+    --of-warn-ink-rgb:    118,68,8;
+    --of-info-ink-rgb:    32,72,138;
+    --of-amber-rgb:       162,116,18;
+    --of-gold-rgb:        170,120,0;
+    --of-gold-2-rgb:      176,124,0;
+    --of-gold-3-rgb:      148,104,0;
+    --of-cyan-rgb:        0,124,168;
+    --of-cyan-2-rgb:      0,116,156;
+    --of-cyan-3-rgb:      0,136,186;
+    --of-cyan-deep-rgb:   18,78,168;
+    --of-trace-rgb:       38,108,198;
+    --of-trace-2-rgb:     30,100,188;
+    --of-link-rgb:        30,100,192;
+    --of-link-2-rgb:      28,96,190;
+    --of-violet-rgb:      122,70,220;
+
+    /* accent */
+    --of-accent-rgb:      31,95,214;
+    --of-accent-2-rgb:    28,86,200;
+    --of-accent-3-rgb:    84,64,206;
+
+    /* elevation reads lighter on a light ground */
+    --of-shadow:          0 8px 22px rgba(var(--of-black-rgb),.16);
+    --of-shadow-sheet:    0 18px 60px rgba(var(--of-black-rgb),.22);
+}
