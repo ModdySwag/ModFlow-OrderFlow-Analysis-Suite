@@ -54,14 +54,41 @@ def _serialize(obj: Any) -> Any:
     return obj
 
 
+# One client's backlog, bounded. Big enough for a burst, small enough that a stalled socket is
+# noticed within seconds instead of growing without limit.
+QUEUE_MAX = 256
+# A write that has not completed in this long means the socket is wedged (half-open, or a client that
+# stopped reading). The client is dropped; the producer never waits for it.
+WRITE_TIMEOUT_S = 5.0
+# Channels whose backlog may be trimmed under pressure: for these, the newest state is what matters and
+# an old message is worth less than a new one. Everything else must arrive — a dropped signal is a lie.
+DROPPABLE = {Channel.TICK.value, Channel.ORDERBOOK.value, Channel.DELTA.value, Channel.STATS.value}
+
+
+class _Client:
+    """A connected client: its socket, its queue, the task draining it, and what it missed."""
+
+    __slots__ = ("ws", "queue", "task", "dropped")
+
+    def __init__(self, ws: WebSocket):
+        self.ws = ws
+        self.queue: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAX)
+        self.task: Optional[asyncio.Task] = None
+        self.dropped = 0
+
+
 class WebSocketManager:
     """
     Manages WebSocket connections and broadcasts data to all connected clients.
     Thread-safe via asyncio — all operations run on the event loop.
+
+    Broadcasts never write to a socket: they offer the message to each client's queue and return, and
+    one writer task per client does the writing. That is what keeps a slow reader from being everyone
+    else's problem, and what keeps `_lock` out of the delivery path entirely.
     """
 
     def __init__(self):
-        self._connections: list[WebSocket] = []
+        self._connections: list[_Client] = []
         self._lock = asyncio.Lock()
 
         # Throttle: channel → {symbol → last_broadcast_time}
@@ -88,18 +115,88 @@ class WebSocketManager:
         return len(self._connections)
 
     async def connect(self, ws: WebSocket):
-        """Accept and register a new WebSocket client."""
+        """Accept a client, give it a queue, and start its writer. Nothing is sent from here on."""
         await ws.accept()
+        client = _Client(ws)
         async with self._lock:
-            self._connections.append(ws)
+            self._connections.append(client)
+        client.task = asyncio.create_task(self._writer(client))
         logger.info(f"Dashboard client connected. Total: {len(self._connections)}")
 
     async def disconnect(self, ws: WebSocket):
-        """Remove a disconnected client."""
+        """Remove a client (and stop its writer) because the socket closed."""
+        client = None
         async with self._lock:
-            if ws in self._connections:
-                self._connections.remove(ws)
+            for candidate in self._connections:
+                if candidate.ws is ws:
+                    client = candidate
+                    self._connections.remove(candidate)
+                    break
+        if client is not None and client.task:
+            client.task.cancel()
         logger.info(f"Dashboard client disconnected. Total: {len(self._connections)}")
+
+    async def _writer(self, client: _Client) -> None:
+        """Drain one client's queue. Outside every lock, so a wedged socket hurts only itself."""
+        try:
+            while True:
+                message = await client.queue.get()
+                try:
+                    await asyncio.wait_for(client.ws.send_text(message), timeout=WRITE_TIMEOUT_S)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "WebSocket client write timed out after %.1fs, dropping it (%d message(s) "
+                        "already trimmed from its queue)",
+                        WRITE_TIMEOUT_S, client.dropped)
+                    break
+                except Exception:
+                    break
+        except asyncio.CancelledError:
+            raise
+        finally:
+            self._forget(client)
+
+    def _forget(self, client: _Client) -> None:
+        """Synchronous removal: safe from a writer's finally block, which cannot await."""
+        if client in self._connections:
+            self._connections.remove(client)
+
+    async def _offer(self, client: _Client, message: str, droppable: bool) -> None:
+        """Hand a message to one client's queue — the whole delivery path, and it does not block on
+        the socket. A full queue trims the oldest message for a throttleable channel (freshness beats
+        completeness there); for a channel that must arrive, it waits — bounded, because a producer
+        that never returns is worse than a client that missed one update."""
+        try:
+            client.queue.put_nowait(message)
+            return
+        except asyncio.QueueFull:
+            pass
+        if droppable:
+            try:
+                client.queue.get_nowait()
+                client.dropped += 1
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                client.queue.put_nowait(message)
+            except asyncio.QueueFull:
+                client.dropped += 1
+            return
+        try:
+            await asyncio.wait_for(client.queue.put(message), timeout=WRITE_TIMEOUT_S * 2)
+        except asyncio.TimeoutError:
+            client.dropped += 1
+            logger.warning("WebSocket client queue stayed full for %.1fs, one message was not delivered",
+                           WRITE_TIMEOUT_S * 2)
+
+    def delivery_stats(self) -> dict:
+        """What the queues are doing — the numbers a test (or a status line) can hold the design to."""
+        return {
+            "clients": len(self._connections),
+            "dropped": sum(c.dropped for c in self._connections),
+            "max_queue": max((c.queue.qsize() for c in self._connections), default=0),
+            "queue_max": QUEUE_MAX,
+        }
 
     async def broadcast(
         self,
@@ -136,20 +233,11 @@ class WebSocketManager:
 
         message = json.dumps(payload)
 
-        # Broadcast to all, collect dead connections
-        dead: list[WebSocket] = []
-        async with self._lock:
-            for ws in self._connections:
-                try:
-                    await ws.send_text(message)
-                except Exception:
-                    dead.append(ws)
-
-            for ws in dead:
-                self._connections.remove(ws)
-
-        if dead:
-            logger.debug(f"Removed {len(dead)} dead WebSocket connection(s)")
+        # Offer it to every client's queue. No lock, no socket write, no waiting on a slow reader —
+        # the snapshot is taken because a writer may remove itself (and its client) at any await.
+        droppable = ch in DROPPABLE
+        for client in list(self._connections):
+            await self._offer(client, message, droppable)
 
     async def broadcast_tick(self, symbol: str, price: float, size: float, side: str):
         """Broadcast a tick update (throttled)."""
