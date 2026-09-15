@@ -289,6 +289,11 @@ def default_config() -> dict[str, Any]:
             "banner_dismissed_alpaca": False,
             # where the setup assistant should resume (step index, 0 = start)
             "wizard_resume_step": 0,
+            # The shell's appearance (theme.js, themes/*.css). The config is the record; the browser
+            # keeps a mirror purely so the first paint is already the right theme.
+            "theme": "dark",            # dark | light | contrast
+            "accent": "cobalt",         # the eight Windows accents
+            "density": "comfortable",   # comfortable | compact | dense
         },
     }
 
@@ -712,6 +717,13 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
 
     ui = _block(cfg, "ui")
     ui["banner_dismissed_alpaca"] = bool(ui.get("banner_dismissed_alpaca", False))
+    # Appearance: an unknown value paints the default rather than a broken shell (theme.js clamps too,
+    # so the file and the page agree about what is legal).
+    ui["theme"] = ui.get("theme") if ui.get("theme") in ("dark", "light", "contrast") else "dark"
+    ui["accent"] = ui.get("accent") if ui.get("accent") in (
+        "cobalt", "teal", "green", "lime", "amber", "orange", "magenta", "violet") else "cobalt"
+    ui["density"] = ui.get("density") if ui.get("density") in (
+        "comfortable", "compact", "dense") else "comfortable"
     try:
         ui["wizard_resume_step"] = max(0, int(ui.get("wizard_resume_step", 0)))
     except (TypeError, ValueError):

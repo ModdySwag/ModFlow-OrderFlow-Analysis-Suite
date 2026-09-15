@@ -176,3 +176,17 @@ def test_a_block_level_write_can_still_remove_a_key(store):
     cs.save_config({"layouts": {"items": {"a": {"name": "a"}, "b": {"name": "b"}}}})
     after = cs.save_config({"layouts": {"items": {"a": {"name": "a"}}}})
     assert list(after["layouts"]["items"]) == ["a"], "save_config stopped being a whole-block write"
+
+
+def test_the_appearance_defaults_exist_and_a_bad_value_clamps(store):
+    """theme/accent/density (plan P1-1): the config file and the page must agree about what is legal —
+    an unknown value paints the default rather than a shell with no colours."""
+    cs = store
+    fresh = cs.load_config()["ui"]
+    assert (fresh["theme"], fresh["accent"], fresh["density"]) == ("dark", "cobalt", "comfortable")
+    stored = cs.merge_config({"ui": {"theme": "neon", "accent": "chartreuse", "density": "ultra"}})
+    assert (stored["ui"]["theme"], stored["ui"]["accent"], stored["ui"]["density"]) == \
+        ("dark", "cobalt", "comfortable"), "an unknown appearance value must not reach the shell"
+    stored = cs.merge_config({"ui": {"theme": "light", "accent": "teal", "density": "dense"}})
+    assert (stored["ui"]["theme"], stored["ui"]["accent"], stored["ui"]["density"]) == \
+        ("light", "teal", "dense"), "the legitimate values must survive the sanitiser"
