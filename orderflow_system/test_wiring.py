@@ -40,6 +40,31 @@ def _nav(html: str) -> list[str]:
     return re.findall(r'class="nav-item"[^>]*data-view="([a-z0-9_-]+)"', html)
 
 
+def test_the_cursor_link_and_the_ladder_agree_on_the_price_attribute():
+    """The engine draws a trace into the ladder by reading each row's price attribute, so the
+    attribute the consumer queries must exist in the producer's row markup.
+
+    Measured the hard way: the consumer asked for `[data-price]`, the ladder never set it, so no row
+    could ever be highlighted and the view's note always read 'outside the drawn ladder levels' —
+    which looked like a coordinate problem and was a wiring problem.
+    """
+    view = (UI / "ofx-view.js").read_text(encoding="utf-8", errors="replace")
+    found = re.search(r"querySelectorAll\('\[(data-[a-z-]+)\]'\)", view)
+    assert found, "ofx-view.js no longer looks ladder rows up by a data attribute — update this guard"
+    attr = found.group(1)
+    ladder = (ROOT / "orderflow_system" / "dashboard" / "static" / "orderbook.js").read_text(
+        encoding="utf-8", errors="replace")
+    assert attr + "=" in ladder, (
+        "the cursor link highlights ladder rows by '" + attr + "', but the ladder's row markup never "
+        "sets it — the highlight can never match")
+    assert "ofx-traced" in ladder, (
+        "the ladder must re-apply the cursor highlight inside its own render — it rebuilds its rows on "
+        "every update, so a class painted by the consumer is wiped by the next poll")
+    assert "nearest(prices, null)" not in view, (
+        "the cursor link must bound its match to the ladder's own step — a null tolerance accepts any "
+        "distance, so a price well outside the drawn band was announced as 'on the ladder'")
+
+
 def test_every_script_tag_resolves_to_a_file():
     """A tag with no file behind it is the one thing that empties the UI — so it is a test, not a habit."""
     html = _html()

@@ -39,6 +39,12 @@ class OrderbookLadder {
         this._pendingRender = false;
         
         this._init();
+
+        /* The engine's cursor link asks this ladder to highlight the row at a price. It is state, not a
+           paint: the rows are rebuilt on every render, so `_render()` re-applies it and the highlight
+           survives the next poll. The consumer reaches it through the element it already owns. */
+        this._tracePrice = null;
+        if (this.container) this.container.setTrace = (price) => this.setTrace(price);
     }
 
     _init() {
@@ -211,6 +217,15 @@ class OrderbookLadder {
         }
     }
 
+    /** Highlight the row at `price` (null clears it). Re-applied inside every render, because the
+     *  rows are rebuilt each update — a class painted by someone else is wiped by the next poll. */
+    setTrace(price) {
+        const next = (price === null || price === undefined) ? null : Number(price);
+        this._tracePrice = Number.isFinite(next) ? next : null;
+        this._render();
+        return this._tracePrice;
+    }
+
     _render() {
         this._lastRender = Date.now();
         
@@ -233,9 +248,11 @@ class OrderbookLadder {
             const imbClass = hasImbalance 
                 ? (level.bidSize > level.askSize ? 'ob-imb-bid' : 'ob-imb-ask') 
                 : '';
+            /* the cursor link's highlight, re-applied here so the next render keeps it */
+            const traced = this._tracePrice !== null && Number(level.price) === this._tracePrice;
             
             html += `
-                <div class="ob-row ${isCurrent ? 'ob-current' : ''} ${isThin ? 'ob-thin' : ''} ${imbClass}">
+                <div class="ob-row ${isCurrent ? 'ob-current' : ''} ${isThin ? 'ob-thin' : ''} ${imbClass} ${traced ? 'ofx-traced' : ''}" data-price="${level.price}">
                     <div class="ob-cell ob-bid-cell">
                         ${level.bidSize ? `
                             <div class="ob-bar ob-bid-bar" style="width: ${bidPct}%"></div>

@@ -439,6 +439,18 @@
         return { w: w, h: h };
     }
 
+    /* The ladder's grid step: the smallest positive gap between the prices it actually draws. It is
+       the only honest tolerance for 'this row is the cursor's price' — see the subscriber below. */
+    function ladderStep(prices) {
+        const sorted = prices.slice().sort((a, b) => a - b);
+        let step = Infinity;
+        for (let i = 1; i < sorted.length; i += 1) {
+            const d = sorted[i] - sorted[i - 1];
+            if (d > 0 && d < step) step = d;
+        }
+        return Number.isFinite(step) ? step : null;
+    }
+
     /* The cursor is shared: whoever moves it, every panel can read it. The ladder highlights the
        nearest price it actually draws, and says so when that price is off its ladder. */
     function wireCursorLink() {
@@ -460,8 +472,17 @@
             if (rowHost && c.price != null) {
                 const rows = [...rowHost.querySelectorAll('[data-price]')];
                 const prices = rows.map((r) => Number(r.dataset.price)).filter((p) => Number.isFinite(p));
-                matched = OFAPCURSOR.nearest(prices, null);
-                rows.forEach((r) => r.classList.toggle('ofx-traced', Number(r.dataset.price) === matched));
+                /* Bounded by one step of the ladder's own grid. With a `null` tolerance the nearest
+                   drawn price came back however far away it was, so a cursor 40 points off a 15-level
+                   ladder was still announced as 'on the ladder'. Outside the band means outside. */
+                matched = OFAPCURSOR.nearest(prices, ladderStep(prices));
+                /* The ladder rebuilds its rows on every update, so hand the price to the ladder (state
+                   it re-applies on each render) instead of toggling a class the next poll would drop.
+                   A ladder without that hook keeps the plain class toggle. */
+                if (typeof rowHost.setTrace === 'function') rowHost.setTrace(matched);
+                else rows.forEach((r) => r.classList.toggle('ofx-traced', Number(r.dataset.price) === matched));
+            } else if (rowHost && typeof rowHost.setTrace === 'function') {
+                rowHost.setTrace(null);          /* leaving the canvas clears the row, like the line */
             }
             if (note) {
                 note.textContent = c.price == null ? ''
