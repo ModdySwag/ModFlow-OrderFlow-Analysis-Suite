@@ -512,6 +512,34 @@ async def drawings_post(payload: dict = Body(default={})) -> dict[str, Any]:
             "note": "drawings are stored in your config file, per view and symbol"}
 
 
+@router.get("/markers")
+async def markers_get(symbol: str = "") -> dict[str, Any]:
+    """The pinned levels for one symbol (stored in the config, in data space)."""
+    cfg = config_store.load_config()
+    key = (symbol or "").upper()[:24]
+    return {"ok": True, "key": key, "block": (cfg.get("markers") or {}).get(key) or {"markers": []}}
+
+
+@router.post("/markers")
+async def markers_post(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Store the pinned levels for one symbol.
+
+    Sanitised by `config_store` (prices finite and positive, per-symbol cap), and the stored block is
+    returned so the panel adopts what the store accepted instead of what it hoped it sent.
+    """
+    cfg = config_store.load_config()
+    key = str(payload.get("symbol") or "").upper()[:24]
+    spaces = cfg.setdefault("markers", {})
+    if not isinstance(spaces, dict):
+        spaces = {}
+        cfg["markers"] = spaces
+    spaces[key] = {"markers": payload.get("markers") or []}
+    saved = config_store.save_config(cfg)
+    block = (saved.get("markers") or {}).get(key) or {"markers": []}
+    return {"ok": True, "key": key, "block": block,
+            "note": "markers are stored in your config file, per symbol"}
+
+
 @router.get("/params")
 async def params_get() -> dict[str, Any]:
     """The display-variable registry with live values.

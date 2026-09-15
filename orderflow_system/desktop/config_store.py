@@ -210,6 +210,7 @@ def default_config() -> dict[str, Any]:
         # Drawings, per view+symbol, in data space (epoch seconds + price). The shape mirrors the
         # reference program's own drawingSettings so the two models stay comparable.
         "drawings": {},
+        "markers": {},
         "ofx": {"symbol": "", "R": 4.0, "stack": 3, "lambda_ms": 500, "text_px": 45, "sweep_c": 1.15,
                 "min_block": 0.0, "va_pct": 0.7},
         "risk": {"signal_cooldown_seconds": 30.0, "min_composite_score": 40.0},
@@ -644,6 +645,42 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
                 "drawings": rows,
             }
     cfg["drawings"] = clean_drawings
+
+    # ── markers: the heatmap's pinned levels, per symbol, in data space (never pixels) ────────────
+    marker_spaces = cfg.get("markers")
+    clean_markers: dict[str, Any] = {}
+    if isinstance(marker_spaces, dict):
+        for key, entry in list(marker_spaces.items())[:64]:
+            slot = str(key).strip().upper()[:24]
+            if not slot or not isinstance(entry, dict):
+                continue
+            rows = []
+            for item in (entry.get("markers") or [])[:500]:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    price = float(item.get("price"))
+                except (TypeError, ValueError):
+                    continue
+                if not (0.0 < price < 1e12):
+                    continue
+                try:
+                    bucket = int(float(item.get("bucket") or 0))
+                except (TypeError, ValueError):
+                    bucket = 0
+                try:
+                    size = round(float(item.get("size") or 0), 8)
+                except (TypeError, ValueError):
+                    size = 0.0
+                rows.append({
+                    "price": round(price, 6),
+                    "bucket": bucket if 0 < bucket < 1e12 else 0,
+                    "size": size if 0 < size < 1e12 else 0.0,
+                    "note": str(item.get("note") or "")[:120],
+                })
+            if rows:
+                clean_markers[slot] = {"markers": rows}
+    cfg["markers"] = clean_markers
     ofx["min_block"] = round(_clamp(ofx.get("min_block", 0.0), 0.0, 1_000_000.0, 0.0), 2)
     ofx["va_pct"] = round(_clamp(ofx.get("va_pct", 0.7), 0.5, 0.95, 0.7), 2)
     if cfg["data_source"] not in ("mt5", "bybit", "both", "alpaca", "all"):
