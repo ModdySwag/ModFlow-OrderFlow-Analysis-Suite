@@ -141,14 +141,14 @@ next gate run: `dist/` matches are only CPython's own `unicodedata.pyd`, not our
 
 ### P1 — the interaction canon and spec alignment
 
-**Status 2026-09-16: P1-1 through P1-4 are done** (handoff §33–§36) — the token block, `themes/`,
+**Status 2026-09-16: P1-1 through P1-5 are done** (handoff §33–§37) — the token block, `themes/`,
 `theme.js`, the Appearance card and the brief's grep gate at **0** (P1-1); the cursor spine adopted by
 six panels, measured live, one heatmap hover lighting the engine, the ladder, the tape and the profile
 with eight badges on one text (P1-2); a shift+drag on the engine producing the statistics strip and a
-real CSV on disk (volume 86.39, delta +14.58, resting +4.83 over 4 bars) plus markers remembered per
-symbol (P1-3); and the strips given keys, pause-on-hover and click-to-locate, with the tape's own
-auto-scroll made to defer to a held reader (P1-4). **Next: P1-5, the token-driven feedback
-cosmetics.**
+real CSV on disk plus markers remembered per symbol (P1-3); the strips given keys, pause-on-hover and
+click-to-locate (P1-4); and the cosmetics rebuilt as feedback — density-tracked ghosts, a low imbalance
+glow with the POC keeping the strong one, a labelled zone projection, `carry_forward` on the panel and
+the hidden-block count beside its control (P1-5). **Next: P1-6, the heatmap answering duration.**
 
 **P1-1 · Theme and token layer first (brief A). — do this before any visual polish below.** L
 Unstarted: `atlas.css` contains **zero** `--of-` tokens (`grep -c -- '--of-'` → 0) and there is no
@@ -229,6 +229,17 @@ From report1's minor lists, each re-argued rather than copied:
 - *Hidden-block count next to the min-block filter*: the engine already tallies hidden blocks; print the
   number beside the control (handoff §2's deferred item). A filter that hides data must say how much (§3.6).
 Gate: live screenshot per item; `node --check`; the engine selftest extended where maths changed.
+
+**Done 2026-09-16 (§37).** Each item carried a live reading. Ghosts: `math.peakAlpha` tracks the cell's
+density bucket — 252 painted cells span 0.867–0.920 over 6 distinct peaks (was: one), and a controlled
+pull left a wall's ghost at 0.920 against a mid cell's 0.871; five selftest checks. Imbalance glow: a
+third of the POC's radius, in the imbalance colour — 27 glowed cells at blur 3.0 against the POC's 7.2,
+matrix still readable. Zone projection: stronger bands plus a deduped right-edge label
+("SELL 4L projected", painted on every base pass). `carry_forward`: on the engine's state and in the
+panel's own note, measured by flipping `atlas.heatmap.carry_forward` (note: the hub reads the ATLAS
+subtree, not the top-level `heatmap` block the store's defaults also declare). Hidden blocks: the count
+sits beside the min-block field — empty at floor 0, "nothing hidden" at floor 5 with nothing below it,
+warning-coloured with "N hidden" when it is hiding executions.
 
 **P1-6 · Heatmap answers duration, not only size (brief E).** M
 Surface `wall_age` / `wall_durations()` (backend-side, already built) as a held-time column in the readout

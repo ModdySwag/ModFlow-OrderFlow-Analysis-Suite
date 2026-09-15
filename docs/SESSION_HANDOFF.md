@@ -1287,3 +1287,65 @@ unchanged, every touched JS parses.
 
 Next: **P1-5, spec-alignment cosmetics redesigned as token-driven feedback** (ghost brightness by size,
 imbalance-cell glow, and the rest of report1's minor list, each re-argued rather than copied).
+
+
+---
+
+## §37 — P1-5: the cosmetics, as feedback (2026-09-16)
+
+Five items from report1's minor lists, each re-argued before it was built. The gate for the phase is a
+live reading per item, so every one below carries what the running engine actually painted.
+
+**1. Ghost brightness by size.** The heat pass stamped every live cell `peak = 0.92`, so a level that
+was pulled left the same ghost whether it had held a wall or a rounding error — the picture asserted
+all liquidity was equal. `math.peakAlpha(size, scale)` maps a cell's own density bucket (the same
+`log1p` mapping `heatPalette` uses for colour) onto the ghost's starting alpha: floor 0.32, top 0.92,
+`sqrt` between them. Live cells keep their full-strength stamp — the pass moved no live pixel.
+Measured on live Bybit depth: 252 painted cells spread over **0.867–0.920 across 6 distinct peaks**
+(under the old code: 1 distinct value), and a controlled pull on the real renderer — the window's
+heaviest cell (153.43) peaked at 0.920 and a mid cell (69.2) at 0.871 — left two ghosts at exactly
+those alphas. Selftested (5 checks): monotone in size, never below the floor or above the top, a
+nonsense scale is 1 rather than NaN.
+
+**2. Imbalance-cell glow, and the POC keeps the strong one.** The imbalance tint was a flat
+`rgba(imBuy, .18)` fill on the text half. It now goes through `glowCell()`, which adds a glow in the
+*imbalance* colour at a third of the POC's radius (`glowRadius × 0.35`, floor 3 px) — accent stays
+scarce (§3.3), and the engine's own legend colour table supplies the colour. Measured live with a trap
+on `fillRect`: **27 glowed cells in one window — 21 sell, 6 buy — all at blur 3.0**, against the POC's
+`glowRadius` of **7.2** on the same stage. The screenshot shows the matrix still readable, which was
+the clause that would have cancelled the item.
+
+**3. The stacked-zone projection reads across the chart.** The projected bands went from
+`0.10 + min(0.10, count·0.02)` to `0.12 + min(0.12, count·0.025)`, and each distinct zone now carries a
+right-edge label where the band *ends* — "BUY 3L projected" / "SELL 4L projected" — deduped per pass so
+the per-bar draw does not stack the same words. Measured live with a trap on `fillText`: the label
+painted on every base pass in the window (`SELL 4L projected`, 3 passes), which is what "once per
+distinct zone per pass" means.
+
+**4. `carry_forward` is on the panel.** The depth map carries liquidity forward between windows; the
+payload has said so all along (`carry_forward`) and nothing displayed it. The view now puts the flag on
+the engine's state and its notes line: **"ghost liquidity carried forward — levels that left the drawn
+window are still shown"**, measured live after setting `atlas.heatmap.carry_forward: true` in the
+sandbox config and reading the panel's own note text — a mark whose explanation is only in the code is
+a lie of omission (§3.6).
+
+**5. The hidden-block count sits beside the min-block floor.** The engine already tallied
+`blocksFiltered`; the count now prints next to the control that causes it (`#ofxHiddenBlocks`), on the
+existing one-second stats tick: **empty at floor 0** (a filter that hides nothing says nothing),
+**"nothing hidden"** with the floor at 5 and nothing in view below it, and it turns warning-coloured
+with "N hidden" and a tooltip naming the floor when the filter *is* hiding executions. Measured live at
+both floors; visible in the screenshot beside the field.
+
+**A config-shape finding, on the record.** The engine's hub reads its depth-map knobs from
+`atlas.heatmap` (`engine.py` hands it the atlas subtree), while `config_store`'s defaults also declare a
+top-level `heatmap` block for the GUI. Setting `carry_forward` at the top level does nothing —
+measured: the payload stayed `false` through an engine restart until the flag went in under
+`atlas.heatmap`. Worth knowing before the next depth-map knob is added; the sandbox was cleaned back
+to its original state afterwards (stray key removed, flag removed).
+
+Gates: **ofx selftest 139 ok** (five new `peakAlpha` checks), pytest **508 passed / 2 skipped**,
+AUDIT CLEAN (the new `ofxHiddenBlocks` id is referenced by the view and exists in `index.html`),
+`node --check` on every touched module.
+
+Next: **P1-6, the heatmap answers duration** — `wall_age` / `wall_durations()` as a held-time column,
+an optional wall-age tint, and the 74/22 px plot insets promoted to one shared constant.

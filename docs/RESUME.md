@@ -1,16 +1,16 @@
 # Resume here — ModFlow OrderFlow Analysis Suite
 
 One page for picking this up cold. The full trail lives in `docs/SESSION_HANDOFF.md`
-(§24–§36 cover the terminal-mode build, the bus, the panels, the commit series, the P0 trust pass, the
-theme/token layer, the cursor spine, selection-as-measurement and the strips' keys);
-`docs/DX_TERMINAL_AND_QUANTOWER_PLAN.md` is the phase plan with the decisions behind it, and
+(§24–§37 cover the terminal-mode build, the bus, the panels, the commit series, the P0 trust pass, the
+theme/token layer, the cursor spine, selection-as-measurement, the strips' keys and the feedback
+cosmetics); `docs/DX_TERMINAL_AND_QUANTOWER_PLAN.md` is the phase plan with the decisions behind it, and
 `docs/UPGRADE_ACTION_PLAN.md` is the prioritised plan of action — from `report1.txt`, corrected against
-the tree. **P0 (§32) and P1-1 through P1-4 (§33–§36) are done; the next work item is P1-5, the
-token-driven feedback cosmetics.**
+the tree. **P0 (§32) and P1-1 through P1-5 (§33–§37) are done; the next work item is P1-6, the heatmap
+answering duration.**
 
 ## Where it stands
 
-- **Branch `master`, HEAD = the `docs:` commit that closes P1-4** (top of the branch, tree clean,
+- **Branch `master`, HEAD = the `docs:` commit that closes P1-5** (top of the branch, tree clean,
   nothing pushed; `git log -1` names it). Recent work, by area: the four P0 fixes (`443008d` desktop,
   `7a81bf6` the cursor-trace contract, `65672f2` book integrity, `d83e7a0` broadcast queues), then the
   theme layer — the token block + `themes/` + `theme.js` + the Appearance card.
@@ -40,7 +40,7 @@ check `orderflow.log` for `client error:` lines.
 
 | What | Where |
 |---|---|
-| The upgrade plan's **P1** work: P1-1 through P1-4 are done (tokens, the cursor spine, selection as measurement, the strips' keys and click-to-locate) — continue with P1-5 (token-driven feedback cosmetics), then P1-6 to P1-10. | plan §2, handoff §36 |
+| The upgrade plan's **P1** work: P1-1 through P1-5 are done (tokens, the cursor spine, selection as measurement, the strips' keys, the feedback cosmetics) — continue with P1-6 (the heatmap answering duration), then P1-7 to P1-10. | plan §2, handoff §37 |
 | Watchlist: configured-instrument rows ("—" rows beside the demo list) — wired to the 2 s beat, not re-checked live. Recipe: add `ZZZTEST` to the config's instrument list, reload, expect a row. | handoff §27 |
 | Bus chip's `sub` count disagrees with `telemetry().subscribers` (measured `1 sub · 2 ch` vs 3) — two counters, one mis-named. | handoff §29 |
 | Fundamentals supply cell and the options gamma precision — both fixed, cosmetic residue noted. | handoff §25 |
