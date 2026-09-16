@@ -309,7 +309,6 @@ def test_the_edgar_payload_is_reduced_before_it_reaches_the_browser():
 
 
 def test_the_crypto_payload_is_the_coingecko_block():
-    from orderflow_system.desktop import edgar
     stub = _Stub()
     payload = _service(stub).payload("btcusdt")
     assert payload["ok"] is True and payload["source"] == "coingecko"
@@ -328,7 +327,6 @@ def test_the_crypto_payload_is_the_coingecko_block():
 
 
 def test_an_instrument_neither_source_covers_gets_the_sentence():
-    from orderflow_system.desktop import edgar
     stub = _Stub()
     service = _service(stub)
     for symbol in ("SPX", "EURUSD", "XAUUSDT", "NAS100USDT", "NOSUCHTICKER"):
@@ -342,7 +340,6 @@ def test_an_instrument_neither_source_covers_gets_the_sentence():
 
 
 def test_no_symbol_is_an_error_the_panel_can_print():
-    from orderflow_system.desktop import edgar
     payload = _service(_Stub()).payload("")
     assert payload["ok"] is False and payload["source"] == "none"
     assert payload["error"] and "instrument" in payload["error"]
@@ -527,7 +524,6 @@ def test_the_route_is_discoverable_by_the_ui_audit():
     atlas/api.py, desktop/api.py and dashboard/app.py, so the panel's route resolves only once
     desktop/edgar.py is added to that scan — the wiring note beside the nav hunk."""
     audit = _audit_module()
-    from orderflow_system.desktop import edgar
     found = audit.routes_from(MODULE, "/api/fundamentals")
     assert found == {"/api/fundamentals/{symbol}"}
     assert audit.normalise(list(found)[0]) == "/api/fundamentals/{param}"

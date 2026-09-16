@@ -14,7 +14,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional
 
-from orderflow_system.data.models import OrderbookSnapshot, OrderbookLevel
+from orderflow_system.data.models import OrderbookSnapshot
 
 
 @dataclass

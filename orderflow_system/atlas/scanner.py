@@ -14,7 +14,6 @@ neutral is worse than one that states its weights.
 
 from __future__ import annotations
 
-import math
 import time
 from typing import Any, Optional
 

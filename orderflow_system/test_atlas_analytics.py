@@ -9,7 +9,6 @@ detection thresholds are actually exercised (not "does it import").
 
 from __future__ import annotations
 
-import time
 
 import pytest
 
@@ -209,7 +208,7 @@ def test_cvd_bearish_divergence():
     cvd = CvdTracker("T", tick_size=0.1, bucket_ms=1000, divergence_lookback=3,
                      divergence_min_ticks=5.0)
     ts = T0
-    for i in range(3):                                   # warm-up so both windows are full
+    for _ in range(3):                                   # warm-up so both windows are full
         cvd.on_tick(tick(ts, 99.0, 1.0, "buy"))
         ts += 1000
     for i in range(3):                                   # previous window: price near 100, buying

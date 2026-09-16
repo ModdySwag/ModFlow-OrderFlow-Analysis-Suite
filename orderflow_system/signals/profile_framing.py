@@ -19,7 +19,7 @@ from enum import Enum
 from typing import Optional
 
 from orderflow_system.data.models import VolumeProfileResult, Side
-from orderflow_system.config.settings import BiasDirection, ProfileShape
+from orderflow_system.config.settings import BiasDirection
 
 logger = logging.getLogger(__name__)
 

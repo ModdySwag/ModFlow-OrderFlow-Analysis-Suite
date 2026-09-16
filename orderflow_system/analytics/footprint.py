@@ -13,7 +13,6 @@ footprint arithmetic and is pinned by `test_footprint_analysis.py`.
 
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass, field
 from collections.abc import Mapping
 from typing import Optional
@@ -21,7 +20,7 @@ from typing import Optional
 #: price → (bid volume, ask volume) — the only shape the analysis pack needs
 MappingLike = Mapping[float, tuple[float, float]] | dict[float, tuple[float, float]]
 
-from orderflow_system.data.models import Tick, Candle, FootprintLevel, Side
+from orderflow_system.data.models import Tick, Candle, FootprintLevel
 
 
 @dataclass
@@ -74,7 +73,7 @@ class FootprintBar:
                 return self.imbalance_levels(threshold, "same_price")     # one row: nothing diagonal
             by_price = {round(p / tick): lv for p, lv in rows}
             results: list[tuple[float, str]] = []
-            for index, (price, lv) in enumerate(rows):
+            for _index, (price, lv) in enumerate(rows):
                 key = round(price / tick)
                 below = by_price.get(key - 1)      # one tick down
                 above = by_price.get(key + 1)      # one tick up

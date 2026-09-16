@@ -22,7 +22,7 @@ from typing import Optional
 from orderflow_system.data.models import (
     Signal, SignalType, Side, TradeState, TradePhase, Candle,
 )
-from orderflow_system.signals.profile_framing import DailyBias, QualifiedLevel, LevelType
+from orderflow_system.signals.profile_framing import DailyBias, QualifiedLevel
 from orderflow_system.config.settings import BiasDirection
 
 logger = logging.getLogger(__name__)

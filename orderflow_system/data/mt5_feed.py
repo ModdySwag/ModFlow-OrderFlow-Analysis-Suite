@@ -91,7 +91,7 @@ class MT5Feed:
 
         # Enable market book for each symbol (DOM data)
         if self.enable_book:
-            for internal, mt5_sym in self.symbols.items():
+            for _internal, mt5_sym in self.symbols.items():
                 self._mt5.market_book_add(mt5_sym)
                 logger.info(f"Market book enabled for {mt5_sym}")
 
@@ -246,7 +246,6 @@ class MT5Feed:
 
     async def _poll_cycle(self):
         """Poll MT5 for new ticks and book data for all symbols."""
-        mt5 = self._mt5
 
         for internal, mt5_sym in self.symbols.items():
             try:
@@ -401,7 +400,6 @@ class MT5Feed:
                 side = Side.SELL
             else:
                 last_price = float(t['last'])
-                bid = float(t['bid'])
                 ask = float(t['ask'])
                 side = Side.BUY if last_price >= ask else Side.SELL
 

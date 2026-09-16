@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import time
 
-import pytest
 
 from orderflow_system.desktop.search_service import (
     RowBatcher,

@@ -8,7 +8,6 @@ that cannot half-land, and a venue symbol the app has never heard of still runs.
 
 from __future__ import annotations
 
-import pytest
 
 from orderflow_system.config import settings as S
 from orderflow_system.config.settings import CRYPTO_MAJORS, INSTRUMENT_SPECS, Instrument

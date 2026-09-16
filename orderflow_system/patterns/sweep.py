@@ -20,7 +20,7 @@ import time
 from typing import Optional
 
 from orderflow_system.data.models import Candle, Signal, SignalType, Side
-from orderflow_system.analytics.orderbook import OrderbookTracker, BookState
+from orderflow_system.analytics.orderbook import OrderbookTracker
 from orderflow_system.analytics.footprint import FootprintBar
 from orderflow_system.config.settings import SweepConfig
 

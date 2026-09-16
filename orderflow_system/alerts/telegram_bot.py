@@ -6,13 +6,12 @@ key levels, and suggested risk management.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Optional
 
 from orderflow_system.signals.aggregator import AggregatedSignal
 from orderflow_system.signals.profile_framing import DailyBias
-from orderflow_system.data.models import Side, TradeState, TradePhase
+from orderflow_system.data.models import Side, TradeState
 
 logger = logging.getLogger(__name__)
 

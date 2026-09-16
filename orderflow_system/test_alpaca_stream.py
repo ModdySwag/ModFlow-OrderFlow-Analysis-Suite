@@ -12,11 +12,9 @@ from __future__ import annotations
 import asyncio
 import json
 
-import pytest
 
 from orderflow_system.data.alpaca_feed import (
     STREAM_ERRORS,
-    AlpacaError,
     AlpacaStream,
     SubscriptionSet,
     map_stream_error,
@@ -89,7 +87,7 @@ async def _run_briefly(stream, seconds=0.2):
 # ── error mapping ───────────────────────────────────────────────────────
 
 def test_every_documented_error_code_maps_to_an_actionable_message():
-    for code, message in STREAM_ERRORS.items():
+    for code, _message in STREAM_ERRORS.items():
         err = map_stream_error(code, "detail")
         assert err.code == code
         assert len(err.args[0]) > 20, f"code {code} needs a real explanation"

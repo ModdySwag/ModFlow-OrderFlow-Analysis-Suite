@@ -82,7 +82,7 @@ def market_status(clock: Optional[dict[str, Any]], now: Optional[float] = None) 
     now_ts = now if now is not None else time.time()
     nxt_open = clock.get("next_open")
     try:
-        from datetime import datetime, timezone
+        from datetime import datetime
         open_dt = datetime.fromisoformat(str(nxt_open).replace("Z", "+00:00")) if nxt_open else None
     except ValueError:
         open_dt = None

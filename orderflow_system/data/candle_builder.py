@@ -5,10 +5,9 @@ Builds candles in real-time from the tick stream.
 
 from __future__ import annotations
 
-import time
 from typing import Callable, Optional
 
-from orderflow_system.data.models import Tick, Candle, FootprintLevel, Side
+from orderflow_system.data.models import Tick, Candle, FootprintLevel
 
 
 class CandleBuilder:

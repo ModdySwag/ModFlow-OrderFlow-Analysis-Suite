@@ -14,7 +14,6 @@ this module does not duplicate it, it adds the reads that engine lacks.
 from __future__ import annotations
 
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 

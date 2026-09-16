@@ -34,16 +34,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from orderflow_system.data.alpaca_normalize import (
-    normalize_bar,
     normalize_crypto_trade,
     normalize_quote,
     normalize_snapshot_quote,
     normalize_snapshot_trade,
     normalize_stock_trade,
-    parse_ts_ms,
 )
 
 logger = logging.getLogger(__name__)

@@ -38,7 +38,7 @@ def make_ticks(n: int, start_ms: int) -> list[Tick]:
     rng = random.Random(7)
     out = []
     ts, price = start_ms, PRICE
-    for i in range(n):
+    for _ in range(n):
         ts += rng.randint(4, 40)
         price = max(1.0, price + rng.choice((-1, 0, 0, 1)) * TICK * rng.randint(1, 3))
         size = rng.choice((0.001, 0.005, 0.01, 0.02, 0.05, 0.4, 1.5))

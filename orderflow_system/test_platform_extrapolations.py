@@ -7,7 +7,6 @@ this build already has, so they are testable without any vendor software running
 
 from __future__ import annotations
 
-import math
 
 import pytest
 

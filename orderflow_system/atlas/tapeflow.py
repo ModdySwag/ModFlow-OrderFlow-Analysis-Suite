@@ -21,8 +21,7 @@ from __future__ import annotations
 import math
 import time
 from collections import deque
-from dataclasses import dataclass, field
-from statistics import mean, pstdev
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from orderflow_system.data.models import Tick

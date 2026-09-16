@@ -20,7 +20,7 @@ setting), so a dust-heavy tape cannot inflate a bubble's count.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from orderflow_system.data.models import Tick
