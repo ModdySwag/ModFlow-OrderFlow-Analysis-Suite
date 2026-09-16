@@ -92,6 +92,11 @@
                     P.last = await api('/api/atlas/heatmap/' + encodeURIComponent(again) + '?columns=' + cols() + '&rows=' + rows());
                 }
             }
+            /* P1-10: the map's sample clock is its newest depth bucket — a silent feed grows this. */
+            if (window.OFAPFRESH) {
+                const buckets = (P.last && P.last.buckets) || [];
+                OFAPFRESH.stamp('heatmap', { lastMs: buckets.length ? Number(buckets[buckets.length - 1]) : 0, kind: 'depth' });
+            }
             draw();
             hud();
         } catch (e) { /* the map's load path reports feed trouble */ }
@@ -703,6 +708,27 @@
         }
         if (act === 'export-markers') { save('heatmap_markers_' + Date.now() + '.csv', csvForMarkers()); return; }
     });
+    /* P1-9: the heatmap's own keys, registered into the app's one shortcut map. Each one CLICKS
+       the real control (found by its data-hm-pro value), so a key can never take a different
+       path than the button. */
+    if (window.OFAPKEYS) {
+        const heatAct = (act) => {
+            const b = document.querySelector('[data-hm-pro="' + act + '"]');
+            if (b) b.click();
+        };
+        OFAPKEYS.bind({ id: 'heatmap-zoom-in', keys: ['=', '+'], scope: 'Heatmap', priority: 5,
+            label: 'zoom in (depth window)', when: () => OFAPKEYS.inView('heatmap'), run: () => heatAct('zoom-in') });
+        OFAPKEYS.bind({ id: 'heatmap-zoom-out', keys: ['-', '_'], scope: 'Heatmap', priority: 5,
+            label: 'zoom out (depth window)', when: () => OFAPKEYS.inView('heatmap'), run: () => heatAct('zoom-out') });
+        OFAPKEYS.bind({ id: 'heatmap-selection-clear', keys: ['x'], scope: 'Heatmap', priority: 5,
+            label: 'clear the selection',
+            when: () => OFAPKEYS.inView('heatmap') && P.sel != null, run: () => heatAct('clear-sel') });
+        OFAPKEYS.bind({ id: 'heatmap-export', keys: ['ctrl+e'], scope: 'Heatmap', priority: 5,
+            label: 'export the selected region as CSV',
+            when: () => OFAPKEYS.inView('heatmap') && P.sel != null, run: () => heatAct('export-region') });
+        OFAPKEYS.bind({ id: 'alert-from-cursor', keys: ['a'], scope: 'Heatmap', priority: 5,
+            label: 'alert on the cursor level', when: () => OFAPKEYS.inView('heatmap'), run: () => heatAct('alert-here') });
+    }
 
     function refresh() {
         if (!active()) return;

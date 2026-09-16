@@ -361,10 +361,20 @@
             menu.appendChild(b);
             return b;
         };
-        mk(draw.text ? 'Edit text…' : 'Add text…', () => {
-            const text = window.prompt ? window.prompt('Text', draw.text || '') : '';
-            if (text !== null) { draw.text = text; paint(); save(); }
+        /* §56 carry-over: edited IN PLACE in the menu — window.prompt is not guaranteed to
+           render in the frozen WebView. (No closeMenu on click: the editor lives in the menu.) */
+        const textRow = document.createElement('button');
+        textRow.className = 'draw-menu-item';
+        textRow.textContent = draw.text ? 'Edit text…' : 'Add text…';
+        textRow.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            if (menu.querySelector('.draw-inline-text')) return;   // one editor at a time
+            inlineText(menu, draw.text || '', (text) => {
+                draw.text = text;
+                paint(); save(); closeMenu();
+            });
         });
+        menu.appendChild(textRow);
         mk(`Highlight price: ${draw.highlight && draw.highlight.price ? 'on' : 'off'}`, () => {
             draw.highlight = { ...(draw.highlight || {}), price: !(draw.highlight && draw.highlight.price) };
             paint(); save();
@@ -402,6 +412,46 @@
         paint(); save();
     }
 
+    /* §56 carry-over: the in-place text editor (draw menu + text tool). Enter/Apply commit,
+       Esc/× cancel; nothing here depends on a system dialog rendering. */
+    function inlineText(host, value, commit, cancel) {
+        const wrap = document.createElement('div');
+        wrap.className = 'draw-inline-text';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'draw-inline-input';
+        input.value = value || '';
+        input.setAttribute('spellcheck', 'false');
+        const apply = document.createElement('button');
+        apply.type = 'button';
+        apply.className = 'draw-inline-apply';
+        apply.textContent = 'Apply';
+        const drop = document.createElement('button');
+        drop.type = 'button';
+        drop.className = 'draw-inline-cancel';
+        drop.textContent = '×';
+        const done = (ok) => {
+            if (!wrap.parentNode) return;
+            wrap.remove();
+            if (ok) commit(input.value);
+            else if (cancel) cancel();
+        };
+        apply.addEventListener('click', (ev) => { ev.stopPropagation(); done(true); });
+        drop.addEventListener('click', (ev) => { ev.stopPropagation(); done(false); });
+        input.addEventListener('keydown', (ev) => {
+            ev.stopPropagation();
+            if (ev.key === 'Enter') { ev.preventDefault(); done(true); }
+            else if (ev.key === 'Escape') { ev.preventDefault(); done(false); }
+        });
+        wrap.appendChild(input);
+        wrap.appendChild(apply);
+        wrap.appendChild(drop);
+        host.appendChild(wrap);
+        input.focus();
+        if (input.select) input.select();
+        return wrap;
+    }
+
     /* ── pointer plumbing ─────────────────────────────────────────────────── */
     function bindPointer(host) {
         const canvas = state.canvas;
@@ -414,14 +464,25 @@
             if (!spec || spec.needs === 'none') return;
             ev.preventDefault();
             if (spec.needs === 'text') {
-                const text = window.prompt ? window.prompt('Text', '') : '';
-                if (text) {
-                    const data = toData(x, y);
-                    const draw = { id: uid(), kind: 'text', a: data, b: data, text };
-                    state.drawings.push(draw);
-                    select(draw.id);
-                    finishFigure();
-                }
+                /* §56 carry-over: a floating field at the click point (Apply/Enter commits,
+                   Esc/× drops the placeholder drawing) — no system dialog anywhere. */
+                const data = toData(x, y);
+                const draw = { id: uid(), kind: 'text', a: data, b: data, text: '' };
+                state.drawings.push(draw);
+                select(draw.id);
+                const host = (state.canvas && state.canvas.parentElement) || document.body;
+                const hrect = host.getBoundingClientRect();
+                const wrap = inlineText(host, '', (text) => {
+                    draw.text = text;
+                    paint(); save(); finishFigure();
+                }, () => {
+                    state.drawings = state.drawings.filter((d) => d.id !== draw.id);
+                    select(null);
+                    paint();
+                });
+                wrap.classList.add('is-float');
+                wrap.style.left = Math.max(4, ev.clientX - hrect.left) + 'px';
+                wrap.style.top = Math.max(4, ev.clientY - hrect.top) + 'px';
                 return;
             }
             const data = toData(x, y);
@@ -528,6 +589,14 @@
                 remove(state.selected);
             }
         });
+        /* The tool's keys stay local (scoped to the drawing selection and the draft in progress);
+           the shortcut sheet lists them through the app's one map. */
+        if (window.OFAPKEYS) {
+            OFAPKEYS.document([
+                { keys: 'Esc', label: 'close the drawing menu, cancel the draft, drop the tool, deselect', scope: 'Drawings' },
+                { keys: 'Del / Backspace', label: 'remove the selected drawing', scope: 'Drawings' },
+            ]);
+        }
         document.addEventListener('mousedown', (ev) => {
             if (state.menu && !ev.target.closest('.draw-menu')) closeMenu();
         }, true);
@@ -613,4 +682,13 @@
         get selected() { return state.selected; },
         get drawings() { return state.drawings; },
     };
+
+    /* §72: a window or display-scale change may have moved the host box; re-fit and repaint from
+       the same entry point the adapter's subscribe uses. (This layer already sizes its backing
+       store by dpr — the listener keeps it current when nothing else fires.) */
+    if (typeof document !== 'undefined') {
+        document.addEventListener('ofap:relayout', () => {
+            try { if (state.canvas) resize(); } catch (e) { /* the layer's own path reports its faults */ }
+        });
+    }
 })(typeof globalThis !== 'undefined' ? globalThis : this);

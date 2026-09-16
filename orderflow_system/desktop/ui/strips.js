@@ -406,6 +406,14 @@
         }
     }, true);
 
+    /* The step keys stay local — they are scoped to the hovered strip and the arbiter's lease —
+       and the shortcut sheet lists them through the app's one map. */
+    if (window.OFAPKEYS) {
+        OFAPKEYS.document([
+            { keys: '↑ ↓ / PgUp / PgDn / Home / End', label: 'step through the strip under the pointer (Home = the newest end)', scope: 'Strips' },
+        ]);
+    }
+
     document.addEventListener('click', () => setTimeout(scan, 400));
     /* A strip that only becomes scrollable later (a tape filling with prints, an alert log growing)
        must still be picked up. A rescan of the visible view is cheap and keeps that honest. */

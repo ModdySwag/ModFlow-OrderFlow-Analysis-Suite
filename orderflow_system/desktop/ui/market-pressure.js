@@ -95,10 +95,16 @@ function mpDraw(series) {
     const el = document.getElementById('mpCanvas');
     if (!el) return;
     const dpr = window.devicePixelRatio || 1;
-    const cssW = Math.max(320, el.clientWidth || el.parentElement.clientWidth || 640);
     const cssH = 190;
+    /* §72: the CSS box is the layout's (container-wide, 190 px tall) and only the backING store
+       carries the display scale. Without an explicit box the canvas displayed at its backing size,
+       so the generic fit pass multiplied it by dpr on every pass — measured 480×285 → 720×428 in a
+       single fit at 150%, and it grew again on the next draw. */
+    if (el.style) { el.style.width = '100%'; el.style.height = cssH + 'px'; }
+    const cssW = Math.max(320, el.clientWidth || el.parentElement.clientWidth || 640);
     el.width = Math.floor(cssW * dpr);
     el.height = Math.floor(cssH * dpr);
+    PRESSURE.lastSeries = series;                                  // the relayout redraw's input (§72)
     const ctx = el.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
@@ -382,6 +388,14 @@ function mpGovernor() {
         wrappedShow.__mpWrapped = true;
         window.showView = wrappedShow;
     }
+    /* §72: a window resize or a display-scale change repaints from the series already in hand —
+       the same draw path the poll uses, so the two can never drift. A hidden card has no box. */
+    document.addEventListener('ofap:relayout', () => {
+        const el = document.getElementById('mpCanvas');
+        if (!el || !el.clientWidth) return;                      // off-screen: nothing to repaint
+        if (window.OFAPINTENT && OFAPINTENT.anyHeld()) return;
+        try { mpDraw(PRESSURE.lastSeries || []); } catch (e) { /* the card's own path reports its faults */ }
+    });
 })();
 
 window.PRESSURE = PRESSURE;

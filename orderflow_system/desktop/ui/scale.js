@@ -51,7 +51,12 @@
     }
 
     function fitView(scope) {
-        const view = scope || document.querySelector('.view.active') || document;
+        /* §72: every visible canvas in the document, not only the active view's. In terminal mode
+           several widgets are on screen at once and only the focused one carries .active — the
+           others were left with stale backing stores after a window or display-scale change.
+           Hidden sections and unpainted tabs have a zero box and are skipped inside fitCanvas, so
+           the wider walk costs one querySelectorAll. */
+        const view = scope || document;
         let touched = 0;
         view.querySelectorAll('canvas').forEach((c) => { if (fitCanvas(c)) touched += 1; });
         return touched;

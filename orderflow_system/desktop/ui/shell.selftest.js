@@ -45,6 +45,65 @@ check('it reports classic mode when it cannot see a page', () => {
     assert.deepStrictEqual(st.unplaced, []);
 });
 
+/* §72: a screen's identity. The primary keeps the original shape (layouts saved for it before
+   this still match); a screen at another origin is its own key, so two identical monitors are
+   not one screen; and nothing measurable yields no key at all rather than a wrong one. */
+check('a primary screen keeps the original key shape', () => {
+    assert.strictEqual(M.screenKeyOf({ width: 2560, height: 1440, availLeft: 0, availTop: 0 }, 1), '2560x1440@1');
+    assert.strictEqual(M.screenKeyOf({ width: 1920, height: 1080 }, 1.5), '1920x1080@1.5');
+});
+
+check('a second monitor is its own screen, even at the same size and scale', () => {
+    const second = M.screenKeyOf({ width: 2560, height: 1440, availLeft: 2560, availTop: 0 }, 1);
+    const primary = M.screenKeyOf({ width: 2560, height: 1440, availLeft: 0, availTop: 0 }, 1);
+    assert.strictEqual(second, '2560x1440@1@2560,0');
+    assert.notStrictEqual(second, primary);
+    // a monitor placed left of / above the primary is negative, and still distinct
+    assert.strictEqual(M.screenKeyOf({ width: 1920, height: 1200, availLeft: -1920, availTop: -200 }, 1), '1920x1200@1@-1920,-200');
+});
+
+check('an unmeasurable screen has no key (never a wrong one)', () => {
+    assert.strictEqual(M.screenKeyOf({}, 1), '');
+    assert.strictEqual(M.screenKeyOf(null, 1), '');
+    assert.strictEqual(M.screenKeyOf({ width: 0, height: 1440 }, 1), '');
+});
+
+check('the key is capped at the length the store accepts', () => {
+    assert.ok(M.screenKeyOf({ width: 12345, height: 6789, availLeft: -12345, availTop: -6789 }, 2).length <= 24);
+});
+
+/* §72: which layout this screen gets on boot. Most recently saved wins; a screen with no layout
+   of its own changes nothing; and a layout that is already active is not re-adopted. */
+check('the most recently saved layout for this screen is the one to load', () => {
+    const items = {
+        a: { id: 'a', name: 'A', screen_key: '2560x1440@1', saved: 100 },
+        b: { id: 'b', name: 'B', screen_key: '2560x1440@1', saved: 300 },
+        c: { id: 'c', name: 'C', screen_key: '1920x1080@1', saved: 900 },
+    };
+    assert.strictEqual(M.pickScreenLayout(items, '2560x1440@1', 'c'), 'b');
+});
+
+check('a screen with no layout of its own keeps whatever is active', () => {
+    const items = { a: { id: 'a', screen_key: '1920x1080@1', saved: 5 } };
+    assert.strictEqual(M.pickScreenLayout(items, '2560x1440@1', 'a'), '');
+    assert.strictEqual(M.pickScreenLayout(items, '', 'a'), '');
+    assert.strictEqual(M.pickScreenLayout({}, '2560x1440@1', ''), '');
+    assert.strictEqual(M.pickScreenLayout(null, '2560x1440@1', ''), '');
+});
+
+check('the layout already active is not reloaded', () => {
+    const items = { a: { id: 'a', screen_key: '2560x1440@1', saved: 42 } };
+    assert.strictEqual(M.pickScreenLayout(items, '2560x1440@1', 'a'), '');
+});
+
+check('a tie between two saves is broken deterministically', () => {
+    const items = {
+        z: { id: 'z', screen_key: '2560x1440@1', saved: 50 },
+        a: { id: 'a', screen_key: '2560x1440@1', saved: 50 },
+    };
+    assert.strictEqual(M.pickScreenLayout(items, '2560x1440@1', ''), 'a');
+});
+
 check('a rect is clamped size-first, then position', () => {
     assert.deepStrictEqual(M.clampRect({ x: 99, y: 99, w: 12, h: 8 }, GRID), { x: 0, y: 0, w: 12, h: 8 });
     assert.deepStrictEqual(M.clampRect({ x: -5, y: -5, w: 6, h: 4 }, GRID), { x: 0, y: 0, w: 6, h: 4 });

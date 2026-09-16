@@ -31,6 +31,21 @@
     const MAX_WIDGETS = 24;
     const hasDom = typeof document !== 'undefined' && !!document.createElement;
 
+    /* §73: this page may BE an auxiliary window — the launcher opens one with
+       `?aux=<view>&win=<id>` so a widget can live on another monitor. An auxiliary window reads as
+       little of the store as it can: it never saves a layout, never changes the mode and never
+       adopts this screen's layout, because it is a *view* of one widget, not a second board. */
+    function auxRequest() {
+        if (!hasDom) return null;
+        const query = String((window.location && window.location.search) || '');
+        const aux = /[?&]aux=([a-z0-9_-]{1,24})/.exec(query);
+        if (!aux) return null;
+        const win = /[?&]win=([a-z0-9_-]{1,24})/.exec(query);
+        return { view: aux[1], id: win ? win[1] : '' };
+    }
+
+    const AUX = auxRequest();
+
     /* ══ pure maths — no DOM in this block (shell.selftest.js drives it directly) ═══════════════ */
 
     function num(value, fallback) {
@@ -47,6 +62,39 @@
     }
 
     const math = {
+        /* §72: a screen's identity — its size and scale, plus where it sits when that origin is
+           not the primary's (0,0). Two identical monitors are then two different screens instead
+           of one key, and the primary keeps the original "WxH@dpr" shape, so layouts a user saved
+           for it before this change still match it. */
+        screenKeyOf(scr, dpr) {
+            const s = scr && typeof scr === 'object' ? scr : {};
+            const w = Math.round(num(s.width, 0));
+            const h = Math.round(num(s.height, 0));
+            if (!w || !h) return '';
+            const scale = Math.round(num(dpr, 1) * 100) / 100 || 1;
+            const x = Math.round(num(s.availLeft, 0));
+            const y = Math.round(num(s.availTop, 0));
+            const origin = (x || y) ? '@' + x + ',' + y : '';
+            return (w + 'x' + h + '@' + scale + origin).slice(0, 24);
+        },
+
+        /* §72: which stored layout belongs to this screen — the most recently saved layout tagged
+           with that screen's key. Returns the id to switch to, or '' when nothing matches and
+           nothing should change (a screen with no layout of its own keeps the active one). */
+        pickScreenLayout(items, key, activeId) {
+            const store = items && typeof items === 'object' ? items : {};
+            if (!key) return '';
+            let best = '';
+            let bestAt = -1;
+            Object.keys(store).forEach(function (id) {
+                const row = store[id] || {};
+                if (String(row.screen_key || '') !== key) return;
+                const at = Number(row.saved) || 0;
+                if (at > bestAt || (at === bestAt && best && id < best)) { best = id; bestAt = at; }
+            });
+            return (best && best !== activeId) ? best : '';
+        },
+
         /* A rect inside the grid: size first, then position — the same two-phase clamp the store
            does, so a widget can never be placed hanging off the edge. */
         clampRect(rect, grid) {
@@ -339,11 +387,27 @@
         classic.title = 'Back to the classic single-view layout (Ctrl+Alt+T)';
         classic.onclick = function () { switchTo('classic'); };
 
-        bar.appendChild(name);
-        bar.appendChild(tabs);
-        bar.appendChild(note);
-        bar.appendChild(add);
-        bar.appendChild(classic);
+        /* §73: the widget-window control lives in its own module (windows-ui.js) and fills this
+           span — the shell owns the bar, the window module owns everything native. */
+        const wins = document.createElement('span');
+        wins.className = 'term-wins';
+
+        if (AUX) {
+            /* An auxiliary window is one widget: no tabs, no “+ widget”, no way back to Classic,
+               and a name that says which widget this is. */
+            name.textContent = '⧉ ' + titleOf(AUX.view);
+            note.textContent = AUX.id ? 'window ' + AUX.id : 'widget window';
+            bar.appendChild(name);
+            bar.appendChild(note);
+            bar.appendChild(wins);
+        } else {
+            bar.appendChild(name);
+            bar.appendChild(tabs);
+            bar.appendChild(note);
+            bar.appendChild(add);
+            bar.appendChild(wins);
+            bar.appendChild(classic);
+        }
 
         const grid = document.createElement('div');
         grid.className = 'term-grid';
@@ -354,6 +418,12 @@
         root.appendChild(host);
 
         S.host = host; S.bar = bar; S.tabsEl = tabs; S.noteEl = note; S.addEl = add; S.grid = grid;
+        S.winsEl = wins;
+        if (window.OFAPWINDOWS && typeof window.OFAPWINDOWS.attach === 'function') {
+            try {
+                window.OFAPWINDOWS.attach(wins, { aux: AUX, view: (AUX && AUX.view) || '' });
+            } catch (e) { /* the bar must never fail to build because of the window control */ }
+        }
     }
 
     function widgetButton(glyph, tip, run) {
@@ -936,6 +1006,17 @@
     /* ══ the switch ═════════════════════════════════════════════════════════════════════════════ */
 
     function ensureLayout() {
+        if (AUX) {
+            /* §73: one widget, full grid — a window is not a board, and it must never write. */
+            const known = knownViews();
+            const view = known.indexOf(AUX.view) >= 0 ? AUX.view : (known[0] || 'overview');
+            const layout = math.defaultLayout([view], GRID, 'lyaux');
+            layout.name = titleOf(view);
+            S.layout = layout;
+            S.layoutId = layout.id;
+            S.activeTab = (layout.tabs[0] || {}).id || 'main';
+            return layout;
+        }
         const known = knownViews();
         const raw = (S.layoutId && S.items[S.layoutId]) || S.items[Object.keys(S.items)[0]];
         let layout;
@@ -1048,6 +1129,13 @@
     }
 
     function openWidget(view) {
+        /* §73: an auxiliary window shows exactly one widget — its own. Anything that would add a
+           second (a nav click, a hash route) is refused with the reason, not obeyed. */
+        if (AUX) {
+            S.notice = 'this window is fixed to ' + titleOf(AUX.view);
+            paintBar();
+            return false;
+        }
         if (S.mode !== 'terminal' || !S.layout) return false;
         const name = String(view || '').trim().toLowerCase();
         if (!sectionFor(name)) { S.error = 'no such panel: ' + name; paintBar(); return false; }
@@ -1127,6 +1215,9 @@
     function saveNow(opts) {
         opts = opts || {};
         if (!S.layout) return Promise.resolve(stats());
+        /* §73: an auxiliary window holds one widget and owns nothing — a write from it would
+           replace the board the main window is showing. Nothing in it is saved. */
+        if (AUX) return Promise.resolve(stats());
         if (S.savedAt >= S.dirtyAt && !opts.force) return Promise.resolve(stats());
         const layout = JSON.parse(JSON.stringify(S.layout));
         layout.saved = Date.now();
@@ -1182,11 +1273,7 @@
 
     function screenKey() {
         if (!hasDom) return '';
-        const scr = window.screen || {};
-        const w = Math.round(scr.width || window.innerWidth || 0);
-        const h = Math.round(scr.height || window.innerHeight || 0);
-        const dpr = Math.round((window.devicePixelRatio || 1) * 100) / 100;
-        return w + 'x' + h + '@' + dpr;
+        return math.screenKeyOf(window.screen, window.devicePixelRatio);
     }
 
     /* Everything the store accepted is what the shell adopts — a layout the sanitiser trimmed must
@@ -1555,10 +1642,33 @@
         installHook();
         paintStatus();
         void loadFeedState();
+        if (AUX) {
+            /* §73: an auxiliary window renders its one widget from a synthetic layout and asks the
+               store nothing — so it can neither read nor disturb what the board is doing. The hash
+               is cleared first: a `#view` in the URL is a routing request, and this window has no
+               board to route (measured: `#overview` from the previous window added a second widget
+               before this guard existed). */
+            try { history.replaceState(null, '', (location.pathname || '/desktop') + (location.search || '')); }
+            catch (e) { /* a document that refuses replaceState simply keeps its hash */ }
+            switchTo('terminal', { silent: true });
+            paintBar();
+            return Promise.resolve(stats());
+        }
         return route('GET').then(function (res) {
             S.items = (res && res.items) || {};
             S.layoutId = (res && res.active) || '';
             if (res && res.mode === 'terminal') switchTo('terminal', { silent: true });
+            /* §72: this monitor's own layout, when one was saved for it — the board built for a
+               second screen comes back on that screen. Terminal mode only (layouts live there),
+               and it never fights a layout that is already active. */
+            if (res && res.mode === 'terminal') {
+                const wanted = math.pickScreenLayout(S.items, screenKey(), S.layoutId);
+                if (wanted) {
+                    void activateLayout(wanted);
+                    S.notice = 'this screen’s layout: “' + ((S.items[wanted] || {}).name || wanted) + '”';
+                    paintBar();
+                }
+            }
             return stats();
         }).catch(function (e) {
             S.error = 'layouts unavailable: ' + ((e && e.message) || e);
@@ -1568,15 +1678,10 @@
 
     if (hasDom) {
         installHook();
-        /* Ctrl+Alt+T works in both modes (the way back); the rest are Terminal-mode keys. Typing is
-           never a hotkey, and Escape reaches both jobs it has: leave the maximised widget, then drop
-           the focus ring. */
+        /* Terminal-mode keys: Escape reaches both jobs it has (leave the maximised widget, then
+           drop the focus ring); F11 and Alt+1-9 are below. Ctrl+Alt+T (the way back) is in
+           keys.js's map now, so it obeys the shared typing guard — it used to toggle mid-typing. */
         document.addEventListener('keydown', function (e) {
-            if (e.ctrlKey && e.altKey && String(e.key || '').toLowerCase() === 't') {
-                e.preventDefault();
-                switchTo(S.mode === 'terminal' ? 'classic' : 'terminal');
-                return;
-            }
             if (S.mode !== 'terminal' || !S.layout) return;
             const target = e.target || {};
             const tag = String(target.tagName || '').toUpperCase();
@@ -1624,6 +1729,19 @@
         document.querySelectorAll('#modeSwitch .seg-btn').forEach(function (btn) {
             btn.addEventListener('click', function () { switchTo(btn.getAttribute('data-mode')); });
         });
+        /* Ctrl+Alt+T is registered into keys.js's map (this module owns the action, the map
+           dispatches it and lists it). The Terminal keys below stay local — they are gated on
+           the shell's own focus/maximise state — and the map lists them too. */
+        if (window.OFAPKEYS) {
+            OFAPKEYS.bind({ id: 'terminal-toggle', keys: ['ctrl+alt+t'], scope: 'Global',
+                label: 'classic ⇄ terminal mode',
+                run: function () { switchTo(S.mode === 'terminal' ? 'classic' : 'terminal'); } });
+            OFAPKEYS.document([
+                { keys: 'F11', label: 'maximise / restore the focused widget', scope: 'Terminal' },
+                { keys: 'Esc', label: 'leave the maximised widget, then drop the panel focus', scope: 'Terminal' },
+                { keys: 'Alt+1 … Alt+9', label: 'switch tab', scope: 'Terminal' },
+            ]);
+        }
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
         else boot();
         window.addEventListener('pagehide', function () { saveNow({ urgent: true }); });
