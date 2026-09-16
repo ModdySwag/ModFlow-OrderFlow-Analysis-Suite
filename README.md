@@ -7,7 +7,7 @@
 [![Instruments](https://img.shields.io/badge/instruments-49-blue?style=for-the-badge)](.)
 [![Code](https://img.shields.io/badge/code-~64k%20lines-brightgreen?style=for-the-badge)](.)
 [![API](https://img.shields.io/badge/API-133%20routes-orange?style=for-the-badge)](.)
-[![Tests](https://img.shields.io/badge/tests-712%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+[![Tests](https://img.shields.io/badge/tests-716%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
 
 ---
 
@@ -96,7 +96,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 │               │                                  │                          │
 │  ┌────────────▼──────────┐  ┌───────────────────▼────────────────────┐     │
 │  │   Telegram Alerts     │  │   FastAPI Dashboard                    │     │
-│  │   Entry/BE/Trail/Exit │  │   132 REST/WS routes + streams         │     │
+│  │   Entry/BE/Trail/Exit │  │   133 REST/WS routes + streams         │     │
 │  │   Daily Bias updates  │  │   Charts, VP, Footprint, Orderbook     │     │
 │  └───────────────────────┘  │   Scanner, Strategy Status, Tape       │     │
 │                              └───────────────────────────────────────┘     │
@@ -876,13 +876,13 @@ orderflow_system/
 | Data feeds + storage | 11 | 3,566 | — | 3,566 |
 | Analytics (delta, footprint, volume profile, patterns, signals, alerts) | 17 | 3,077 | — | 3,077 |
 | Atlas (live analytics + `/api/atlas/*`) | 26 | 7,558 | — | 7,558 |
-| Desktop app (desktop package + packaging scripts) | 23 | 8,895 | — | 8,895 |
+| Desktop app (desktop package + packaging scripts) | 24 | 9,065 | — | 9,065 |
 | Desktop UI (vanilla JS + CSS + HTML, no build step) | 81 | — | 31,950 | 31,950 |
 | Legacy dashboard (host + legacy page assets) | 14 | 2,506 | 4,633 | 7,139 |
 | Orchestrator (`main.py`) | 1 | 820 | — | 820 |
-| **Total (excluding tests)** | **175** | **27,237** | **36,583** | **63,820** |
+| **Total (excluding tests)** | **176** | **27,407** | **36,583** | **63,990** |
 
-Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 68 files / 12,371 lines.
+Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 69 files / 12,422 lines.
 
 ---
 

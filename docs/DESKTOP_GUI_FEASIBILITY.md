@@ -198,10 +198,14 @@ python -m orderflow_system.desktop --headless   # server only (CI/smoke tests)
 
 | File (in `docs/screenshots/`) | Shows |
 |---|---|
-| `desktop-overview-live.png` | native window, Overview: BTCUSDT 77694.70, 1,838 ticks, cum Δ 7.87, trade phase `watching`, engine Running |
-| `desktop-live-session.png` | native window, earlier live session (price/ticks/delta updating, Stop engine visible) |
-| `desktop-chart.png` | native window, Chart view: candles + delta histogram, POC/VAH/VAL lines |
-| `desktop-chart-value-area.png` | browser render of the same view with POC 77480.00 and the honest note that `/api/markers` errors in live mode |
+| `desktop-overview-live.png` | live Overview on the Bybit feed: BTCUSDT 75,824.60, 14,118 ticks, cum Δ −233.45 in the KPI cards, plus the session summary, the Alpaca account card and the market-context block |
+| `desktop-live-session.png` | an earlier live session of the same view — last price, ticks and window delta updating as prints arrive, Stop engine visible |
+| `desktop-chart.png` | Chart view: candles + delta line with the POC/VAH/VAL levels, and the VWAP ±1σ row under the canvas |
+| `desktop-chart-value-area.png` | the same view at 1,264×569 for the value-area detail: the POC level and the Δ/V badge on the canvas, with the panel's expression/palette note above it |
+
+All captures were re-shot on 2026-09-16 against the ModFlow-branded build (the Sep 14 batch still
+carried the retired `OF` tile and the "OrderFlow Analysis Pro" wording); the `atlas-*` and
+`desktop-window-*` sets (§8) were re-shot in the same pass.
 
 ### What is verified working
 
