@@ -19,7 +19,7 @@ pip install -e ".[dev]"
 ## Tests, audit and UI selftests (the gates that must stay green)
 
 Every change must leave these green — CI runs exactly the same commands on Python 3.11 and
-3.12, plus a dependency audit (`.github/workflows/ci.yml`):
+3.12, plus the lint baseline and a dependency audit (`.github/workflows/ci.yml`):
 
 ```bash
 python -m pytest orderflow_system -q                     # full suite (baseline: 712 passed / 2 skipped)
