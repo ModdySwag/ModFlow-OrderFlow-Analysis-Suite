@@ -43,7 +43,13 @@
             apiGet(`/api/footprint/${s}`).catch(() => []),
             apiGet(`/api/candles/${s}?timeframe=1m`).catch(() => []),
             apiGet(`/api/delta/${s}`).catch(() => []),
-            apiGet(`/api/tape/${s}?limit=200`).catch(() => []),
+            apiGet(`/api/tape/${s}?count=200`).catch(() => []),
+            /* §56 measured: the JSON route parses+adapts a 29 k-cell snapshot in 0.8 ms and the
+               typed /bin sibling in 0.7 ms — and the bin is BIGGER on sparse books (fixed 4 B per
+               cell per section vs "0,"). The JSON route stays the view's path; the wire is built,
+               tested and available, re-measure it when a snapshot's JSON text passes ~2 MB or an
+               adapt pass passes ~8 ms. (What §56 actually fixed here was the axis contract — see
+               adaptHeat's note.) */
             apiGet(`/api/atlas/heatmap/${s}`).catch(() => ({})),
         ]);
         const bars = mergeBars(fp, candles, delta);
@@ -51,8 +57,19 @@
         for (const bar of fp || []) levelsByTime.set(bar.time, OFX.indexLevels(bar));
         const barSec = bars.length > 1 ? Math.max(1, bars[bars.length - 1].time - bars[bars.length - 2].time) : 60;
         const adapted = OFX.math.adaptHeat(heat, bars.map((b) => b.time), barSec);
+        /* P2-2: the server's matrix version rides along — an unchanged version (the cached
+           snapshot) is not repainted again. */
+        if (adapted) adapted.version = heat && heat.version;
         OFX.state.symbol = s;
         OFX.setData({ bars, levelsByTime, prints: Array.isArray(tape) ? tape : [], heat: adapted || { rows: [], scale: 1 } });
+        /* P1-10: the age of what this view drew — the newest merged bar's own clock; a demo fill
+           (the server says 'demo') is labelled from the live map instead of aged. */
+        if (window.OFAPFRESH) {
+            /* A closed bar's `time` is its OPEN — the sample is the CLOSE (open + the bar's own
+               interval, measured from the series), or a healthy 1m panel would read stale. */
+            OFAPFRESH.stamp('ofx', { lastMs: bars.length ? (Number(bars[bars.length - 1].time) + barSec) * 1000 : 0, kind: 'candles',
+                source: (typeof liveState === 'function' && liveState('footprint') === 'demo') ? 'demo' : '' });
+        }
         /* The depth map carries liquidity forward between windows; ghost levels with no explanation
            are a lie of omission, so the flag rides on the state and the note below says it. */
         OFX.state.data.heatCarry = !!(heat && heat.carry_forward);
@@ -85,6 +102,9 @@
                 lambda: Number(p.lambda_ms) || OFX.state.params.lambda,
                 textPx: Number(p.text_px) || OFX.state.params.textPx,
                 sweepC: Number(p.sweep_c) || OFX.state.params.sweepC,
+                /* P1-8: the depth ramp is a stored display parameter now — it used to live only in
+                   browser storage, which config_store's own rule says is never the record. */
+                ramp: p.ramp || OFX.state.params.ramp,
             });
         } catch (err) { /* defaults stand; the engine is usable without saved params */ }
         if (el('ofxSymbol')) el('ofxSymbol').value = sym();
@@ -93,6 +113,46 @@
         if (el('ofxLambda')) el('ofxLambda').value = String(OFX.state.params.lambda);
         if (el('ofxMinBlock')) el('ofxMinBlock').value = String(OFX.state.params.minBlock);
         if (el('ofxVaPct')) el('ofxVaPct').value = String(OFX.state.params.vaPct);
+        if (el('ofxRamp')) el('ofxRamp').value = String(OFX.state.params.ramp);
+    }
+
+    /* ── P1-8: the bar expression, read and written through the config ───────────────────────
+       GET gives the stored value; every change is applied locally FIRST (so the picture follows the
+       control immediately) and then reconciled with what the store accepted — the store is the
+       authority, and `adopt` is what puts its answer back on the control. */
+    async function loadExpression() {
+        let block = null;
+        try {
+            const res = await apiGet('/api/control/expression');
+            block = (res && res.expression) || null;
+        } catch (err) { /* the catalogue's defaults stand; the engine is usable without saved state */ }
+        const eng = (block && block.engine) || {};
+        adoptExpression({ mode: eng.mode, palette: eng.palette });
+        return eng;
+    }
+
+    function adoptExpression(next) {
+        if (!window.OFAPEXPR) return;
+        const applied = OFX.setExpression({ mode: next.mode, palette: next.palette });
+        if (el('ofxMode')) el('ofxMode').value = applied.mode;
+        if (el('ofxPalette')) el('ofxPalette').value = applied.palette;
+        paintLegend();
+    }
+
+    async function saveExpression(patch) {
+        try {
+            const res = await apiGet('/api/control/expression', {
+                method: 'POST', body: Object.assign({ chart: 'engine' }, patch),
+            });
+            if (res && res.ok === false) { view.lastError = `expression refused: ${res.error}`; paintStats(); return; }
+            /* Adopt the value the STORE accepted: a junk mode comes back as `default`, and the
+               control has to show that rather than the word that was typed. */
+            const value = (res && res.value) || {};
+            adoptExpression({ mode: value.mode, palette: value.palette });
+        } catch (err) {
+            view.lastError = `expression save failed: ${err}`;
+            paintStats();
+        }
     }
 
     async function saveParams() {
@@ -278,7 +338,11 @@
                 + `${s.lod} · col ${s.colW}px · ${read} · levels ${s.levelCount} · avg ${s.avgLevelVolume}`;
         }
         if (el('ofxLod')) {
-            el('ofxLod').textContent = s.lod === 'profile' ? 'LOD: volume profile (text suppressed)' : 'LOD: footprint cells + text';
+            const exprNote = (s.expression.mode !== 'default' && s.lod === 'profile')
+                ? ' · bar expression not drawn at this LOD' : '';
+            el('ofxLod').textContent = (s.lod === 'profile'
+                ? 'LOD: volume profile (text suppressed)'
+                : 'LOD: footprint cells + text') + exprNote;
         }
         if (el('ofxDepthNote')) el('ofxDepthNote').textContent = view.lastError || '';
     }
@@ -291,15 +355,27 @@
         chip.textContent = historical ? '⟲ Snap to live market' : '● live';
         const float = el('ofxSnapFloat');
         if (float) float.classList.toggle('on', historical);      // bottom-right badge, only when history is in view
-        paintSpark(el('ofxSpark'));
-        paintSpark(el('ofxSpark2'));
+        paintSpark(el('ofxSpark'), 90, 20);
+        paintSpark(el('ofxSpark2'), 88, 18);
     }
 
-    function paintSpark(spark) {
+    function paintSpark(spark, cssW, cssH) {
         if (!spark) return;
+        const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+        /* §72: the spark keeps its small fixed CSS box (90×20 / 88×18) and carries the display scale
+           in its backing store. It used to have no CSS size at all, so it displayed at its backing
+           size: a 125/150/200% monitor drew it soft, and a fit pass could resize the element. */
+        if (spark.style && spark.style.width !== cssW + 'px') {
+            spark.style.width = cssW + 'px';
+            spark.style.height = cssH + 'px';
+        }
+        const wantW = Math.max(1, Math.round(cssW * dpr)), wantH = Math.max(1, Math.round(cssH * dpr));
+        if (spark.width !== wantW || spark.height !== wantH) { spark.width = wantW; spark.height = wantH; }
         const ctx = spark.getContext('2d');
-        const closes = OFX.state.data.bars.slice(-60).map((b) => Number(b.close) || 0);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, spark.width, spark.height);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const closes = OFX.state.data.bars.slice(-60).map((b) => Number(b.close) || 0);
         if (closes.length < 2) return;
         const lo = Math.min(...closes), hi = Math.max(...closes);
         const up = closes[closes.length - 1] >= closes[0];
@@ -307,8 +383,8 @@
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         closes.forEach((c, i) => {
-            const x = (i / (closes.length - 1)) * (spark.width - 2) + 1;
-            const y = spark.height - 2 - ((c - lo) / Math.max(1e-9, hi - lo)) * (spark.height - 4);
+            const x = (i / (closes.length - 1)) * (cssW - 2) + 1;
+            const y = cssH - 2 - ((c - lo) / Math.max(1e-9, hi - lo)) * (cssH - 4);
             if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         });
         ctx.stroke();
@@ -674,18 +750,30 @@
             const head = document.querySelector('.view[data-view="ofx"] .view-head');
             if (head) OFAPCURSOR.badge(head);
         }
-        /* The ramp is a display preference, so it lives with the view, not the engine config: it is
-           applied immediately and remembered across restarts without a server round-trip. */
+        /* The ramp is a stored display parameter (config_store clamps it to `RAMP_KEYS`), so it is
+           applied immediately AND persisted through the same route the other parameters use. It
+           used to be a localStorage preference, which is not the record anywhere else in this app. */
         if (el('ofxRamp')) {
-            const saved = (() => { try { return window.localStorage.getItem('ofx.ramp'); } catch (e) { return null; } })();
-            if (saved === 'thermal' || saved === 'classic') el('ofxRamp').value = saved;
-            const apply = () => {
-                if (typeof OFX.setParams === 'function') OFX.setParams({ ramp: el('ofxRamp').value });
-                try { window.localStorage.setItem('ofx.ramp', el('ofxRamp').value); } catch (e) { /* private mode */ }
-            };
-            el('ofxRamp').addEventListener('change', apply);
-            apply();
+            el('ofxRamp').addEventListener('change', () => {
+                OFX.setParams({ ramp: el('ofxRamp').value });
+                paintLegend();
+                void saveParams();
+            });
         }
+        /* Bars and palette: applied on change, then reconciled with the store's answer. */
+        ['ofxMode', 'ofxPalette'].forEach((id) => {
+            if (!el(id)) return;
+            el(id).addEventListener('change', () => {
+                void saveExpression({ mode: el('ofxMode').value, palette: el('ofxPalette').value });
+            });
+        });
+        /* The Chart menu writes the same registry paths through /api/control/params; that arrives as
+           an event rather than a direct call, because the menu has no idea which view is live. */
+        document.addEventListener('ofap:expression', () => {
+            /* The menu writes the config, not this module's memory: re-read the block and adopt
+               it, rather than re-resolving parameters that never changed. */
+            void loadExpression();
+        });
         if (el('ofxSymbol')) el('ofxSymbol').addEventListener('change', () => {
             view.symbol = (el('ofxSymbol').value || SYM_FALLBACK).toUpperCase();
             void saveParams();
@@ -707,6 +795,7 @@
             if (s3) OFX.resize(s3.w, s3.h);
         });
 
+        await loadExpression();
         try {
             await load();
         } catch (err) {
@@ -780,6 +869,31 @@
             void ofxInit();
             refit();
         }).observe(section, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    /* P1-9: the engine's keys, registered into the app's one shortcut map — at module scope, so the
+       map is complete before the view has ever been opened. Zoom anchors at the stage centre (the
+       wheel keeps the cursor); priority 6 outranks the heatmap's 5 when Terminal mode shows both
+       views at once. Clear and export drive the selection strip's own buttons, so a key can never
+       take a different path than the click it stands for. */
+    if (window.OFAPKEYS) {
+        const stripBtn = (what) => document.querySelector('.view[data-view="ofx"] [data-ofx-sel="' + what + '"]');
+        OFAPKEYS.bind({ id: 'zoom-time-in', keys: ['=', '+'], scope: 'Engine', priority: 6,
+            label: 'zoom time in', when: () => OFAPKEYS.inView('ofx'), run: () => OFX.zoomTime(1.12) });
+        OFAPKEYS.bind({ id: 'zoom-time-out', keys: ['-', '_'], scope: 'Engine', priority: 6,
+            label: 'zoom time out', when: () => OFAPKEYS.inView('ofx'), run: () => OFX.zoomTime(0.89) });
+        OFAPKEYS.bind({ id: 'zoom-price-in', keys: [']', '}'], scope: 'Engine', priority: 6,
+            label: 'zoom price in', when: () => OFAPKEYS.inView('ofx'), run: () => OFX.zoomPrice(1.09) });
+        OFAPKEYS.bind({ id: 'zoom-price-out', keys: ['[', '{'], scope: 'Engine', priority: 6,
+            label: 'zoom price out', when: () => OFAPKEYS.inView('ofx'), run: () => OFX.zoomPrice(0.92) });
+        OFAPKEYS.bind({ id: 'selection-clear', keys: ['x'], scope: 'Engine', priority: 6,
+            label: 'clear the selection',
+            when: () => OFAPKEYS.inView('ofx') && OFX.selection() != null,
+            run: () => { const b = stripBtn('clear'); if (b) b.click(); } });
+        OFAPKEYS.bind({ id: 'export', keys: ['ctrl+e'], scope: 'Engine', priority: 6,
+            label: 'export the selection as CSV',
+            when: () => OFAPKEYS.inView('ofx') && OFX.selection() != null,
+            run: () => { const b = stripBtn('export'); if (b) b.click(); } });
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchView);

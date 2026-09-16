@@ -118,13 +118,14 @@ state.view.scaleX = 55;                      // zoom time only
 check('matrix: X zoom leaves Y alone', OFX.priceToY(150) === yBefore);
 
 /* ── depth-history adapter ───────────────────────────────────────────────── */
-const heatPayload = { step: 1, buckets: [1700000000, 1700000060], prices: [[10, 11], [10, 11]], values: [[5, 9], [0, 14]] };
+/* §56: the snapshot contract — values[price row][time col], prices the flat ladder */
+const heatPayload = { step: 1, buckets: [1700000000, 1700000060], prices: [10, 11], values: [[5, 0], [9, 14]] };
 const adapted = OFX.math.adaptHeat(heatPayload, [1700000000, 1700000060], 60);
 check('adaptHeat: columns land on the bars containing their timestamp',
     adapted && adapted.rows.length === 3 && adapted.rows.filter((r) => r.col === 1).length === 1
     && adapted.rows.find((r) => r.col === 1).size === 14,
     JSON.stringify(adapted && adapted.rows));
-const sumPayload = { step: 1, buckets: [1700000000, 1700000030], prices: [[10], [10]], values: [[5], [7]] };
+const sumPayload = { step: 1, buckets: [1700000000, 1700000030], prices: [10], values: [[5, 7]] };
 const summed = OFX.math.adaptHeat(sumPayload, [1700000000, 1700000060], 60);
 check('adaptHeat: sub-bar columns sum into one bar cell (payload is finer than the bar axis)',
     summed && summed.rows.length === 1 && summed.rows[0].size === 12 && summed.rows[0].col === 0,
@@ -334,6 +335,443 @@ check('selection: a range with no bars is null, not an empty strip',
 const selOne = math.selectionStats({ bars: selBars, levels: selLevels, prints: [], i0: 1, i1: 1, p0: 100, p1: 101 });
 check('selection: a single-bar range is legal (its own bar, no neighbours required)',
     selOne.bars === 1 && selOne.t0 === 1060 && selOne.t1 === 1060, JSON.stringify([selOne.bars, selOne.t0]));
+
+/* ── P1-9: keyboard zoom — the wheel's own arithmetic, pinned ────────────── */
+check('zoom: the time scale clamps at both limits',
+    math.zoomScale(85, 1.12, 2.5, 90) === 90 && math.zoomScale(3, 0.8, 2.5, 90) === 2.5);
+check('zoom: the price scale clamps at both limits',
+    math.zoomScale(39, 1.09, 0.02, 40) === 40 && math.zoomScale(0.015, 0.89, 0.02, 40) === 0.02);
+{
+    const v = OFX.state.view;
+    v.width = 800; v.height = 500; v.scaleX = 50; v.scaleY = 2; v.offX = 10; v.offY = 100;
+    OFX.state.autoFit = false;
+    const idx0 = OFX.xToIndex(400);
+    const sx = OFX.zoomTime(1.12, 400);
+    check('zoom: a time zoom keeps the anchored column under the anchor point',
+        near(OFX.xToIndex(400), idx0) && near(sx, 56), JSON.stringify([idx0, sx]));
+    const p0 = OFX.yToPrice(250);
+    const sy = OFX.zoomPrice(1.09, 250);
+    check('zoom: a price zoom keeps the anchored price under the anchor point',
+        near(OFX.yToPrice(250), p0) && near(sy, 2.18) && OFX.state.autoFit === false,
+        JSON.stringify([p0, sy]));
+}
+{
+    const v = OFX.state.view;
+    v.scaleX = 52; v.offX = 0; OFX.state.autoFit = false;
+    const centre = OFX.xToIndex(v.width / 2);
+    OFX.zoomTime(0.89);
+    check('zoom: a bare key press anchors at the stage centre', near(OFX.xToIndex(v.width / 2), centre));
+    const centreY = OFX.yToPrice(v.height / 2);
+    OFX.zoomPrice(0.92);
+    check('zoom: the price default anchor is the stage centre too', near(OFX.yToPrice(v.height / 2), centreY));
+}
+
+/* ── P2-1: the hover index — parity with the loops it replaced ───────────────
+   The reference (oracle) here is the OLD algorithm written out verbatim: a full scan per bar.
+   The index must answer exactly what those loops answered, for the same payload. */
+{
+    const T0 = 1700000000, SEC = 60, NB = 40, NP = 400;
+    const hBars = [], hPrints = [], hHeat = [];
+    for (let i = 0; i < NB; i += 1) {
+        hBars.push({ time: T0 + i * SEC, open: 1, high: 2, low: 1, close: 1.5, volume: 5, delta: (i % 5) - 2 });
+    }
+    for (let k = 0; k < NP; k += 1) {
+        const bi = k % NB;
+        hPrints.push({ time: T0 + bi * SEC + (k % SEC), price: 1.05, size: 0.5 + (k % 7) * 0.25, side: k % 2 ? 'buy' : 'sell' });
+    }
+    for (let c = 0; c < NB; c += 1) {
+        for (let p = 0; p < 6; p += 1) {
+            hHeat.push({ col: c, lo: 1 + (p - 2) * 0.07, hi: 1 + (p - 1) * 0.07, size: 1 + (c % 5) + p });
+        }
+    }
+    const hLevels = new Map(hBars.map((b) => [b.time, [{ price: 1.05, bid: 9, ask: 8 }]]));
+    const hEvents = hHeat.map((_, k) => ({ col: k % NB, kind: 'sweep', direction: 'buy', price: 1.05, size: 1 }));
+    OFX.setData({ bars: hBars, levelsByTime: hLevels, prints: hPrints,
+        heat: { rows: hHeat, scale: 1, traded: [], best: [], events: hEvents } });
+
+    const sec = OFX.barSeconds();
+    const oracle = (i) => {
+        let cvd = 0;
+        for (let k = 0; k <= i; k += 1) cvd += Number(hBars[k].delta) || 0;
+        const bar = hBars[i];
+        let prints = 0, sweep = 0;
+        for (const p of hPrints) {
+            const raw = Number(p.time) || 0;
+            const ts = raw > 1e11 ? raw / 1000 : raw;
+            if (ts >= bar.time && ts < bar.time + sec) { prints += 1; sweep += Number(p.size) || 0; }
+        }
+        let depth = 0;
+        for (const cell of hHeat) {
+            if (cell.col !== i) continue;
+            if (cell.lo <= 1.05 && 1.05 < cell.hi) depth += cell.size;
+        }
+        const events = hEvents.filter((e) => Number(e.col) === i).length;
+        return { cvd: cvd, prints: prints, sweep: sweep, depth: depth, events: events };
+    };
+
+    const idx = OFX.state.idx;
+    check('P2-1: prints are bucketed exactly as the unindexed scan counts them',
+        [3, 16, 25, 39].every((i) => {
+            const o = oracle(i);
+            return idx.printsByBar[i].prints === o.prints && near(idx.printsByBar[i].sweep, o.sweep, 1e-9);
+        }),
+        JSON.stringify([3, 16, 25, 39].map((i) => [idx.printsByBar[i].prints, oracle(i).prints])));
+    check('P2-1: the CVD prefix equals the loop from bar 0',
+        [0, 7, 21, 39].every((i) => idx.cvd[i + 1] === oracle(i).cvd));
+    check('P2-1: hover depth comes from the renderer column groups',
+        [5, 17, 30].every((i) => {
+            let depth = 0;
+            for (const cell of OFX.state.data.heatIndex.groups.get(i) || []) {
+                if (cell.lo <= 1.05 && 1.05 < cell.hi) depth += cell.size;
+            }
+            return depth === oracle(i).depth;
+        }));
+    check('P2-1: flow events group by column like the filter did',
+        [4, 19, 33].every((i) => (idx.flowByCol.get(i) || []).length === oracle(i).events));
+    {
+        const hi = 16;
+        const mx = OFX.worldX(hi) + OFX.state.view.scaleX / 2;
+        const my = OFX.priceToY(1.05);
+        OFX.hover(mx, my);
+        const h = OFX.state.hover, o = oracle(hi);
+        check('P2-1: hover() end to end reads the index (same numbers as the old loops)',
+            !!h && h.index === hi && h.prints === o.prints && near(h.sweep, o.sweep, 1e-9)
+            && near(h.depth, o.depth, 1e-9) && near(h.cvd, o.cvd, 1e-9),
+            JSON.stringify([h && [h.index, h.prints, h.sweep, h.depth, h.cvd], o]));
+    }
+    /* Millisecond stamps: the selectionStats rule means they COUNT now (they used to read zero). */
+    const msPrints = hPrints.map((p) => ({ time: Math.round(p.time * 1000), price: p.price, size: p.size, side: p.side }));
+    OFX.setData({ prints: msPrints });
+    const msTotal = OFX.state.idx.printsByBar.reduce((a, r) => a + r.prints, 0);
+    check('P2-1: millisecond stamps are normalised once and counted', msTotal === NP, `got ${msTotal}`);
+    /* Bar boundaries moving must re-bucket: the oracle recomputed against the shifted bars agrees. */
+    const sBars = hBars.map((b) => ({ time: b.time + 30, open: b.open, high: b.high, low: b.low,
+        close: b.close, volume: b.volume, delta: b.delta }));
+    OFX.setData({ bars: sBars });
+    const sSec = OFX.barSeconds();
+    const sOracle = (i) => {
+        const bar = sBars[i];
+        let n = 0;
+        for (const p of msPrints) {
+            const ts = Number(p.time) / 1000;
+            if (ts >= bar.time && ts < bar.time + sSec) n += 1;
+        }
+        return n;
+    };
+    check('P2-1: a bars-only change re-buckets the prints',
+        [3, 16, 25, 39].every((i) => OFX.state.idx.printsByBar[i].prints === sOracle(i)),
+        JSON.stringify([3, 16, 25, 39].map((i) => [OFX.state.idx.printsByBar[i].prints, sOracle(i)])));
+}
+
+/* ── P2-2 (R6): the heat change gate, the ghost patch pass, hover coalescing ──
+   The gate's contract: a pass runs when the epoch moved or ghosts are fading, and a no-op pass
+   must COUNT as a no-op (heatSkips), so a benchmark cannot mistake it for work. */
+{
+    const heatRows = [
+        { col: 0, lo: 1.0, hi: 1.01, size: 5 },
+        { col: 1, lo: 1.0, hi: 1.01, size: 7 },
+    ];
+    const calls = { clear: 0, fullClear: 0, fill: 0 };
+    const heatStub = {
+        fillStyle: '',
+        setTransform() {},
+        clearRect(x, y) { if (x === 0 && y === 0) calls.fullClear += 1; calls.clear += 1; },
+        fillRect() { calls.fill += 1 },
+    };
+    heatStub.getContext = () => heatStub;
+    OFX.state.layers.heat = heatStub;
+
+    OFX.setData({ heat: { rows: heatRows, scale: 1, version: 'v1' } });
+    const s0 = OFX.stats();
+    OFX.renderLayers(false);
+    const s1 = OFX.stats();
+    check('P2-2: a new heat version paints once (heatPasses +1, full clear ran)',
+        s1.heatPasses === s0.heatPasses + 1 && calls.fullClear > 0, JSON.stringify([s0.heatPasses, s1.heatPasses]));
+
+    /* nothing changed: the same dirty flag now costs a counted no-op, not a repaint */
+    OFX.state.dirty.heat = true;
+    const before = calls.fullClear;
+    OFX.renderLayers(false);
+    const s2 = OFX.stats();
+    check('P2-2: an unchanged epoch is a counted skip, never a repaint',
+        s2.heatPasses === s1.heatPasses && s2.heatSkips === s1.heatSkips + 1 && calls.fullClear === before,
+        JSON.stringify([s2.heatPasses, s2.heatSkips, calls.fullClear - before]));
+
+    /* the same version delivered twice is not a change */
+    const e0 = OFX.state.heatEpoch;
+    OFX.setData({ heat: { rows: heatRows, scale: 1, version: 'v1' } });
+    check('P2-2: a repeated server version does not bump the epoch', OFX.state.heatEpoch === e0);
+    OFX.setData({ heat: { rows: heatRows, scale: 1, version: 'v2' } });
+    check('P2-2: a new version bumps the epoch', OFX.state.heatEpoch === e0 + 1);
+
+    /* resize clears the canvas, so it must force a full repaint */
+    OFX.state.heatPainted = OFX.state.heatEpoch;
+    OFX.resize(900, 480);
+    check('P2-2: resize forces a full repaint (canvas content is gone)', OFX.state.heatEpoch > OFX.state.heatPainted);
+    OFX.state.heatPainted = OFX.state.heatEpoch;
+    OFX.setParams({ lambda: 700 });
+    check('P2-2: a lambda change forces the decay curve to repaint', OFX.state.heatEpoch > OFX.state.heatPainted);
+
+    /* §72: the backing store carries the display scale. dpr = 1 is the identity the engine has
+       always painted at; a real display scale must shape the backing stores and nothing else. */
+    check('§72: math.layerSize is the one place that maths lives', (() => {
+        const one = OFX.math.layerSize(900, 480, 1);
+        const mid = OFX.math.layerSize(900, 480, 1.5);
+        const two = OFX.math.layerSize(900, 480, 2);
+        const zero = OFX.math.layerSize(900, 480, 0);
+        return one.w === 900 && one.h === 480 && mid.w === 1350 && mid.h === 720
+            && two.w === 1800 && two.h === 960 && zero.w === 900 && zero.h === 480;
+    })());
+    {
+        const savedWindow = (typeof globalThis.window === 'undefined') ? undefined : globalThis.window;
+        const savedBase = OFX.state.layers.base;
+        const savedRibbon = OFX.state.layers.ribbon;
+        try {
+            const layer = { width: 10, height: 10, style: {}, getContext: () => ctxt, addEventListener: () => {} };
+            OFX.state.layers.base = layer;
+            OFX.state.layers.ribbon = null;
+            globalThis.window = { devicePixelRatio: 1.5 };
+            OFX.resize(900, 480);
+            check('§72: a 150% display backs the layers at 1.5×', layer.width === 1350 && layer.height === 720,
+                `got ${layer.width}x${layer.height}`);
+            globalThis.window = { devicePixelRatio: 1 };
+            OFX.resize(900, 480);
+            check('§72: dpr = 1 is the identity — the exact sizes the engine always used',
+                layer.width === 900 && layer.height === 480, `got ${layer.width}x${layer.height}`);
+            const boxed = { width: 1, height: 1, clientWidth: 250, clientHeight: 125, style: {}, getContext: () => ctxt };
+            OFX.state.layers.base = boxed;
+            globalThis.window = { devicePixelRatio: 2 };
+            OFX.resize(900, 480);
+            check('§72: a canvas with its own CSS box is sized from that box × dpr',
+                boxed.width === 500 && boxed.height === 250, `got ${boxed.width}x${boxed.height}`);
+            const ribbon = { width: 1, height: 1, clientWidth: 700, clientHeight: 82, style: { width: '' }, getContext: () => ctxt };
+            OFX.state.layers.ribbon = ribbon;
+            globalThis.window = { devicePixelRatio: 2 };
+            OFX.resize(720, 480);
+            check('§72: the ribbon box is the stage width and its backing carries the scale',
+                ribbon.style.width === '720px' && ribbon.width === 1400 && ribbon.height === 164,
+                JSON.stringify([ribbon.style.width, ribbon.width, ribbon.height]));
+        } finally {
+            if (savedWindow === undefined) delete globalThis.window; else globalThis.window = savedWindow;
+            OFX.state.layers.base = savedBase;
+            OFX.state.layers.ribbon = savedRibbon;
+        }
+    }
+
+    /* the ghost patch pass: repaint on quantised change, keep fading while it lasts, clear on death */
+    OFX.setParams({ lambda: 500 });          // restore the constant the ghost maths below assumes
+    OFX.state.heatPainted = OFX.state.heatEpoch;
+    const ghostCell = { size: 0, alpha: 0.5, peak: 0.9, seen: Date.now() - 200, lastSize: 5 };
+    OFX.state.heatGhosts = [{ cell: ghostCell, x: 10, yTop: 10, h: 5 }];
+    const p0 = OFX.stats();
+    const fills0 = calls.fill;
+    const clears0 = calls.clear;
+    OFX.state.dirty.heat = true;
+    OFX.renderLayers(false);
+    const p1 = OFX.stats();
+    check('P2-2: a moved ghost is patch-repainted inside its own rect (no full clear)',
+        p1.heatPatches === p0.heatPatches + 1 && calls.fill === fills0 + 1
+        && calls.fullClear === before && calls.clear === clears0 + 1,
+        JSON.stringify([p1.heatPatches, p0.heatPatches, calls.fill - fills0, calls.clear - clears0]));
+    check('P2-2: the ghost keeps its new alpha', Math.abs(ghostCell.alpha - 0.603) < 0.01, String(ghostCell.alpha));
+    const fills1 = calls.fill;
+    OFX.state.dirty.heat = true;
+    OFX.renderLayers(false);
+    check('P2-2: an invisible move paints nothing (quantised)', calls.fill === fills1);
+    ghostCell.seen = Date.now() - 10000;
+    OFX.state.dirty.heat = true;
+    OFX.renderLayers(false);
+    check('P2-2: a dead ghost is cleared and leaves the list', OFX.state.heatGhosts.length === 0,
+        JSON.stringify(OFX.state.heatGhosts.length));
+
+    /* ── adaptHeat: the numeric-key rewrite must answer exactly what the string keys did ── */
+    const T0 = 1700000000;
+    const barTimes = [T0, T0 + 60];
+    const wire = {
+        step: 0.01, tick: 0.01,
+        buckets: [T0 * 1000, (T0 + 65) * 1000, (T0 + 61) * 1000],
+        prices: [1.0, 1.01],
+        values: [[3, 5, 2], [4, 6, 0]],
+        traded: [[1, 0, 3], [0, 2, 0]],
+        best: [{ bid: 1, ask: 1.02, trades: 1 }],
+        events: [
+            { ts_ms: T0 * 1000 + 500, price: 1.0, kind: 'stack', size: 5, direction: 'buy' },
+            { ts_ms: T0 * 1000 + 700, price: 1.0, kind: 'stack', size: 9, direction: 'buy' },
+            { ts_ms: (T0 + 61) * 1000, price: 1.0, kind: 'pull', size: 4, direction: 'sell' },
+        ],
+    };
+    const wireAdapted = OFX.math.adaptHeat(wire, barTimes, 60);
+    const rowAt = (col, price) => (wireAdapted.rows.find((r) => r.col === col && Math.abs(r.price - price) < 1e-9) || {}).size;
+    check('P2-2: adaptHeat merges per (bar, price) with numeric keys',
+        rowAt(0, 1.0) === 3 && rowAt(0, 1.01) === 4 && rowAt(1, 1.0) === 7 && rowAt(1, 1.01) === 6,
+        JSON.stringify(wireAdapted.rows));
+    check('P2-2: adaptHeat merges traded volume the same way',
+        wireAdapted.traded.some((r) => r.col === 1 && Math.abs(r.price - 1.0) < 1e-9 && r.size === 3)
+        && wireAdapted.traded.filter((r) => r.col === 1).length === 2,
+        JSON.stringify(wireAdapted.traded));
+    check('P2-2: events keep the largest size per (bar, price, kind) and stay distinct by kind',
+        wireAdapted.events.length === 2
+        && wireAdapted.events.some((e) => e.kind === 'stack' && e.size === 9)
+        && wireAdapted.events.some((e) => e.kind === 'pull' && e.size === 4),
+        JSON.stringify(wireAdapted.events.map((e) => [e.kind, e.size])));
+    check('P2-2: a bucket past the last window is not placed', OFX.math.adaptHeat({
+        step: 0.01, buckets: [(T0 + 120) * 1000], prices: [1.0], values: [[5]] }, barTimes, 60) === null);
+    const noisy = OFX.math.adaptHeat({
+        step: 0.01, buckets: [T0 * 1000], prices: [1.0000000001, 1.0], values: [[2], [3]] }, barTimes, 60);
+    check('P2-2: off-grid float noise merges with its grid price',
+        noisy && noisy.rows.length === 1 && noisy.rows[0].size === 5, JSON.stringify(noisy && noisy.rows));
+
+    /* ── hover coalescing: many moves, no hover until the frame runs it ── */
+    const wx = {}, cx2 = {};
+    global.window = { addEventListener: (type, fn) => { wx[type] = fn; } };
+    const canvas2 = {
+        addEventListener: (type, fn) => { cx2[type] = fn; },
+        getBoundingClientRect: () => ({ left: 0, top: 0, right: 900, bottom: 480 }),
+    };
+    OFX.attach(canvas2);
+    const hoverBefore = OFX.state.hover;
+    wx.mousemove({ clientX: 123, clientY: 45 });
+    const first = OFX.state.pendingHover;
+    wx.mousemove({ clientX: 200, clientY: 60 });
+    const second = OFX.state.pendingHover;
+    check('P2-2: moves pend (newest wins) and do not run hover per event',
+        !!first && first.x === 123 && first.y === 45 && !!second && second.x === 200 && second.y === 60
+        && OFX.state.hover === hoverBefore,
+        JSON.stringify([first, second]));
+    check('P2-2: a move outside the canvas still pends nothing new',
+        (() => { const keep = OFX.state.pendingHover; wx.mousemove({ clientX: 5000, clientY: 5000 });
+            return OFX.state.pendingHover === keep; })());
+}
+
+/* ── P2-3: the frame yield (measured at 4K: 17.5 ms arrival frame -> split) ────────────
+   The contract: a frame that has spent its share paints what it can and leaves the rest
+   QUEUED (dirty), so the next frame finishes the job instead of the first one blowing the
+   budget. A single-layer job can never yield — there is nothing to defer to. */
+{
+    /* a self-returning callable proxy: satisfies every 2D-context method call and property
+       read without writing fifty no-ops. */
+    const ctxt = new Proxy(function () {}, {
+        get: (target, key) => (key === Symbol.toPrimitive ? () => 0 : ctxt),
+        set: () => true,
+        apply: () => ctxt,
+    });
+    const canvasFor = () => ({ width: 100, height: 100, getContext: () => ctxt, addEventListener: () => {}, getBoundingClientRect: () => ({ left: 0, top: 0, right: 100, bottom: 100 }) });
+    OFX.state.layers.base = canvasFor();
+    OFX.state.layers.live = canvasFor();
+    OFX.state.layers.ribbon = canvasFor();
+
+    let spin = true;
+    const heatStub = {
+        fillStyle: '',
+        setTransform() {},
+        clearRect() { if (spin) { const t0 = Date.now(); while (Date.now() - t0 < 7) { /* burn the budget */ } spin = false; } },
+        fillRect() {},
+        getContext() { return heatStub; },
+    };
+    OFX.state.layers.heat = heatStub;
+
+    OFX.setData({ heat: { rows: [{ col: 0, lo: 1.0, hi: 1.01, size: 5 }], scale: 1, version: 'y1' } });
+    const y0 = OFX.stats();
+    OFX.state.dirty.heat = OFX.state.dirty.base = OFX.state.dirty.live = true;
+    OFX.renderLayers(false);
+    const y1 = OFX.stats();
+    check('P2-3: a frame that spends its share defers the rest (yield counted, flags left set)',
+        y1.yields === y0.yields + 1 && OFX.state.dirty.base === true && OFX.state.dirty.live === true
+        && y1.heatPasses === y0.heatPasses + 1,
+        JSON.stringify([y1.yields, OFX.state.dirty.base, OFX.state.dirty.live]));
+
+    OFX.renderLayers(false);
+    const y2 = OFX.stats();
+    check('P2-3: the next frame finishes the deferred layers and clears their flags',
+        OFX.state.dirty.base === false && OFX.state.dirty.live === false && y2.yields === y1.yields,
+        JSON.stringify([OFX.state.dirty.base, OFX.state.dirty.live, y2.yields - y1.yields]));
+
+    /* a fast frame paints everything in one go */
+    OFX.state.heatEpoch += 1;
+    OFX.state.dirty.heat = OFX.state.dirty.base = OFX.state.dirty.live = true;
+    const y3before = OFX.stats();
+    OFX.renderLayers(false);
+    const y3 = OFX.stats();
+    check('P2-3: a frame under its share paints the whole job in one pass',
+        y3.yields === y3before.yields && OFX.state.dirty.base === false && OFX.state.dirty.heat === false,
+        JSON.stringify([y3.yields - y3before.yields]));
+
+    /* a single-layer job never yields, even when that one layer is slow */
+    spin = true;
+    OFX.state.heatEpoch += 1;
+    OFX.state.dirty.heat = true;
+    const y4before = OFX.stats();
+    OFX.renderLayers(false);
+    const y4 = OFX.stats();
+    check('P2-3: a single-layer frame cannot defer to itself — no yield',
+        y4.yields === y4before.yields && OFX.state.dirty.heat === false,
+        JSON.stringify([y4.yields - y4before.yields, OFX.state.dirty.heat]));
+
+    check('P2-3: stats() reports yields', 'yields' in OFX.stats());
+}
+
+/* ── §56: the typed heat wire decodes, and adapts to EXACTLY what the JSON path produces ──
+   The fixture is assembled byte-by-byte here, so this also pins the layout `atlas/wire.py`
+   writes (magic, u32 header length, header JSON, f64 buckets, f32 sections, 12 B best). */
+{
+    const T0 = 1700000000000;
+    const header = {
+        symbol: 'T', version: 3, step: 0.5, tick: 0.5, cols: 3, rows: 2,
+        prices_mode: 'per_column', traded: true, carry_forward: false, carried_cells: 0,
+        scale_max: 9, upper_cutoff_pct: 1, wall_age_ms: 120000, walls: [], note: '',
+        events: [{ ts_ms: T0 + 500, price: 100.0, kind: 'wall', size: 5, direction: 'bid' }],
+    };
+    const hj = new TextEncoder().encode(JSON.stringify(header));
+    const parts = [];
+    parts.push(new Uint8Array([79, 70, 72, 66]));                       // 'OFHB'
+    const lb = new Uint8Array(4);
+    new DataView(lb.buffer).setUint32(0, hj.length, true);
+    parts.push(lb, hj);
+    const f64 = (arr) => new Uint8Array(Float64Array.from(arr).buffer);
+    const f32 = (arr) => new Uint8Array(Float32Array.from(arr).buffer);
+    parts.push(f64([T0, T0 + 30000, T0 + 61000]));
+    parts.push(f32([100.0, 100.5, 100.0, 100.5, 100.0, 100.5]));         // prices, per column (legacy path, same ladder)
+    parts.push(f32([5.0, 3.0, 4.0, 2.0, 1.0, 0.0]));                     // values, row-major
+    parts.push(f32([1.0, 0.5, 2.0, 0.0, 0.0, 0.0]));                     // traded, row-major
+    const bb = new Uint8Array(36);
+    const bdv = new DataView(bb.buffer);
+    bdv.setFloat32(0, 100.0, true); bdv.setFloat32(4, 100.5, true); bdv.setInt32(8, 4, true);
+    for (let c = 1; c < 3; c += 1) { bdv.setFloat32(c * 12, 0, true); bdv.setFloat32(c * 12 + 4, 0, true); bdv.setInt32(c * 12 + 8, 0, true); }
+    parts.push(bb);
+    const total = parts.reduce((n, p) => n + p.length, 0);
+    const buf = new Uint8Array(total);
+    let off2 = 0;
+    for (const p of parts) { buf.set(p, off2); off2 += p.length; }
+
+    const wire = OFX.math.decodeHeatBin(buf.buffer);
+    check('§56: decodeHeatBin reads the header and typed sections',
+        !!wire && wire.header.cols === 3 && wire.header.rows === 2
+        && wire.buckets.length === 3 && Math.abs(wire.buckets[0] - T0) < 1e-6
+        && wire.values.length === 6 && wire.traded.length === 6
+        && wire.best.length === 3 && wire.best[0].trades === 4,
+        JSON.stringify(wire && { cols: wire.header.cols, v: wire.values.length }));
+
+    const bt = [1700000000, 1700000060];
+    const bin = OFX.math.adaptHeatBin(wire, bt, 60);
+    const json = OFX.math.adaptHeat({
+        step: 0.5, tick: 0.5,
+        buckets: [T0, T0 + 30000, T0 + 61000],
+        prices: [100.0, 100.5],
+        values: [[5.0, 3.0, 4.0], [2.0, 1.0, 0.0]],
+        traded: [[1.0, 0.5, 2.0], [0.0, 0.0, 0.0]],
+        best: [{ bid: 100.0, ask: 100.5, trades: 4 }, { bid: 0, ask: 0, trades: 0 }, { bid: 0, ask: 0, trades: 0 }],
+        events: header.events,
+    }, bt, 60);
+    check('§56: adaptHeatBin deep-equals adaptHeat on the same data',
+        JSON.stringify(bin) === JSON.stringify(Object.assign({}, json, { version: 3 })),
+        JSON.stringify([bin && bin.rows.length, json && json.rows.length]));
+    check('§56: the wire path carries the wall event through',
+        !!bin && bin.events.some((e) => e.kind === 'wall' && e.size === 5 && e.col === 0),
+        JSON.stringify(bin && bin.events));
+    check('§56: a garbage buffer decodes to null, never a half-map',
+        OFX.math.decodeHeatBin(new ArrayBuffer(4)) === null
+        && OFX.math.adaptHeatBin(null, bt, 60) === null);
+}
 
 console.log(`ofx selftest: ${ok} ok, ${failures.length} failed`);
 for (const f of failures) console.log('  FAIL', f);

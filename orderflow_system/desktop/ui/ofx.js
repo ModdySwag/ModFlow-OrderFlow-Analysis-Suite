@@ -16,6 +16,16 @@
 
     const NS = 'http://www.w3.org/2000/svg';
 
+    /* The ramps the depth layer can draw. One list, read by the control, the legend and the selftest;
+       `config_store.RAMP_KEYS` holds the same three names and `test_expression.py` keeps them equal,
+       because a ramp the engine knows and the control does not is a feature nobody can reach. */
+    const RAMPS = ['classic', 'thermal'];
+
+    /* The engine's own bar chrome — what every bar drew before P1-8 existed, and what the `default`
+       mode still means. `expression.js` declares the identical object for its `default` mode and
+       `test_expression.py` holds the two equal, so "the default mode changes nothing" is checked. */
+    const CHROME_DEFAULT = Object.freeze({ framing: true, ground: true, zones: true, poc: true, badges: true });
+
     /* ── math: every rule the spec states, as a function ─────────────────── */
 
     const math = {
@@ -28,6 +38,17 @@
             if (!v || !avg) return 300;
             const ratio = Math.min(v / (avg * saturateAt), 1);
             return Math.round((300 + 600 * Math.sqrt(ratio)) / 100) * 100;
+        },
+
+        /* §72: the backing store for one layer canvas — the CSS box at the display scale.
+           dpr = 1 returns the CSS size unchanged, which is the identity this engine has always
+           painted at; every display-scale fix keeps that identity as its regression pin. */
+        layerSize(cssW, cssH, dpr) {
+            const k = (Number(dpr) > 0) ? Number(dpr) : 1;
+            return {
+                w: Math.max(1, Math.round((Number(cssW) || 0) * k)),
+                h: Math.max(1, Math.round((Number(cssH) || 0) * k)),
+            };
         },
 
         /* Diagonal processing matrix. Buying imbalance: Bid[Y] over Ask[Y+1]. Selling is the
@@ -107,10 +128,11 @@
             const dt = Math.max(0, Number(dtMs) || 0);
             return Math.max(0, Math.min(1, (Number(alpha0) || 0) * Math.exp(-dt / lam)));
         },
-        /* Two ramps. 'classic' is the original blue->cyan->green->yellow->red; 'thermal' follows
-           the research brief's monotonic heat reading (deep slate -> orange -> white-hot gold), which
-           never relies on a hue change to carry magnitude. Both are functions of one 0..1 scalar, so
-           switching ramps cannot change any value - only its display. */
+        /* Two ramps, both monotone in luminance — which is what lets a magnitude be read without
+           colour vision, and which `ofx.selftest.js` MEASURES at 21 samples per ramp rather than
+           asserting here. 'classic' runs slate blue -> orange -> white-hot gold; 'thermal' starts
+           deeper (a near-black low end) and reaches the same white-hot top. Both are functions of one
+           0..1 scalar, so switching ramps cannot change any value - only its display. */
         heatColor01(t, ramp) {
             const x = Math.max(0, Math.min(1, Number(t) || 0));
             if (ramp === 'thermal') {
@@ -243,7 +265,6 @@
         adaptHeat(payload, barTimes, barSeconds) {
             const values = (payload && payload.values) || [];
             if (!Array.isArray(values) || !values.length) return null;
-            const cols = Array.isArray(values[0]) ? values : [values];
             const buckets = (payload && (payload.buckets || payload.times)) || null;
             if (!Array.isArray(buckets) || !buckets.length) return null;
             const step = Number(payload && payload.step) || Number(payload && payload.tick) || 1;
@@ -252,72 +273,94 @@
             /* One drawn column per BAR, not per payload column. The depth payload's columns are
                ~1-second buckets; the bar axis is minutes, so ~60 sub-columns per bar were each drawn
                one bar-width wide and the layer smeared across its neighbours (visible in the
-               screenshot that prompted this). Resting depth sums per (bar, price). */
-            const acc = new Map();
-            cols.forEach((col, ci) => {
-                const stamp = Number(buckets[ci]) || 0;
-                if (!stamp || !Array.isArray(col)) return;
-                const ms = stamp > 1e12 ? stamp / 1000 : stamp;
-                let barIndex = -1;
-                for (let i = barTimes.length - 1; i >= 0; i -= 1) {
-                    if (barTimes[i] <= ms && ms < barTimes[i] + Math.max(1, barSeconds)) { barIndex = i; break; }
+               screenshot that prompted this). Resting depth sums per (bar, price).
+               §56 CORRECTION: the snapshot contract is values[PRICE ROW][TIME COLUMN] with a flat
+               `prices` ladder — heatmap-pro has always read it that way (vals[ri][ci]). This
+               adapter had the axes transposed, so live payloads were laid out along the bottom of
+               the ladder: the "heat centred on the wrong price" that §52 blamed on a crop mistake.
+               Price rows are the outer axis now, and the wire path (adaptHeatBin) reads the same
+               shape. */
+            const BK = 1e5;
+            const pkey = (p) => Math.round(p / step);
+            const barAt = (ms) => {
+                const n = barTimes.length;
+                if (!n || ms < barTimes[0]) return -1;
+                let lo = 0, hi = n - 1;
+                while (lo < hi) {
+                    const mid = (lo + hi + 1) >> 1;
+                    if (barTimes[mid] <= ms) lo = mid; else hi = mid - 1;
                 }
-                if (barIndex < 0) return;                       // a bucket outside the drawn bars is not ours to place
-                const prices = Array.isArray(payload.prices) && Array.isArray(payload.prices[ci])
-                    ? payload.prices[ci] : (payload.prices || []);
-                col.forEach((size, pi) => {
-                    const price = Number(prices[pi]);
-                    const value = Number(size) || 0;
-                    if (!Number.isFinite(price) || value <= 0) return;
-                    const key = barIndex + '|' + price;
-                    acc.set(key, (acc.get(key) || 0) + value);
-                });
-            });
-            for (const [key, value] of acc) {
-                const cut = key.indexOf('|');
-                const barIndex = Number(key.slice(0, cut));
-                const price = Number(key.slice(cut + 1));
-                scale = Math.max(scale, value);
-                rows.push({ col: barIndex, price, lo: price, hi: price + step, size: value });
-            }
-            const mapCol = (colIdx) => {
-                const stamp = Number((buckets || [])[colIdx]) || 0;
-                const ms = stamp > 1e12 ? stamp / 1000 : stamp;
-                let barIndex = -1;
-                for (let i = barTimes.length - 1; i >= 0; i -= 1) {
-                    if (barTimes[i] <= ms && ms < barTimes[i] + Math.max(1, barSeconds)) { barIndex = i; break; }
-                }
-                if (barIndex < 0 && barTimes.length) barIndex = Math.max(0, barTimes.length - 1 - (cols.length - 1 - colIdx));
-                return barIndex;
+                return ms < barTimes[lo] + Math.max(1, barSeconds) ? lo : -1;
             };
+            const nc = buckets.length;
+            const perColumnPrices = Array.isArray(payload.prices) && Array.isArray(payload.prices[0]);
+            const priceRows = perColumnPrices
+                ? Math.max(values.length,
+                           ...payload.prices.map((p) => (Array.isArray(p) ? p.length : 0)))
+                : (Array.isArray(payload.prices) && payload.prices.length ? payload.prices.length : values.length);
+            const colBars = new Array(nc);
+            for (let ci = 0; ci < nc; ci += 1) {
+                const stamp = Number(buckets[ci]) || 0;
+                const ms = stamp > 1e12 ? stamp / 1000 : stamp;
+                colBars[ci] = stamp ? barAt(ms) : -1;   // a bucket outside the drawn bars is not ours to place
+            }
+            const mapCol = (ci) => {
+                let bi = colBars[ci];
+                if (bi < 0 && barTimes.length) bi = Math.max(0, barTimes.length - 1 - (nc - 1 - ci));
+                return bi;
+            };
+            const priceOf = (r, ci) => Number(perColumnPrices ? (payload.prices[ci] || [])[r]
+                                                                : (payload.prices || [])[r]);
+            const acc = new Map();
+            for (let r = 0; r < priceRows; r += 1) {
+                const row = values[r];
+                if (!Array.isArray(row)) continue;      // ragged rows are skipped, not guessed
+                for (let ci = 0; ci < nc; ci += 1) {
+                    const barIndex = colBars[ci];
+                    if (barIndex < 0) continue;
+                    const size = Number(row[ci]) || 0;
+                    if (size <= 0) continue;
+                    const price = priceOf(r, ci);
+                    if (!Number.isFinite(price)) continue;
+                    const key = barIndex * BK + pkey(price);
+                    const rec = acc.get(key);
+                    if (rec) rec.size += size;
+                    /* §56: the Map value IS the row object — one allocation per cell, not two. */
+                    else acc.set(key, { col: barIndex, price: price, lo: price, hi: price + step, size: size });
+                }
+            }
+            for (const rec of acc.values()) {
+                scale = Math.max(scale, rec.size);
+                rows.push(rec);
+            }
             /* Executed volume rides the same grid as the resting depth: without it the engine could
                only show prints the live tape still holds, and every older column lost its trades. */
             const tradedAcc = new Map();
             const tradedMatrix = Array.isArray(payload.traded) ? payload.traded : [];
-            tradedMatrix.forEach((col, ci) => {
-                if (!Array.isArray(col)) return;
-                const barIndex = mapCol(ci);
-                if (barIndex < 0) return;
-                const prices = Array.isArray(payload.prices) && Array.isArray(payload.prices[ci])
-                    ? payload.prices[ci] : (payload.prices || []);
-                col.forEach((size, pi) => {
-                    const value = Number(size) || 0;
-                    if (value <= 0) return;
-                    const price = Number(prices[pi]);
-                    if (!Number.isFinite(price)) return;
-                    const key = barIndex + '|' + price;
-                    tradedAcc.set(key, (tradedAcc.get(key) || 0) + value);
-                });
-            });
+            for (let r = 0; r < Math.max(priceRows, tradedMatrix.length); r += 1) {
+                const row = tradedMatrix[r];
+                if (!Array.isArray(row)) continue;
+                for (let ci = 0; ci < nc; ci += 1) {
+                    const barIndex = mapCol(ci);
+                    if (barIndex < 0) continue;
+                    const size = Number(row[ci]) || 0;
+                    if (size <= 0) continue;
+                    const price = priceOf(r, ci);
+                    if (!Number.isFinite(price)) continue;
+                    const key = barIndex * BK + pkey(price);
+                    const rec = tradedAcc.get(key);
+                    if (rec) rec.v += size;
+                    else tradedAcc.set(key, { v: size, price: price, col: barIndex });
+                }
+            }
             /* Executed volume sums per bar too, and carries the side the prints took: the ramp at the
                end of the pass paints it as flow, not as liquidity. */
             const tradedRows = [];
-            for (const [key, value] of tradedAcc) {
-                const cut = key.indexOf('|');
-                tradedRows.push({ col: Number(key.slice(0, cut)), price: Number(key.slice(cut + 1)), size: value, side: '' });
+            for (const rec of tradedAcc.values()) {
+                tradedRows.push({ col: rec.col, price: rec.price, size: rec.v, side: '' });
             }
-            /* Best bid/ask per column is the spread the book actually carried. */
-            /* Best bid/ask: one point per bar (the last book state the bar saw). */
+            /* Best bid/ask: one point per bar (the last book state the bar saw) — `best` is per
+               payload COLUMN (buckets), which the mapCol fallback keeps honest. */
             const bestByBar = new Map();
             (Array.isArray(payload.best) ? payload.best : []).forEach((b, ci) => {
                 const barIndex = mapCol(ci);
@@ -325,21 +368,25 @@
                 bestByBar.set(barIndex, { col: barIndex, bid: Number(b.bid) || 0, ask: Number(b.ask) || 0, trades: Number(b.trades) || 0 });
             });
             const bestCols = [...bestByBar.values()];
-            /* Book events (stack / pull) land on the bar axis the same way. */
             /* Book events: one mark per (bar, price, kind) — a wall that stacks 40 times in a minute
                is one fact about that level, not forty marks in the same pixel. Largest size wins. */
             const eventAcc = new Map();
+            /* P2-2: numeric key here too; kinds become dense codes (any kind, not a fixed list). */
+            const kindCode = new Map();
+            const codeOf = (k) => {
+                let c = kindCode.get(k);
+                if (c === undefined) { c = kindCode.size; kindCode.set(k, c); }
+                return c;
+            };
             (Array.isArray(payload.events) ? payload.events : []).forEach((ev) => {
                 if (!ev) return;
-                const ms = (Number(ev.ts_ms) || 0) > 1e12 ? Number(ev.ts_ms) / 1000 : Number(ev.ts_ms) || 0;
-                let barIndex = -1;
-                for (let i = barTimes.length - 1; i >= 0; i -= 1) {
-                    if (barTimes[i] <= ms && ms < barTimes[i] + Math.max(1, barSeconds)) { barIndex = i; break; }
-                }
+                const raw = Number(ev.ts_ms) || 0;
+                const ms = raw > 1e12 ? raw / 1000 : raw;
+                const barIndex = barAt(ms);
                 if (barIndex < 0) return;
                 const price = Number(ev.price) || 0;
                 const kind = ev.kind || '';
-                const key = barIndex + '|' + price + '|' + kind;
+                const key = (barIndex * BK + pkey(price)) * 64 + codeOf(kind);
                 const prev = eventAcc.get(key);
                 const size = Number(ev.size) || 0;
                 if (!prev || size > prev.size) {
@@ -349,6 +396,155 @@
             const flowEvents = [...eventAcc.values()];
             if (!rows.length && !tradedRows.length) return null;
             return { rows, scale, traded: tradedRows, best: bestCols, events: flowEvents };
+        },
+
+        /* §56: the binary sibling of the JSON heat payload. `decodeHeatBin` reads the layout
+           `atlas/wire.py` writes (magic OFHB, u32 header length, header JSON, typed sections) and
+           `adaptHeatBin` walks the typed arrays into the SAME rows the JSON path produces —
+           pinned equal by the selftest. The point is skipping 48 k JSON objects per payload. */
+        decodeHeatBin(buffer) {
+            const bytes = new Uint8Array(buffer);
+            if (bytes.length < 8
+                || String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) !== 'OFHB') return null;
+            const dv = new DataView(buffer);
+            const hlen = dv.getUint32(4, true);
+            let header = null;
+            try {
+                header = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + hlen)));
+            } catch (e) { return null; }
+            const cols = Number(header.cols) || 0;
+            const rows = Number(header.rows) || 0;
+            let off = 8 + hlen;
+            /* slice() before viewing: typed views demand alignment, and a copy of a few dozen KB
+               is cheaper than trusting the producer's padding. */
+            const take = (kind, count) => {
+                const size = count * (kind === 8 ? 8 : 4);
+                const view = kind === 8
+                    ? new Float64Array(buffer.slice(off, off + size))
+                    : new Float32Array(buffer.slice(off, off + size));
+                off += size;
+                return view;
+            };
+            const buckets = take(8, cols);
+            const prices = take(4, header.prices_mode === 'flat' ? rows : cols * rows);
+            const values = take(4, cols * rows);
+            const traded = header.traded ? take(4, cols * rows) : null;
+            const best = new Array(cols);
+            for (let c = 0; c < cols; c += 1) {
+                best[c] = { bid: dv.getFloat32(off, true), ask: dv.getFloat32(off + 4, true),
+                            trades: dv.getInt32(off + 8, true) };
+                off += 12;
+            }
+            return { header, buckets, prices, values, traded, best };
+        },
+        adaptHeatBin(wire, barTimes, barSeconds) {
+            if (!wire || !wire.header) return null;
+            const cols = wire.header.cols | 0;
+            const rows = wire.header.rows | 0;
+            const step = Number(wire.header.step) || Number(wire.header.tick) || 1;
+            const flat = wire.header.prices_mode === 'flat';
+            const BK = 1e5;
+            const pkey = (p) => Math.round(p / step);
+            const barAt = (sec) => {
+                const n = (barTimes || []).length;
+                if (!n || sec < barTimes[0]) return -1;
+                let lo = 0, hi = n - 1;
+                while (lo < hi) {
+                    const mid = (lo + hi + 1) >> 1;
+                    if (barTimes[mid] <= sec) lo = mid; else hi = mid - 1;
+                }
+                return sec < barTimes[lo] + Math.max(1, barSeconds) ? lo : -1;
+            };
+            const mapCol = (colIdx) => {
+                let bi = barAt((wire.buckets[colIdx] || 0) / 1000);
+                if (bi < 0 && barTimes.length) bi = Math.max(0, barTimes.length - 1 - (cols - 1 - colIdx));
+                return bi;
+            };
+            const colBars = new Array(cols);
+            for (let ci = 0; ci < cols; ci += 1) {
+                const ms = (wire.buckets[ci] || 0) / 1000;
+                colBars[ci] = barAt(ms);
+            }
+            const priceOf = (r, ci) => Number(flat ? wire.prices[r] : wire.prices[ci * rows + r]);
+            /* the same numeric-key merge the JSON path runs, on the same axes:
+               values[price row][time col] — row-major, flat ladder (see adaptHeat's §56 note). */
+            const acc = new Map();
+            for (let r = 0; r < rows; r += 1) {
+                for (let ci = 0; ci < cols; ci += 1) {
+                    const barIndex = colBars[ci];
+                    if (barIndex < 0) continue;
+                    const value = wire.values[r * cols + ci];
+                    if (!(value > 0)) continue;
+                    const price = priceOf(r, ci);
+                    if (!Number.isFinite(price)) continue;
+                    const key = barIndex * BK + pkey(price);
+                    const rec = acc.get(key);
+                    if (rec) rec.size += value;
+                    else acc.set(key, { col: barIndex, price: price, lo: price, hi: price + step, size: value });
+                }
+            }
+            const outRows = [];
+            let scale = 1;
+            for (const rec of acc.values()) {
+                scale = Math.max(scale, rec.size);
+                outRows.push(rec);
+            }
+            const tradedRows = [];
+            if (wire.traded) {
+                const tacc = new Map();
+                for (let r = 0; r < rows; r += 1) {
+                    for (let ci = 0; ci < cols; ci += 1) {
+                        const barIndex = mapCol(ci);
+                        if (barIndex < 0) continue;
+                        const value = wire.traded[r * cols + ci];
+                        if (!(value > 0)) continue;
+                        const price = priceOf(r, ci);
+                        if (!Number.isFinite(price)) continue;
+                        const key = barIndex * BK + pkey(price);
+                        const rec = tacc.get(key);
+                        if (rec) rec.v += value;
+                        else tacc.set(key, { v: value, price: price, col: barIndex });
+                    }
+                }
+                for (const rec of tacc.values()) {
+                    tradedRows.push({ col: rec.col, price: rec.price, size: rec.v, side: '' });
+                }
+            }
+            const bestByBar = new Map();
+            for (let ci = 0; ci < cols; ci += 1) {
+                const barIndex = mapCol(ci);
+                if (barIndex < 0) continue;
+                const b = wire.best[ci] || {};
+                bestByBar.set(barIndex, { col: barIndex, bid: Number(b.bid) || 0,
+                                          ask: Number(b.ask) || 0, trades: Number(b.trades) || 0 });
+            }
+            const eventAcc = new Map();
+            const kindCode = new Map();
+            const codeOf = (k) => {
+                let c = kindCode.get(k);
+                if (c === undefined) { c = kindCode.size; kindCode.set(k, c); }
+                return c;
+            };
+            (Array.isArray(wire.header.events) ? wire.header.events : []).forEach((ev) => {
+                if (!ev) return;
+                const raw = Number(ev.ts_ms) || 0;
+                const sec = raw > 1e12 ? raw / 1000 : raw;
+                const barIndex = barAt(sec);
+                if (barIndex < 0) return;
+                const price = Number(ev.price) || 0;
+                const kind = ev.kind || '';
+                const key = (barIndex * BK + pkey(price)) * 64 + codeOf(kind);
+                const prev = eventAcc.get(key);
+                const size = Number(ev.size) || 0;
+                if (!prev || size > prev.size) {
+                    eventAcc.set(key, { col: barIndex, kind, direction: ev.direction || '',
+                                        price, size, detail: ev.detail || '' });
+                }
+            });
+            const flowEvents = [...eventAcc.values()];
+            if (!outRows.length && !tradedRows.length) return null;
+            return { rows: outRows, scale, traded: tradedRows, best: [...bestByBar.values()],
+                     events: flowEvents, version: wire.header.version };
         },
 
         /* LOD: text is suppressed entirely below the threshold; between threshold and
@@ -479,6 +675,17 @@
         rgba(key, alpha) {
             const rgb = this.theme[key] || key;
             return `rgba(${rgb},${alpha})`;
+        },
+        /* ── P1-9: the zoom maths, one home for the wheel and the keys ─────────
+           `zoomScale` is a scale step with its hard limit; `anchorOffset` solves the pin
+           equation (price = offY + (height - anchorY) / scale) for offY, so the point under
+           the anchor keeps its price/time as the scale changes. Pure — pinned in
+           ofx.selftest.js. */
+        zoomScale(value, factor, min, max) {
+            return Math.max(min, Math.min(max, value * factor));
+        },
+        anchorOffset(price, height, anchorPx, scale) {
+            return price - (height - anchorPx) / scale;
         },
         /* Sizes as an order-flow reader reads them: crypto prints live at 0.001-0.15 and must not
            be rounded to a string of zeros; contracts in the hundreds must not grow decimals. */
@@ -665,30 +872,142 @@
 
     /* ── state ───────────────────────────────────────────────────────────── */
 
+    /* P2-3: how much of the 16.7 ms frame budget one frame may spend before the remaining
+       layers are deferred to the next rAF. 6 ms leaves room for the browser's own work in the
+       same frame; the measured 4K costs (heat ~7.5, base ~6.5) split cleanly under it. */
+    const YIELD_MS = 6;
+
     const state = {
         symbol: 'BTCUSDT',
         params: { R: 4.0, stack: 3, lambda: 500, textPx: 45, sweepC: 1.15, levelCap: 260,
-            vaPct: 0.7, minBlock: 0, minRowPx: 9, ramp: 'classic' },
+            vaPct: 0.7, minBlock: 0, minRowPx: 9, ramp: 'classic',
+            /* P1-8: how a bar is expressed. Resolved by `expression.js` at paint time; junk falls
+               back to `default`/`theme` there, so this pair can never blank the stage. */
+            mode: 'default', palette: 'theme' },
         // coordinate matrix — pixels per unit, plus origin
         /* scaleX=52 keeps the default view above the 45px text threshold: the engine opens on
            footprints, and LOD takes over when the user zooms out. */
-        view: { offX: 0, scaleX: 52, offY: 0, scaleY: 0.6, width: 900, height: 480 },
+        view: { offX: 0, scaleX: 52, offY: 0, scaleY: 0.6, width: 900, height: 480, dpr: 1 },
         data: { bars: [], levels: new Map(), prints: [], heat: [], heatScale: 1, sessions: [],
             heatIndex: null, palette: null, traded: [], best: [], flowEvents: [], key: '' },
         layers: { heat: null, base: null, live: null, ribbon: null, hud: null },
         mode: 'live',
         lod: { mode: 'footprint', text: true, labelAlpha: 1 },
         dirty: { heat: true, base: true, live: true, ribbon: true, hud: true },
-        stats: { frames: 0, lastMs: 0, emaMs: 0, p95Ms: 0, heatPasses: 0, decayCells: 0, framesMs: [], misses: 0,
+        stats: { frames: 0, lastMs: 0, emaMs: 0, p95Ms: 0, heatPasses: 0, heatPatches: 0, heatSkips: 0, yields: 0, decayCells: 0, framesMs: [], misses: 0,
             recovered: 0, flowBubbles: 0, flowEvents: 0,
             printsSeen: 0, printsMatched: 0, sweepBubbles: 0, heatCells: 0, textStarved: 0,
-            cellPx: 0, aggregating: false, groupK: 1, divState: 'none', blocksFiltered: 0 },
+            cellPx: 0, aggregating: false, groupK: 1, divState: 'none', blocksFiltered: 0,
+            barBodies: 0, barSplits: 0 },
         hover: null,
+        /* P2-1: per-payload indexes (prints by bar, CVD prefix sums, flow events by column).
+           Built once in `setData()`; hover reads them instead of rescanning the payload. */
+        idx: null,
+        /* P2-2: the heat layer's change gate. `heatEpoch` moves when the matrix, the view or the
+           parameters change; the 33 ms tick only asks for a pass when the painted epoch lags it,
+           or while ghosts are still fading. `heatGhosts` holds the visible fading cells and their
+           screen rects, so a decay pass costs what is fading — not what is on screen. */
+        heatEpoch: 0, heatPainted: -1, heatGhosts: [],
+        pendingHover: null,
         autoFit: true,
         avgLevelVolume: 0,
         avgBarVolume: 0,
         lastPaint: 0,
     };
+
+    /* ── the expression palette ────────────────────────────────────────────────────────────────
+       `math.theme` is the one colour table: the renderers paint from it and `legend()` quotes it, so a
+       palette is applied INTO it rather than kept beside it (a parallel table is how a legend ends up
+       describing a colour the picture does not use). BASE_THEME is frozen at load, so switching back
+       to the theme palette restores every key exactly — proven in `ofx.selftest.js`. */
+    const BASE_THEME = Object.freeze(Object.assign({}, math.theme));
+
+    function applyPalette(key) {
+        const expr = root.OFAPEXPR;
+        Object.assign(math.theme, BASE_THEME);
+        if (!expr || typeof expr.themeOverrides !== 'function') return 0;
+        const over = expr.themeOverrides(key) || {};
+        Object.assign(math.theme, over);
+        return Object.keys(over).length;
+    }
+
+    /* What to draw for one bar, and the words that describe it. The catalogue decides; with no
+       catalogue loaded the engine draws exactly what it always drew (CHROME_DEFAULT, no body). */
+    function barPaintFor(bar) {
+        const expr = root.OFAPEXPR;
+        if (!expr || typeof expr.barPaint !== 'function') {
+            return {
+                mode: 'default', palette: 'theme', chrome: CHROME_DEFAULT, body: null, split: null,
+                glyph: '', encoding: '', pairing: '',
+                wick: { rgba: math.rgba('wick', '.35'), lineWidth: 1 },
+            };
+        }
+        return expr.barPaint(bar, {
+            mode: state.params.mode, palette: state.params.palette,
+            theme: { pos: math.theme.bid, neg: math.theme.ask },
+        });
+    }
+
+    /* ── the bar's own body (P1-8) ─────────────────────────────────────────────────────────────
+       Fill under the cells so the digits keep their contrast, outline over them so the bar's boundary
+       is never lost, and the split candle's two halves in between. The decision is `expression.js`'s;
+       this only puts pixels where it says. */
+    function bodyBox(bar, x, colW) {
+        const yOpen = priceToY(bar.open);
+        const yClose = priceToY(bar.close);
+        return { y0: Math.min(yOpen, yClose), h: Math.max(1.5, Math.abs(yClose - yOpen)), w: Math.max(1, colW - 2), x: x + 1 };
+    }
+
+    function paintBodyFill(ctx, paint, bar, x, colW) {
+        if (!paint.body) return false;
+        const box = bodyBox(bar, x, colW);
+        ctx.fillStyle = paint.body.fill;
+        ctx.fillRect(box.x, box.y0, box.w, box.h);
+        return true;
+    }
+
+    function paintBodyStroke(ctx, paint, bar, x, colW) {
+        if (!paint.body) return false;
+        const box = bodyBox(bar, x, colW);
+        ctx.strokeStyle = paint.body.stroke;
+        ctx.lineWidth = paint.body.lineWidth || 1.5;
+        ctx.strokeRect(x + 0.5, box.y0 + 0.5, Math.max(1, colW - 1), box.h);
+        /* The direction glyph rides the body itself, so the sign survives even where the column is
+           too narrow for the delta badge — colour is never the only carrier (canon #5). */
+        if (paint.glyph && colW >= 18 && box.h >= 12) {
+            ctx.save();
+            ctx.font = '600 11px ui-monospace, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = paint.body.stroke;
+            ctx.fillText(paint.glyph, x + colW / 2, box.y0 + box.h / 2);
+            ctx.restore();
+        }
+        return true;
+    }
+
+    /* The split candle: two sub-bars inside the bar's own high→low range — left = sell volume, right
+       = buy volume (the same left/right the cells use), each as tall as its share of the bar's
+       traded volume, both growing from the range's low edge. */
+    function paintSplit(ctx, paint, bar, x, colW) {
+        if (!paint.split) return false;
+        const topY = Math.min(priceToY(bar.high), priceToY(bar.low));
+        const botY = Math.max(priceToY(bar.high), priceToY(bar.low));
+        const h = Math.max(4, botY - topY);
+        const half = Math.max(1, Math.floor((colW - 2) / 2));
+        const right = Math.max(1, colW - 2 - half);
+        const hSell = Math.max(1.5, h * paint.split.left.frac);
+        const hBuy = Math.max(1.5, h * paint.split.right.frac);
+        ctx.fillStyle = paint.split.left.rgba;
+        ctx.fillRect(x + 1, botY - hSell, half, hSell);
+        ctx.fillStyle = paint.split.right.rgba;
+        ctx.fillRect(x + 1 + half, botY - hBuy, right, hBuy);
+        ctx.strokeStyle = paint.wick.rgba;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 1.5, botY - hSell + 0.5, half - 1, Math.max(1, hSell - 1));
+        ctx.strokeRect(x + 1 + half + 0.5, botY - hBuy + 0.5, Math.max(1, right - 1), Math.max(1, hBuy - 1));
+        return true;
+    }
 
     /* ── coordinate matrix ───────────────────────────────────────────────── */
 
@@ -756,6 +1075,72 @@
         state.avgBarVolume = bars ? barSum / bars : 0;
     }
 
+    /* ── P2-1: the hover index ─────────────────────────────────────────────
+       `hover()` used to rescan the whole print list, the whole depth matrix and the bar deltas
+       from bar 0 on EVERY pointer move (O(prints + heat cells + bars) per call — ~40 k iterations
+       on a 10 k-print tape with a 30 k-cell matrix). These builders do the same work once per
+       payload instead, and the measured numbers are pinned equal to the old loops by
+       ofx.selftest.js. */
+    /* P2-2: one gate for every change that makes the current heat pixels wrong. */
+    function markHeatFull() {
+        state.heatEpoch += 1;
+        state.dirty.heat = true;
+    }
+
+    function buildPrintIndex() {
+        const bars = state.data.bars;
+        const prints = state.data.prints;
+        const idx = state.idx || (state.idx = {});
+        const rows = new Array(bars.length);
+        for (let i = 0; i < bars.length; i += 1) rows[i] = { prints: 0, sweep: 0 };
+        if (bars.length) {
+            const sec = barSeconds();
+            for (const p of prints || []) {
+                /* Stamps are normalised with the same rule `math.selectionStats` uses: a stamp
+                   above 1e11 is milliseconds. The live tape already arrives in seconds; a ms
+                   source used to silently read as zero prints in every bar. */
+                const raw = Number(p.time) || 0;
+                const ts = raw > 1e11 ? raw / 1000 : raw;
+                if (ts < bars[0].time) continue;
+                /* Last bar whose window has opened by ts (bars are in time order — the payload
+                   contract); then the same half-open window test hover used: [t, t + sec). */
+                let lo = 0, hi = bars.length - 1;
+                while (lo < hi) {
+                    const mid = (lo + hi + 1) >> 1;
+                    if (bars[mid].time <= ts) lo = mid; else hi = mid - 1;
+                }
+                if (ts < bars[lo].time + sec) {
+                    rows[lo].prints += 1;
+                    rows[lo].sweep += Number(p.size) || 0;
+                }
+            }
+        }
+        idx.printsByBar = rows;
+    }
+
+    function buildCvdPrefix() {
+        const bars = state.data.bars;
+        const idx = state.idx || (state.idx = {});
+        /* float64, summed in bar order — the same arithmetic order as the loop it replaces,
+           so the bits match, not just the values. */
+        const cvd = new Float64Array(bars.length + 1);
+        for (let i = 0; i < bars.length; i += 1) cvd[i + 1] = cvd[i] + (Number(bars[i].delta) || 0);
+        idx.cvd = cvd;
+    }
+
+    function buildFlowIndex() {
+        const idx = state.idx || (state.idx = {});
+        const byCol = new Map();
+        for (const e of state.data.flowEvents || []) {
+            const c = Number(e.col);
+            if (!Number.isFinite(c)) continue;
+            let g = byCol.get(c);
+            if (!g) { g = []; byCol.set(c, g); }
+            g.push(e);
+        }
+        idx.flowByCol = byCol;
+    }
+
     function setData({ bars, levelsByTime, prints, heat }) {
         if (bars) state.data.bars = bars;
         if (levelsByTime) state.data.levels = levelsByTime;
@@ -769,7 +1154,19 @@
             /* Column index built once per payload, not per repaint: the renderer walks
                visible columns only, so a 30k-cell matrix no longer costs 30k iterations a pass. */
             state.data.heatIndex = math.heatColumns(state.data.heat);
+            /* P2-2: the server versions the matrix; an unchanged version (the cached-snapshot
+               case) is not repainted again. A payload without a version always rebuilds. */
+            const nextVersion = heat.version == null ? null : String(heat.version);
+            if (nextVersion === null || nextVersion !== state.data.heatVersion) {
+                state.data.heatVersion = nextVersion;
+                markHeatFull();
+            }
         }
+        /* P2-1: one index pass per payload. Bar boundaries define the print buckets, so a bars
+           change rebuilds them too; the CVD prefix follows the bars; the flow index follows heat. */
+        if (bars || prints) buildPrintIndex();
+        if (bars) buildCvdPrefix();
+        if (heat) buildFlowIndex();
         computeSessionAverages();
         /* Data identity: symbol + bar span + count. A new identity means the previous transform may
            fit nothing at all, so the view is re-anchored on the newest bars unless the price window
@@ -884,6 +1281,20 @@
                 live: `VA ${fmt(p.vaPct * 100, 0)}% of each bar's volume`,
             },
             {
+                name: 'Bar expression',
+                swatch: exprMode().key === 'default' || exprMode().key === 'wick'
+                    ? { type: 'line', rgb: t.wick }
+                    : { type: 'split', rgb: t.bid, rgb2: t.ask },
+                meaning: exprMode().says + ' \· sign: ' + exprMode().pairing,
+                live: `mode ${exprMode().key} \· palette ${exprMode().paletteLabel || exprMode().palette}`
+                    + ` \· ${s.barBodies || 0} bodies, ${s.barSplits || 0} splits drawn in the last pass`
+                    + (exprMode().key === 'split' && state.data.bars.length
+                        ? ' \· ' + (root.OFAPEXPR
+                            ? root.OFAPEXPR.splitVolumes(state.data.bars[state.data.bars.length - 1]).source
+                            : 'side volumes where the feed carries them')
+                        : ''),
+            },
+            {
                 name: 'Bar range',
                 swatch: { type: 'line', rgb: t.wick },
                 meaning: 'High→low of the bar down the column centre: the profile against the bar it '
@@ -972,10 +1383,15 @@
             { keys: 'P', action: 'hold updates while you work (feed keeps ingesting)' },
             { keys: 'hover', action: 'cursor tag on the canvas + full metric panel beside the stage' },
             { keys: 'click a print (tape)', action: 'locate it — the cursor takes that price and time, the viewport seeks to its bar' },
+            { keys: '= / -', action: 'keyboard: zoom time in / out, around the stage centre' },
+            { keys: '[ / ]', action: 'keyboard: zoom price out / in, around the stage centre' },
+            { keys: 'X', action: 'clear the selection (the full map: ?)' },
+            { keys: 'Ctrl+E', action: 'export the selection as CSV' },
         ];
         const layout = [
             'depth heat — behind the matrix, one column per bar',
             'footprint matrix — one column per bar: bid left half, ask right half, POC boxed, VA shaded, STACK bands',
+            `bar expression (${exprMode().key}): ${exprMode().says}`,
             'executed flow — sweep bubbles sized by print size, split when both sides traded',
             'book events — ▲ stacks and ✕ pulls at the price they happened',
             'best bid/ask line — the spread path across the bars',
@@ -990,6 +1406,7 @@
                 R: p.R, stack: p.stack, vaPct: p.vaPct, ramp: rampKey, minBlock: p.minBlock,
                 levelCap: p.levelCap, sweepC: p.sweepC, minRowPx: p.minRowPx, lambda: p.lambda,
                 symbol: state.symbol,
+                expression: { mode: exprMode().key, palette: exprMode().palette, ramp: rampKey },
             },
             stats: {
                 heatScale: Number(s.heatScale) || 0, heatCells: s.heatCells, sweepBubbles: s.sweepBubbles,
@@ -1000,6 +1417,19 @@
     }
 
     /* Aggregated view when LOD suppresses text: one bar per interval, split by direction. */
+    /* The active mode/palette as the catalogue resolves them (junk -> default/theme). */
+    function exprMode() {
+        const expr = root.OFAPEXPR;
+        if (!expr) return { key: 'default', palette: 'theme', says: '', pairing: '' };
+        const m = expr.mode(state.params.mode);
+        const p = expr.palette(state.params.palette);
+        return {
+            key: expr.MODE_KEYS.indexOf(String(state.params.mode)) >= 0 ? String(state.params.mode) : 'default',
+            palette: expr.PALETTE_KEYS.indexOf(String(state.params.palette)) >= 0 ? String(state.params.palette) : 'theme',
+            says: m.says, pairing: m.pairing, label: m.label, paletteLabel: p.label,
+        };
+    }
+
     function profileBars() {
         return state.data.bars.map((bar, i) => {
             const rows = state.data.levels.get(bar.time) || [];
@@ -1213,6 +1643,9 @@
         const pal = heatPaletteFor();
         const strings = pal.strings;
         let decayed = 0;
+        /* P2-2: what is still fading is remembered WITH its rect, so the decay pass repaints
+           exactly these cells and nothing else. */
+        const ghosts = [];
         /* Column range first (binary search over the ordered column keys), then the rows inside
            those columns only. Same picture as the per-cell bounds test, without the 30k
            iterations a pass: cells outside the viewport are never touched. */
@@ -1254,12 +1687,51 @@
                     continue;
                 }
                 if (alpha <= 0.004) continue;
+                const yTop = Math.min(y0, y1);
+                const hh = Math.max(1, Math.abs(y1 - y0));
                 ctx.fillStyle = strings[pal.index(cell.lastSize || 1, alpha)] || strings[0];
-                ctx.fillRect(x, Math.min(y0, y1), colW, Math.max(1, Math.abs(y1 - y0)));
+                ctx.fillRect(x, yTop, colW, hh);
+                if (cell.size <= 0) ghosts.push({ cell: cell, x: x, yTop: yTop, h: hh });
             }
         }
+        state.heatGhosts = ghosts;
         state.stats.decayCells = decayed;
         return decayed;
+    }
+
+    /* P2-2: the incremental decay pass — only ghosts whose quantised alpha actually moved are
+       repainted, each inside its own rect on the existing canvas. Cost is proportional to what is
+       fading, not to what is on screen; a pass where nothing moved paints nothing. */
+    function patchHeat(ctx) {
+        const list = state.heatGhosts;
+        if (!list.length) return false;
+        const now = Date.now();
+        const pal = heatPaletteFor();
+        const strings = pal.strings;
+        const colW = Math.max(1, state.view.scaleX);
+        let painted = 0;
+        const alive = [];
+        for (const gh of list) {
+            const cell = gh.cell;
+            if (cell.size > 0) continue;                  // live again: the full pass owns it
+            const alpha = math.decayAlpha(cell.peak || cell.alpha, now - (cell.seen || now), state.params.lambda);
+            if (alpha <= 0.004) {
+                ctx.clearRect(gh.x, gh.yTop, colW, gh.h); // gone: leave nothing behind
+                state.stats.decayCells += 1;
+                continue;
+            }
+            if (Math.abs(alpha - cell.alpha) >= 0.008) {  // quantised: invisible moves paint nothing
+                cell.alpha = alpha;
+                ctx.clearRect(gh.x, gh.yTop, colW, gh.h);
+                ctx.fillStyle = strings[pal.index(cell.lastSize || 1, alpha)] || strings[0];
+                ctx.fillRect(gh.x, gh.yTop, colW, gh.h);
+                painted += 1;
+                state.stats.decayCells += 1;
+            }
+            alive.push(gh);
+        }
+        state.heatGhosts = alive;
+        return painted > 0;
     }
 
     /* A tinted cell with a low glow, for the imbalanced rows only: the matrix stays quiet
@@ -1305,6 +1777,8 @@
         state.stats.aggregating = lod.mode === 'profile' || groupFallback;
         /* Counted per paint so the badge's presence is assertable, not just visible. */
         state.stats.columnBadges = 0;
+        state.stats.barBodies = 0;
+        state.stats.barSplits = 0;
 
         for (let i = start; i < end; i += 1) {
             const bar = bars[i];
@@ -1312,6 +1786,9 @@
             const colW = Math.max(1, v.scaleX);
             const raw = state.data.levels.get(bar.time) || [];
             if (!raw.length) continue;
+            /* One paint decision per bar, from the catalogue — the same object the legend quotes. */
+            const paint = barPaintFor(bar);
+            const chrome = paint.chrome || CHROME_DEFAULT;
 
             if (lod.mode === 'profile' || groupFallback) {
                 const prof = math.rowShares(raw, state.params.vaPct);
@@ -1339,7 +1816,7 @@
             const half = colW / 2;
             /* Drawn after the cells and before the text: a translucent band with a solid leading
                rail, so a stacked run reads as one object without the digits losing contrast. */
-            zones.forEach((zone) => {
+            if (chrome.zones) zones.forEach((zone) => {
                 const yTop = priceToY(zone.high);
                 const yBot = priceToY(zone.low);
                 const y0 = Math.min(yTop, yBot), y1 = Math.max(yTop, yBot);
@@ -1358,11 +1835,18 @@
 
             /* Bar framing first: an alternating band plus a right-edge separator, so adjacent
                bars are distinguishable without reading a single number (they were not: with the
-               band gone the matrix read as one continuous slab). */
-            ctx.fillStyle = i % 2 ? 'rgba(255,255,255,.016)' : 'rgba(0,0,0,.10)';
-            ctx.fillRect(x, 0, colW, v.height);
-            ctx.fillStyle = 'rgba(150,175,215,.18)';
-            ctx.fillRect(x + colW - 1, 0, 1, v.height);
+               band gone the matrix read as one continuous slab). `split` and `wick` drop it — their
+               own sub-bars / range is the separator. */
+            if (chrome.framing) {
+                ctx.fillStyle = i % 2 ? 'rgba(255,255,255,.016)' : 'rgba(0,0,0,.10)';
+                ctx.fillRect(x, 0, colW, v.height);
+                ctx.fillStyle = 'rgba(150,175,215,.18)';
+                ctx.fillRect(x + colW - 1, 0, 1, v.height);
+            }
+            /* The bar's own expression, under the cells: a tinted body (delta / heat) or the split
+               candle's two halves. Drawn before the rows so the numbers keep their contrast. */
+            if (paintBodyFill(ctx, paint, bar, x, colW)) state.stats.barBodies += 1;
+            if (paintSplit(ctx, paint, bar, x, colW)) state.stats.barSplits += 1;
 
             for (let k = 0; k < rows.length; k += 1) {
                 const level = rows[k];
@@ -1374,12 +1858,12 @@
                 const sellHot = im.side === 'sell' || im.side === 'both';
 
                 /* Ground: value-area rows sit on a lighter slate than the outer 30%. */
-                if (info.inVA) {
+                if (info.inVA && chrome.ground) {
                     ctx.fillStyle = math.rgba('vaGround', '.10');
                     ctx.fillRect(x, y, colW, cellH);
                 }
                 /* HVN: the heaviest row of the candle carries a warm tint under everything. */
-                if (level.price === shares.hvn) {
+                if (level.price === shares.hvn && chrome.ground) {
                     ctx.fillStyle = math.rgba('hvn', '.12');
                     ctx.fillRect(x, y, colW, cellH);
                 }
@@ -1446,8 +1930,12 @@
                 }
             }
 
+            /* The body's outline goes over the cells: the bar's boundary stays visible whatever the
+               rows do underneath it. */
+            paintBodyStroke(ctx, paint, bar, x, colW);
+
             const poc = math.poc(rows);
-            if (poc) {
+            if (poc && chrome.poc) {
                 const y = priceToY(poc.price) - cellH / 2;
                 ctx.save();
                 ctx.shadowColor = 'rgba(255,214,102,.9)';
@@ -1460,8 +1948,8 @@
                 ctx.fillRect(x + colW - 3, y + Math.max(0, cellH / 2 - 1), 3, Math.max(2, cellH * 0.5));
             }
 
-            ctx.strokeStyle = math.rgba('wick', '.35');
-            ctx.lineWidth = 1;
+            ctx.strokeStyle = paint.wick.rgba;
+            ctx.lineWidth = paint.wick.lineWidth || 1;
             ctx.beginPath();
             ctx.moveTo(x + colW / 2, priceToY(bar.high));
             ctx.lineTo(x + colW / 2, priceToY(bar.low));
@@ -1469,7 +1957,7 @@
 
             /* Column stats: the bar's own delta and volume, hung above its high where an
                order-flow reader looks for them. Only where the column can carry the text. */
-            if (colW >= 48 && lod.text) {
+            if (chrome.badges && colW >= 48 && lod.text) {
                 const dy = priceToY(bar.high) - 12;
                 if (dy > 8) {
                     const delta = Number(bar.delta) || 0;
@@ -1591,14 +2079,22 @@
         const canvas = state.layers.ribbon;
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
-        const { width, height } = canvas;
-        ctx.clearRect(0, 0, width, height);
+        const dpr = state.view.dpr || 1;
+        resetLayer(ctx, canvas, dpr);
+        /* Logical size: the ribbon paints in the stage's coordinate space (worldX/xToIndex), so its
+           own box is stage-wide and the backing store may be dpr times that. */
+        const width = canvas.width / dpr;
+        const height = canvas.height / dpr;
         const bars = state.data.bars;
         if (!bars.length) return;
         const laneH = height / 3;
-        const cvd = [];
-        let run = 0;
-        for (const b of bars) { run += Number(b.delta) || 0; cvd.push(run); }
+        /* P2-1: the shared prefix from `setData()` — index i + 1 is the cumulation THROUGH bar i.
+           The local build is the fallback for a draw before any payload ever landed. */
+        let cvd = state.idx && state.idx.cvd;
+        if (!cvd) {
+            cvd = new Float64Array(bars.length + 1);
+            for (let i = 0; i < bars.length; i += 1) cvd[i + 1] = cvd[i] + (Number(bars[i].delta) || 0);
+        }
         const maxVol = Math.max(1, ...bars.map((b) => Number(b.volume) || 0));
         const maxDelta = Math.max(1, ...bars.map((b) => Math.abs(Number(b.delta) || 0)));
         const cvdLo = Math.min(...cvd, 0);
@@ -1628,7 +2124,7 @@
                 : (swing ? math.rgba('ask', '1') : math.rgba('ask', '.62'));
             ctx.fillRect(x, d >= 0 ? mid - dh : mid, Math.max(1, colW - 1), Math.max(1, dh));
 
-            const y = laneH * 2 + laneH - ((cvd[i] - cvdLo) / Math.max(1, cvdHi - cvdLo)) * (laneH - 6);
+            const y = laneH * 2 + laneH - ((cvd[i + 1] - cvdLo) / Math.max(1, cvdHi - cvdLo)) * (laneH - 6);
             if (i === start) {
                 ctx.beginPath();
                 ctx.moveTo(x, y);
@@ -1780,6 +2276,30 @@
         if (typeof state.onSelection === 'function') state.onSelection(null);
     }
 
+    /* §72: the display scale, one read per resize — the window may sit on a 125/150/200% monitor
+       (or have just been moved onto one), and every backing store must carry devicePixelRatio,
+       not CSS pixels. dpr = 1 reproduces the sizes this engine has always painted at. */
+    function layerDpr() {
+        const v = (typeof window !== 'undefined' && window.devicePixelRatio) ? Number(window.devicePixelRatio) : 1;
+        return v > 0 ? v : 1;
+    }
+
+    /* One layer canvas: size its backing store from its own CSS box — falling back to the stage
+       box when the canvas has no measurable one (a Node stub, a hidden tab) — at the given scale. */
+    function sizeLayer(c, fallbackW, fallbackH, dpr) {
+        const size = math.layerSize(c.clientWidth || fallbackW, c.clientHeight || fallbackH, dpr);
+        if (c.width !== size.w || c.height !== size.h) { c.width = size.w; c.height = size.h; }
+        return size;
+    }
+
+    /* Clear at 1:1, then paint in CSS pixels: every painter's maths stays in the logical space it
+       was written for, and only the backing store carries the display scale. */
+    function resetLayer(ctx, canvas, dpr) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
     function renderLayers(force) {
         const t0 = performance.now();
         state.lastPaint = Date.now();
@@ -1788,7 +2308,16 @@
         if (state.dirty.base || force) job.push('base');
         if (state.dirty.live || force) job.push('live');
         if (state.dirty.ribbon || force) job.push('ribbon');
-        for (const name of job) {
+        for (let j = 0; j < job.length; j += 1) {
+            const name = job[j];
+            /* P2-3 (measured, §51): at 4K with a 30 k-cell matrix one payload-arrival frame cost
+               17.5 ms — over the 60 Hz budget. When a frame has already spent its share, the rest
+               of the job waits for the next rAF instead of blowing the frame: the deferred
+               layers keep their dirty flags, and the tick paints them one frame later. */
+            if (j > 0 && performance.now() - t0 >= YIELD_MS) {
+                state.stats.yields += 1;
+                break;
+            }
             const canvas = state.layers[name];
             /* The flag is cleared whether or not a canvas is attached: a null layer used to
                stay dirty for ever, which kept this loop running on every animation frame and
@@ -1796,19 +2325,31 @@
             state.dirty[name] = false;
             if (!canvas) continue;
             const ctx = canvas.getContext('2d');
+            const dpr = state.view.dpr || 1;
             if (name === 'heat') {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                drawHeat(ctx);
-                state.stats.heatPasses += 1;
+                /* P2-2: repair only when the pixels are actually outdated — a newer epoch repaints
+                   in full; fading ghosts patch their own rects; anything else is a no-op (counted,
+                   so a benchmark cannot mistake it for work). */
+                if (state.heatPainted !== state.heatEpoch) {
+                    resetLayer(ctx, canvas, dpr);
+                    drawHeat(ctx);
+                    state.heatPainted = state.heatEpoch;
+                    state.stats.heatPasses += 1;
+                } else if (state.heatGhosts.length) {
+                    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);   // ghosts patch in logical pixels
+                    if (patchHeat(ctx)) state.stats.heatPatches += 1;
+                } else {
+                    state.stats.heatSkips += 1;
+                }
             } else if (name === 'base') {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                resetLayer(ctx, canvas, dpr);
                 /* Axes first, then the matrix, then the executed-flow overlay: the frame must read
                    as a chart (what price, what time, where the data is) even before a bar is drawn. */
                 drawAxes(ctx);
                 drawFootprint(ctx);
                 drawFlow(ctx);
             } else if (name === 'live') {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                resetLayer(ctx, canvas, dpr);
                 drawSweeps(ctx);
                 drawHud(ctx);
                 drawSelection(ctx);
@@ -1836,11 +2377,21 @@
         rafHandle = requestAnimationFrame(tick);
         const dt = lastTick ? now - lastTick : 16;
         lastTick = now;
-        /* decay runs at ~30 Hz: lambda is 500 ms, so a 60 Hz repaint of it is wasted work */
+        /* decay runs at ~30 Hz: lambda is 500 ms, so a 60 Hz repaint of it is wasted work.
+           P2-2: the cadence asks a question first — a pass only when the epoch moved or a ghost
+           is still fading, so a static matrix costs nothing between payloads. */
         heatAccum += dt;
-        if (heatAccum >= 33 && state.data.heat.length) {
+        if (heatAccum >= 33 && state.data.heat.length
+            && (state.heatPainted !== state.heatEpoch || state.heatGhosts.length)) {
             heatAccum = 0;
             state.dirty.heat = true;
+        }
+        /* P2-2: coalesced — a fast sweep fires many moves per frame; hover runs once per tick,
+           with the newest position, immediately before the layers paint. */
+        if (state.pendingHover) {
+            const p = state.pendingHover;
+            state.pendingHover = null;
+            hover(p.x, p.y);
         }
         if (state.invalidateBase) { state.dirty.base = true; state.invalidateBase = false; }
         if (state.dirty.heat || state.dirty.base || state.dirty.live || state.dirty.ribbon) renderLayers(false);
@@ -1862,44 +2413,57 @@
 
     /* ── interaction: asymmetric zoom, pan, hover ────────────────────────── */
 
+    /* ── P1-9: keyboard zoom ──────────────────────────────────────────────────
+       The wheel's own arithmetic with the anchor pulled out: the stage centre for the keys
+       (there is no cursor), the pointer for the wheel. `idx`/`price` are read BEFORE the scale
+       moves — that read is what pins the point under the anchor. */
+    function zoomTime(factor, anchorX) {
+        const W = state.view.width;
+        const x = anchorX == null ? W / 2 : Math.max(0, Math.min(W, anchorX));
+        const idx = xToIndex(x);
+        const next = math.zoomScale(state.view.scaleX, factor, 2.5, 90);
+        state.view.scaleX = next;
+        state.view.offX = idx - x / next;
+        if (state.autoFit) fitHeight();
+        markViewDirty();
+        return next;
+    }
+
+    function zoomPrice(factor, anchorY) {
+        const H = state.view.height;
+        const y = anchorY == null ? H / 2 : Math.max(0, Math.min(H, anchorY));
+        const price = yToPrice(y);
+        const next = math.zoomScale(state.view.scaleY, factor, 0.02, 40);
+        state.view.scaleY = next;
+        state.view.offY = math.anchorOffset(price, H, y, next);
+        state.autoFit = false;                    // the user owns the price axis now
+        markViewDirty();
+        return next;
+    }
+
+    function markViewDirty() {
+        state.dirty.base = state.dirty.live = state.dirty.ribbon = true;
+        markHeatFull();                        // P2-2: the pixels are stale until the next pass
+        applyLod();
+    }
+
     function attach(canvas) {
         state.layers.base = canvas;
         canvas.addEventListener('wheel', (ev) => {
             /* A trackpad pinch arrives as ctrl+wheel; the browser would zoom the whole page, so it
-               is cancelled here and given the price-axis maths below, around the gesture's own point. */
-            if (ev.ctrlKey) {
-                ev.preventDefault();
-                const pinchRect = canvas.getBoundingClientRect();
-                const pinchY = ev.clientY - pinchRect.top;
-                const overPrice = yToPrice(pinchY);
-                const zoomed = Math.max(0.02, Math.min(40, state.view.scaleY * (ev.deltaY < 0 ? 1.09 : 0.92)));
-                state.view.scaleY = zoomed;
-                state.view.offY = overPrice - (state.view.height - pinchY) / zoomed;
-                state.autoFit = false;                    // the user owns the price axis now
-                state.dirty.base = state.dirty.live = state.dirty.ribbon = state.dirty.heat = true;
-                applyLod();
-                return;
-            }
+               is cancelled here and routed into the same price-axis maths as the plain wheel,
+               around the gesture's own point. */
             ev.preventDefault();
             const rect = canvas.getBoundingClientRect();
             const mx = ev.clientX - rect.left;
             const my = ev.clientY - rect.top;
-            if (ev.shiftKey) {
+            if (ev.shiftKey && !ev.ctrlKey) {
                 /* X-axis only: zoom time around the cursor, price scale untouched */
-                const idx = xToIndex(mx);
-                state.view.scaleX = Math.max(2.5, Math.min(90, state.view.scaleX * (ev.deltaY < 0 ? 1.12 : 0.89)));
-                state.view.offX = idx - mx / state.view.scaleX;
-                if (state.autoFit) fitHeight();
+                zoomTime(ev.deltaY < 0 ? 1.12 : 0.89, mx);
             } else {
                 /* Y-axis only: zoom price around the cursor, time scale untouched */
-                const price = yToPrice(my);
-                const next = Math.max(0.02, Math.min(40, state.view.scaleY * (ev.deltaY < 0 ? 1.09 : 0.92)));
-                state.view.scaleY = next;
-                state.view.offY = price - (state.view.height - my) / next;
-                state.autoFit = false;                       // the user owns the price axis now
+                zoomPrice(ev.deltaY < 0 ? 1.09 : 0.92, my);
             }
-            state.dirty.base = state.dirty.live = state.dirty.ribbon = state.dirty.heat = true;
-            applyLod();
         }, { passive: false });
 
         let drag = null;
@@ -1947,7 +2511,9 @@
             }
             const rect = canvas.getBoundingClientRect();
             if (ev.clientX < rect.left || ev.clientX > rect.right || ev.clientY < rect.top || ev.clientY > rect.bottom) return;
-            hover(ev.clientX - rect.left, ev.clientY - rect.top);
+            /* P2-2: coalesced into the frame — the tick runs hover once with the newest position
+               before it paints, instead of once per raw pointer event. */
+            state.pendingHover = { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
         });
     }
 
@@ -2005,8 +2571,11 @@
         const price = yToPrice(my);
         const rows = state.data.levels.get(bar.time) || [];
         const { rows: imRows, buyCount, sellCount } = math.diagonalImbalance(rows, state.params.R);
-        let cvd = 0;
-        for (let k = 0; k <= i; k += 1) cvd += Number(state.data.bars[k].delta) || 0;
+        /* P2-1: everything below reads the index built once per payload in `setData()` — the
+           numbers are identical to the loops these replaced (pinned by ofx.selftest.js) and the
+           per-mousemove cost no longer scales with the tape size or the matrix size. */
+        const cvdPrefix = state.idx && state.idx.cvd;
+        const cvd = cvdPrefix ? cvdPrefix[i + 1] : 0;
         let total = 0;
         for (const l of rows) total += l.bid + l.ask;
         const near = nearestLevel(rows, price);
@@ -2014,26 +2583,23 @@
         const im = nearIdx >= 0 ? imRows[nearIdx] : null;
         const zones = math.stackedZones(imRows, state.params.stack);
         const zone = near ? zones.find((z) => z.low <= near.level.price && near.level.price <= z.high) : null;
-        /* Depth at the hovered row, from the depth matrix's own column for this bar. */
+        /* Depth at the hovered row, from the renderer's own column groups — the layer that paints
+           the cells and the layer that reports them can never disagree about which column it is. */
         let depth = 0;
-        for (const cell of state.data.heat) {
-            if (cell.col !== i) continue;
-            if (near && cell.lo <= near.level.price && near.level.price < cell.hi) depth += cell.size;
+        if (near && state.data.heatIndex) {
+            for (const cell of state.data.heatIndex.groups.get(i) || []) {
+                if (cell.lo <= near.level.price && near.level.price < cell.hi) depth += cell.size;
+            }
         }
-        const prints = [];
-        for (const p of state.data.prints) {
-            if (p.time >= bar.time && p.time < bar.time + barSeconds()) prints.push(p);
-        }
-        let sweep = 0;
-        for (const p of prints) sweep += Number(p.size) || 0;
-        const events = state.data.flowEvents.filter((e) => Number(e.col) === i);
+        const bucket = (state.idx && state.idx.printsByBar && state.idx.printsByBar[i]) || null;
+        const events = (state.idx && state.idx.flowByCol && state.idx.flowByCol.get(i)) || [];
         state.hover = {
             x: mx, y: my, price, index: i, bar,
             barTime: bar.time, cvd, total, buyCount, sellCount, zones: zones.length,
             zone: zone ? { side: zone.side, count: zone.count, low: zone.low, high: zone.high } : null,
             level: near ? { price: near.level.price, bid: near.level.bid, ask: near.level.ask, dist: near.dist } : null,
             imbalance: im ? { side: im.side, ratio: im.ratio, buy: im.buy, sell: im.sell } : null,
-            depth, prints: prints.length, sweep,
+            depth, prints: bucket ? bucket.prints : 0, sweep: bucket ? bucket.sweep : 0,
             events: events.map((e) => ({ kind: e.kind, direction: e.direction, price: e.price, size: e.size })),
             calc: bar.calc || null,
             visibleBars: barsOnScreen(),
@@ -2082,14 +2648,26 @@
     function resize(width, height) {
         state.view.width = width;
         state.view.height = height;
+        const dpr = layerDpr();
+        state.view.dpr = dpr;
         for (const key of ['heat', 'base', 'live']) {
             const c = state.layers[key];
             if (!c) continue;
-            c.width = width;
-            c.height = height;
+            sizeLayer(c, width, height, dpr);
         }
         const r = state.layers.ribbon;
-        if (r) { r.width = width; r.height = 84; }
+        if (r) {
+            /* The legend's own contract — 'volume, delta, CVD on the same X as the bars' — means the
+               ribbon paints in the stage's coordinate space, so its CSS box must BE the stage's
+               width. It used to keep `width: 100%` while the backing store was stage-wide, so the
+               browser stretched the picture ~17% horizontally wherever the readout column showed. */
+            const boxW = Math.max(1, Math.round(width));
+            if (r.style && r.style.width !== boxW + 'px') r.style.width = boxW + 'px';
+            sizeLayer(r, boxW, 84, dpr);
+        }
+        /* P2-2: setting canvas.width CLEARS the canvas — without this bump the change gate would
+           happily skip the repaint and leave a blank heat layer. */
+        markHeatFull();
         fitHeight();
         applyLod();
         applyMode();
@@ -2100,23 +2678,51 @@
         worldX, xToIndex, priceToY, yToPrice,
         setData, profileBars, computeSessionAverages,
         indexLevels, renderLayers, start, stop, attach, resize,
-        hover, applyLod, applyMode, clampView, viewBounds, barsOnScreen, snapToLive, fitSession, fitHeight, barSeconds, legend,
+        hover, applyLod, applyMode, clampView, viewBounds, barsOnScreen, snapToLive, fitSession, fitHeight,
+        zoomTime, zoomPrice, barSeconds, legend,
         stats() {
             const s = state.stats;
             return {
                 frames: s.frames, lastMs: +s.lastMs.toFixed(2), emaMs: +s.emaMs.toFixed(2), p95Ms: +s.p95Ms.toFixed(2),
-                heatPasses: s.heatPasses, decayCells: s.decayCells, mode: state.mode, lod: state.lod.mode,
+                heatPasses: s.heatPasses, heatPatches: s.heatPatches, heatSkips: s.heatSkips, yields: s.yields,
+                heatGhosts: state.heatGhosts.length, decayCells: s.decayCells, mode: state.mode, lod: state.lod.mode,
                 printsSeen: s.printsSeen, printsMatched: s.printsMatched, sweepBubbles: s.sweepBubbles,
                 heatCells: state.data.heat.length, textStarved: s.textStarved, columnBadges: s.columnBadges || 0,
                 autoFit: state.autoFit,
                 cellPx: +s.cellPx.toFixed(2), aggregating: s.aggregating, groupK: s.groupK,
                 divState: s.divState, blocksFiltered: s.blocksFiltered, maxFrameMs: s.framesMs.length ? +Math.max(...s.framesMs).toFixed(2) : 0,
                 recovered: s.recovered, flowBubbles: s.flowBubbles, flowEvents: s.flowEvents, barsOnScreen: barsOnScreen(),
+                /* P1-8: what the expression pass actually painted this frame, so a mode can be
+                   asserted from telemetry instead of from pixels. */
+                expression: {
+                    mode: exprMode().key, palette: exprMode().palette,
+                    bodies: s.barBodies || 0, splits: s.barSplits || 0,
+                },
                 colW: +state.view.scaleX.toFixed(1), levelCount: state.data.levels.size,
                 avgLevelVolume: +state.avgLevelVolume.toFixed(2), symbol: state.symbol, params: { ...state.params },
             };
         },
-        setParams(next) { Object.assign(state.params, next || {}); applyLod(); state.dirty.base = state.dirty.live = true; },
+        setParams(next) {
+            Object.assign(state.params, next || {});
+            applyLod();
+            state.dirty.base = state.dirty.live = true;
+            markHeatFull();                    // P2-2: lambda changes the curve, ramp the palette
+        },
+        RAMPS,
+        /* P1-8: the bar expression, applied as one thing — the palette writes the colour table (so
+           the legend would already have to tell the truth about it) and the mode changes what each
+           bar draws. Returns what the catalogue resolved, which is what the control displays. */
+        setExpression(next) {
+            const n = next || {};
+            if (n.mode !== undefined) state.params.mode = String(n.mode);
+            if (n.palette !== undefined) state.params.palette = String(n.palette);
+            const applied = applyPalette(state.params.palette);
+            const resolved = exprMode();
+            state.dirty.base = state.dirty.live = true;
+            markHeatFull();
+            return { mode: resolved.key, palette: resolved.palette, overrides: applied };
+        },
+        expression: exprMode,
         /* P1-3: the selection's own surface (the arithmetic lives in math.selectionStats). */
         selection: () => (selection ? Object.assign({}, selection) : null),
         selectionStats: selectionStats,
