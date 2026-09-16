@@ -604,6 +604,8 @@
                 /* the path is spelled out at the call site so the UI audit can resolve it */
                 const payload = await api(`/api/fundamentals/${encodeURIComponent(symbol)}`);
                 paint(plan(payload, null, symbol, Date.now()));
+                /* P1-10: filings are slow by nature — 10 min of silence is the staleness signal. */
+                if (window.OFAPFRESH) OFAPFRESH.stamp('fundamentals', { ageMs: 0, windowMs: 600000 });
             } catch (e) {
                 paint(plan(null, e, symbol, Date.now()));
             }

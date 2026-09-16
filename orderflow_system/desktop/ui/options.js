@@ -528,6 +528,8 @@
             render();
             return state.plan;
         }
+        /* P1-10: a chain that arrived is a fresh sample; a dead poll ages past two intervals. */
+        if (window.OFAPFRESH && payload) OFAPFRESH.stamp('options', { ageMs: 0, windowMs: 2 * INTERVAL_MS });
         return onChain(payload);
     }
 

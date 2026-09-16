@@ -123,10 +123,12 @@ const TIPS = {
     /* alerts */
     '#alSound': 'Play a short tone when an alert fires (severity decides the tone). Saved in this browser.',
     '#alAuto': 'Refresh the alert log automatically while this view is open.',
-    '#alClear': 'Empty the alert log (rules and history are untouched).',
-    '#alSave': 'Write the rule table back to the engine: enable flags, params JSON and cooldowns.',
-    '#alertTable': 'Every fired alert, newest first, with severity and the rule that matched.',
-    '#ruleTable': 'One row per alert rule: on/off, thresholds (JSON), cooldown seconds and fire count.',
+    '#alClear': 'Empty the alert log on the engine (rules and persisted history are untouched).',
+    '#alOnlyHm': 'Show only the rules the depth map created (their id starts with hm-).',
+    '#alOnlyOn': 'Show only the rules that are currently enabled.',
+    '#alRuleCount': 'How many rules the filter is showing, out of how many exist \u2014 counted from the list, never assumed.',
+    '#alertTable': 'Every fired alert, newest first: time, severity, kind, symbol, the level and size it happened at, and why it fired.',
+    '#ruleTable': 'One row per alert rule, in words: what it watches for, where, and how often it may fire. Edit opens its fields \u2014 thresholds, level scope, hold time, channels and cooldown.',
     '#histTable': 'Detections persisted to SQLite \u2014 review a session after the window is closed.',
     '#histReload': 'Re-read the persisted history now.',
     '#tgRouting': 'Per-rule switch: which rules are allowed to send to Telegram.',
@@ -472,6 +474,10 @@ function guideStyles() {
 */
 function wizGo(view, why) {
     closeWizard();
+    if (view === 'hotkeys') {                  // the keyboard map — an overlay, like the guide
+        if (window.OFAPMenu) OFAPMenu.showHotkeys(true);
+        return;
+    }
     if (view === 'menu') {                     // the ☰ panel, not a view section
         const btn = document.getElementById('menuBtn');
         if (btn) { btn.click(); return; }
@@ -2336,14 +2342,17 @@ const WIZ_PRO = [
             <div class="wiz-note"><b>Defaults worth knowing:</b> <b>Ctrl+K</b> the command palette
             (every panel, one box), <b>P</b> freeze the background refreshes the moment you want to
             read a static screen, <b>?</b> or <b>F1</b> the map of every binding, <b>1&hellip;9</b>
-            switch views in rail order.</div>
+            switch views in rail order &mdash; and on the panels themselves <b>X</b> clears a
+            selection, <b>Ctrl+E</b> exports it, <b>=</b> / <b>&minus;</b> and <b>[</b> / <b>]</b>
+            zoom the engine, <b>A</b> alerts on the heatmap cursor, <b>Space</b> plays and pauses
+            the replay.</div>
             <div class="wiz-note"><b>What a professional sets:</b> one habit &mdash; freeze before you
             read, unfreeze before you trade. Live panels that repaint under your eyes are for
             monitoring; a frozen screen is for deciding.</div>
             ${wizFooter({
                 unlocks: 'navigation without the mouse, and a freeze key you will use constantly',
                 deeper: 'the hotkey map lists every binding and its scope',
-                view: 'guide', label: 'Open the hotkey map' })}
+                view: 'hotkeys', label: 'Open the hotkey map' })}
         `,
     },
     {
@@ -2378,7 +2387,7 @@ const WIZ_PRO = [
             first, then text &mdash; rather than dropping frames.</div>
             ${wizFooter({
                 unlocks: 'a screen that stays smooth under load, instead of one that looks impressive and stutters',
-                deeper: 'the logs panel and the status bar show freshness, frame behaviour and data age',
+                deeper: 'every panel\'s freshness chip and the status bar\'s data pill show the age of what you are reading',
                 view: 'logs', label: 'Open Logs' })}
         `,
     },

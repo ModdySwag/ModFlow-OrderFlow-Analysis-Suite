@@ -27,18 +27,19 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
-DEFAULT_STALE_MS = 5_000
+#: The age policy lives in ONE module now (atlas/freshness.py): P1-10 made the engine status and
+#: the UI chips read the same windows, so this module imports the policy instead of owning it.
+#: These names stay importable from here for older callers.
+from orderflow_system.atlas import freshness as _freshness
 
-#: A depth feed updates continuously, so seconds of silence is stale. A *quote* feed does
-#: not: Alpaca's crypto quotes tick a few times a minute, and calling that "stale" would
-#: throw away a perfectly usable top of book (measured: 13.7 s between updates).
-STALE_DEPTH_MS = 5_000
-STALE_QUOTE_MS = 60_000
+DEFAULT_STALE_MS = _freshness.DEFAULT_WINDOW_MS
+STALE_DEPTH_MS = _freshness.STALE_DEPTH_MS
+STALE_QUOTE_MS = _freshness.STALE_QUOTE_MS
 
 
 def stale_window_ms(kind: str) -> int:
     """How long a row of this kind may go without an update before it is called stale."""
-    return STALE_QUOTE_MS if kind == "quote" else STALE_DEPTH_MS
+    return _freshness.window_ms(kind)
 
 
 @dataclass
@@ -59,11 +60,10 @@ class VenueTop:
     def to_dict(self, now_ms: int, stale_ms: Optional[int] = None) -> dict[str, Any]:
         #: ts_ms == 0 means the venue's clock is not comparable to ours (documented in the
         #: caller): an unknown age is reported as unknown, not as stale — inventing an age
-        #: would be worse than saying nothing.
-        window = stale_window_ms(self.kind) if stale_ms is None else int(stale_ms)
-        age = max(0, now_ms - self.ts_ms) if self.ts_ms else 0
+        #: would be worse than saying nothing. The assessment itself lives in atlas/freshness.py.
+        a = _freshness.assess(self.kind, self.ts_ms, now_ms, window=stale_ms)
         valid = self.ok and self.bid > 0 and self.ask > 0 and self.ask >= self.bid
-        stale = bool(self.ts_ms) and age > window
+        stale = a["stale"]
         spread = (self.ask - self.bid) if valid else 0.0
         mid = ((self.ask + self.bid) / 2) if valid else 0.0
         return {
@@ -75,9 +75,9 @@ class VenueTop:
             "ask": self.ask,
             "ask_size": self.ask_size,
             "ts_ms": self.ts_ms,
-            "age_ms": age,
-            "age_known": bool(self.ts_ms),
-            "stale_after_ms": window,
+            "age_ms": a["age_ms"],
+            "age_known": a["age_known"],
+            "stale_after_ms": a["window_ms"],
             "stale": stale,
             "ok": bool(valid and not stale),
             "spread": round(spread, 10),
@@ -126,7 +126,6 @@ def build(entries: Iterable[VenueTop], now_ms: Optional[int] = None,
         reasons = [f"{r['label']}: {r['note'] or ('stale' if r['stale'] else 'no quote')}" for r in rows]
         consolidated["reason"] = ("no venue could answer — " + "; ".join(reasons)) if reasons else "no venues configured"
 
-    kinds = {r["kind"] for r in rows}
     multibook_capable = len([r for r in rows if r["kind"] == "depth"]) > 1
     note = ("Top-of-book consolidation across venues: the best bid and best ask may come from "
             "different venues. A fully merged book needs depth from more than one venue "
@@ -134,7 +133,7 @@ def build(entries: Iterable[VenueTop], now_ms: Optional[int] = None,
     return {
         "venues": rows,
         "consolidated": consolidated,
-        "stale_policy": {"depth_ms": STALE_DEPTH_MS, "quote_ms": STALE_QUOTE_MS,
+        "stale_policy": {"depth_ms": _freshness.STALE_DEPTH_MS, "quote_ms": _freshness.STALE_QUOTE_MS,
                          "override_ms": stale_ms},
         "kind": "top_of_book" if not multibook_capable else "depth_merge",
         "note": note,

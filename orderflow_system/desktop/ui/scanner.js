@@ -97,6 +97,11 @@ function scanEnsureView() {
         th.onclick = () => { SCAN.sort = th.dataset.sort; SCAN.lastKey = ''; scanRefresh(); };
     });
     section.querySelector('#scanRefresh').onclick = () => { SCAN.lastKey = ''; scanRefresh(); };
+    /* P1-10: this view is built here, AFTER freshness.js's boot pass — attach its chip now. */
+    if (window.OFAPFRESH) {
+        const fh = section.querySelector('.view-head');
+        if (fh) OFAPFRESH.chip(fh, 'scanner');
+    }
 }
 
 function scanNum(v, digits = 2) {
@@ -170,6 +175,8 @@ async function scanRefresh() {
     if (!inView && SCAN.lastKey) return;                 // only poll the visible view
     try {
         const table = await api(`/api/atlas/scanner?sort=${encodeURIComponent(SCAN.sort)}&limit=60`);
+        /* P1-10: the scanner payload carries the server's own as_of clock. */
+        if (window.OFAPFRESH) OFAPFRESH.stamp('scanner', { lastMs: Number(table.as_of) || 0, kind: 'candles' });
         const key = `${table.as_of && Math.round(table.as_of / 1000)}|${table.sort}|${table.count}|${(table.rows || []).length}`;
         if (key === SCAN.lastKey) return;
         SCAN.lastKey = key;

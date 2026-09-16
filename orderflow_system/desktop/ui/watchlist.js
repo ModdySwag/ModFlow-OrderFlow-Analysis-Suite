@@ -351,6 +351,12 @@
 
     function onStatus(payload) {
         state.statusAt = Date.now();
+        /* P1-10: the watchlist's sample clock is the newest tick the status route reports; a
+           demo list is labelled as demo instead of aged. */
+        if (window.OFAPFRESH && payload && typeof payload === 'object' && !payload.error) {
+            const newest = (payload.per_symbol || []).reduce((m, r) => Math.max(m, Number(r.last_tick_ms) || 0), 0);
+            OFAPFRESH.stamp('watchlist', { lastMs: newest, kind: 'trades', source: demoNote() ? 'demo' : '' });
+        }
         if (payload && payload.error) {
             state.statusError = String(payload.error);
         } else if (payload && typeof payload === 'object') {

@@ -260,6 +260,10 @@
        out of plan(), so what the user reads is what the selftest pinned. */
     function paint(st) {
         NEWS.state = st;
+        /* P1-10: a headline feed is judged by the hour — fresh until it has not fetched for 10 min. */
+        if (window.OFAPFRESH && st && typeof st.count === 'number') {
+            OFAPFRESH.stamp('news', { ageMs: 0, windowMs: 600000 });
+        }
         const count = el('newsCount'), source = el('newsSource'), sub = el('newsSub'), body = el('newsBody');
         if (count) count.textContent = st.count + (st.count === 1 ? ' headline' : ' headlines');
         if (source) source.textContent = st.source || '—';
