@@ -25,7 +25,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-from orderflow_system.desktop import config_store, logs, windows as windows_mod
+from orderflow_system.desktop import config_store, logs, single_instance, windows as windows_mod
 
 logger = logging.getLogger(__name__)
 
@@ -459,6 +459,14 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = config_store.load_config()
     logs.install(cfg.get("logging", {}).get("level", "INFO"))
+
+    # N-1: one windowed instance per profile. A second launch finds the named mutex held, brings
+    # the existing window forward and exits — it does NOT start a second server/engine over the
+    # same config.json and database. Headless runs are exempt on purpose (the smoke recipes run
+    # their own scratch APPDATA alongside the owner's window).
+    if not args.headless and not single_instance.acquire_for_app(str(config_store.config_dir())):
+        print("ModFlow OrderFlow Analysis Suite is already running — bringing it forward.", file=sys.stderr)
+        return 0
 
     preferred = args.port or int(cfg.get("dashboard", {}).get("port", 8080))
     port = free_port(preferred)
