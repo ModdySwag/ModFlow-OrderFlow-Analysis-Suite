@@ -57,13 +57,13 @@ body {
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 16px; }
 .brand-mark {
-    width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
-    background: linear-gradient(140deg, var(--blue), var(--purple));
-    font-weight: 800; font-size: 15px; color: var(--of-on-accent);
+    /* P62: the badge icon itself — no tile behind it and no radius; the artwork is the disc */
+    width: 32px; height: 32px; flex: 0 0 auto; display: block;
 }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
-.brand-name { font-weight: 650; font-size: 13.5px; letter-spacing: .01em; }
-.brand-sub  { font-size: 10.5px; color: var(--text-muted); letter-spacing: .09em; text-transform: uppercase; }
+.brand-name { font-weight: 650; font-size: 14px; letter-spacing: .005em; }
+.brand-sub  { font-size: 11px; color: var(--text-muted); letter-spacing: .01em; }
+/* P62: sentence case — the all-caps shout and its wide tracking came off the rail sub */
 
 .nav-item {
     display: flex; align-items: center; gap: 10px;
@@ -201,6 +201,10 @@ table.data td.name { font-family: var(--font-sans); font-weight: 550; }
 .banner.warn { background: var(--orange-bg); border-color: rgba(var(--of-warn-rgb),.32); color: rgb(var(--of-warn-ink-rgb)); }
 .banner.err  { background: var(--red-bg); border-color: rgba(var(--of-err-rgb),.32); color: rgb(var(--of-err-ink-rgb)); }
 .banner.ok   { background: var(--green-bg); border-color: rgba(var(--of-ok-rgb),.3); color: rgb(var(--of-ok-bright-rgb)); }
+
+/* The notice strip is where a body-level toast lands: fixed, so it takes no part in the body's flex
+   layout, and it can never replace the app the way assigning innerHTML to the body would. */
+#noticeStrip { position: fixed; left: 10px; bottom: 10px; z-index: 9999; max-width: min(720px, 60vw); }
 
 .chart-wrap { height: 460px; border-radius: 10px; overflow: hidden; }
 .chart-wrap.short { height: 300px; }
