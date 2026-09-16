@@ -156,6 +156,48 @@ class Database:
             for r in rows
         ]
 
+    async def delete_ticks_window(self, instrument: str, start_ms: int, end_ms: int) -> int:
+        """Remove a window of stored ticks, returning how many rows went.
+
+        Only the archive backfill calls this: a stored day is *replaced* rather than appended to, so
+        re-running an interrupted day (or re-downloading one) can never double-count volume in the
+        profiles, delta lanes or any study that reads history.
+        """
+        cursor = await self._db.execute(
+            "DELETE FROM ticks WHERE instrument = ? AND timestamp_ms >= ? AND timestamp_ms < ?",
+            (instrument, start_ms, end_ms),
+        )
+        await self._db.commit()
+        return cursor.rowcount or 0
+
+    async def count_ticks(self, instrument: str, start_ms: int, end_ms: int) -> int:
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) FROM ticks WHERE instrument = ? AND timestamp_ms >= ? AND timestamp_ms < ?",
+            (instrument, start_ms, end_ms),
+        )
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def get_recent_ticks(self, instrument: str, start_ms: int, end_ms: int,
+                               limit: int = 5_000) -> list[Tick]:
+        """The newest `limit` ticks inside a window, returned oldest-first.
+
+        A day of a liquid instrument is millions of rows: reading the window into memory and putting
+        every row in an HTTP response would be a denial of service against our own loopback, so the
+        read walks backwards from the newest row and stops at the cap.
+        """
+        cursor = await self._db.execute(
+            "SELECT timestamp_ms, price, size, side, trade_id FROM ticks "
+            "WHERE instrument = ? AND timestamp_ms >= ? AND timestamp_ms < ? "
+            "ORDER BY timestamp_ms DESC LIMIT ?",
+            (instrument, start_ms, end_ms, int(limit)),
+        )
+        rows = await cursor.fetchall()
+        return [
+            Tick(timestamp_ms=r[0], price=r[1], size=r[2], side=Side(r[3]), trade_id=r[4] or "")
+            for r in reversed(rows)
+        ]
+
     # ── Candles ──
 
     # ── R5: storage retention ─────────────────────────────────────────────

@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import math
+import random
 import time
 from typing import Any, Callable, Optional
 
@@ -20,6 +21,9 @@ from orderflow_system.data.models import Tick, Side, OrderbookSnapshot, Orderboo
 logger = logging.getLogger(__name__)
 
 BYBIT_WS_URL = "wss://stream.bybit.com/v5/public/linear"
+
+#: ±fraction applied to a reconnect sleep (see data/feed_session.py — the shared rule).
+_BACKOFF_JITTER = 0.25
 
 
 def _update_id(data: dict) -> int:
@@ -100,8 +104,12 @@ class BybitFeed:
                 ConnectionRefusedError,
                 OSError,
             ) as e:
-                logger.warning(f"WebSocket disconnected: {e}. Reconnecting in {self._reconnect_delay}s...")
-                await asyncio.sleep(self._reconnect_delay)
+                # Sleep with jitter, then escalate. The ladder is NOT reset here: it resets when a
+                # frame actually parses (below) — a socket that opens and dies must keep escalating
+                # instead of hammering the venue at 1 s forever.
+                delay = self._reconnect_delay * (1.0 + random.uniform(-_BACKOFF_JITTER, _BACKOFF_JITTER))
+                logger.warning(f"WebSocket disconnected: {e}. Reconnecting in {delay:.1f}s...")
+                await asyncio.sleep(delay)
                 self._reconnect_delay = min(self._reconnect_delay * 2, 30.0)
             except Exception as e:
                 logger.error(f"Unexpected error in feed: {e}", exc_info=True)
@@ -115,7 +123,6 @@ class BybitFeed:
     async def _connect_and_listen(self):
         async with websockets.connect(BYBIT_WS_URL, ping_interval=20) as ws:
             self._ws = ws
-            self._reconnect_delay = 1.0
             self._ts_fallback_warned = False          # a fresh connection may say it again
             logger.info("Connected to Bybit WebSocket")
 
@@ -137,6 +144,9 @@ class BybitFeed:
                     break
                 try:
                     msg = json.loads(raw_msg)
+                    # A decoded frame is the only proof the socket works: the reconnect ladder
+                    # resets HERE and nowhere else (see data/feed_session.py for the rule).
+                    self._reconnect_delay = 1.0
                     await self._handle_message(msg)
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid JSON: {raw_msg[:100]}")
