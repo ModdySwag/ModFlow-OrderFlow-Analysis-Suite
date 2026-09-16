@@ -449,14 +449,29 @@ function stRegisterHelp() {
         };
     }
     if (typeof GUIDE_SECTIONS !== 'undefined' && !GUIDE_SECTIONS.some((s) => s && s.id === 'studies')) {
+        /* GUIDE_SECTIONS entries are {h, body}: the Guide renders `s.h` as the card title and the
+           palette indexes it as the search title. This entry shipped as {title, lead, body}, so its
+           card read "undefined" and EVERY non-empty palette query threw in searchScore (the index
+           item had no title to score) — found live in the P1-9 pass (§44). Keep the shape. */
         GUIDE_SECTIONS.push({
             id: 'studies',
-            title: 'Writing your own studies',
-            lead: 'The chart accepts indicator modules written against a documented contract, so the '
-                + 'indicator library is extensible without touching the app.',
-            body: 'Full contract, worked examples and the compatibility notes are in '
-                + 'docs/TRADOVATE_STUDY_BRIDGE.md; the starter pack lives in desktop/ui/indicators.',
+            h: 'Writing your own studies',
+            body: '<p>The chart accepts indicator modules written against a documented contract, so '
+                + 'the indicator library is extensible without touching the app.</p>'
+                + '<p>Full contract, worked examples and the compatibility notes are in '
+                + 'docs/TRADOVATE_STUDY_BRIDGE.md; the starter pack lives in desktop/ui/indicators.</p>',
         });
+        /* The guide view is built once, before this section is pushed, so refresh it the same way
+           the how-to section in guide.js does — without this the card never appears at all (§44). */
+        const gbody = document.getElementById('guideBody');
+        if (gbody) {
+            gbody.innerHTML = GUIDE_SECTIONS.map((s) => `
+                <div class="card" style="margin-bottom:12px">
+                    <div class="card-head"><span class="card-title">${s.h}</span></div>
+                    <div class="card-body guide-copy">${s.body}</div>
+                </div>`).join('');
+            if (typeof applyTips === 'function') applyTips(gbody);
+        }
     }
 }
 

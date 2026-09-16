@@ -224,9 +224,10 @@ function searchBuildIndex(force) {
     /* alert kinds and rules */
     const kinds = (typeof ALERT_KIND_HELP !== 'undefined') ? ALERT_KIND_HELP : [];
     kinds.forEach(([kind, desc]) => push('Alerts', kind.replace(/_/g, ' '), desc, `${kind} alert rule notify`, () => window.showView && window.showView('alerts')));
-    document.querySelectorAll('#ruleTable tbody tr, [data-rule-row]').forEach((row) => {
-        const name = (row.querySelector('td, .rule-name') || {}).textContent;
-        if (name) push('Alerts', `Rule: ${name.replace(/\s+/g, ' ').trim()}`, 'An armed alert rule — open it to change its parameters, channels or cooldown.', `${name} rule cooldown channel`, () => window.showView && window.showView('alerts'));
+    document.querySelectorAll('#ruleTable tbody tr').forEach((row) => {
+        const cell = row.querySelector('[data-rule-name]');
+        const name = cell ? (cell.getAttribute('data-rule-name') || cell.textContent) : '';
+        if (name) push('Alerts', `Rule: ${name.replace(/\s+/g, ' ').trim()}`, 'An armed alert rule \u2014 open it to change its thresholds, level scope, channels or cooldown.', `${name} rule cooldown channel`, () => window.showView && window.showView('alerts'));
     });
 
     /* help walkthroughs + guide sections */
@@ -487,13 +488,17 @@ function searchEnsureUI() {
         else if (e.key === '?' && e.shiftKey) { e.preventDefault(); searchOpsToggle(); }
     });
     wrap.querySelector('#searchClear').onclick = () => { input.value = ''; searchSymbolsThenRender(''); searchRender(''); input.focus(); };
-    document.addEventListener('keydown', (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); input.focus(); input.select(); }
-        else if (e.key === '/' && document.activeElement !== input
-            && !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) {
-            e.preventDefault(); input.focus();
-        }
-    });
+    /* Ctrl+K and `/` are the map's 'palette' binding (keys.js). The module that owns the input
+       registers the action, the map dispatches it — one owner for `/` at last: it used to open
+       the ☰ menu AND focus this input on the same press (menu.js's copy is gone). */
+    function focusPalette() { input.focus(); input.select(); }
+    if (window.OFAPKEYS) {
+        OFAPKEYS.bind({ id: 'palette', keys: ['ctrl+k', '/'], scope: 'Global',
+            label: 'command palette — search panels, settings and symbols', run: focusPalette });
+        OFAPKEYS.document([
+            { keys: '↑ ↓ / Enter / Esc / Shift+?', label: 'walk the results, run the highlighted one, close, operators', scope: 'Palette' },
+        ]);
+    }
     document.addEventListener('click', (e) => {
         if (!panel.contains(e.target) && !wrap.contains(e.target)) searchClose();
     });

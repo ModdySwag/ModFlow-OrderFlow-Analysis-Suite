@@ -53,16 +53,8 @@
         ['mt5', 'MetaTrader 5', 'your local terminal — free if it is installed here', true],
     ];
 
-    const HOTKEYS = [
-        ['Ctrl+K', 'Command palette', 'Global'],
-        ['P', 'Pause / resume background refreshes', 'Global'],
-        ['?  or  F1', 'This hotkey map', 'Global'],
-        ['1 … 9', 'Switch view by rail order', 'Global'],
-        ['Shift + wheel', 'Zoom time only', 'Engine'],
-        ['wheel', 'Zoom price only', 'Engine'],
-        ['drag', 'Pan both axes (Snap to live returns)', 'Engine'],
-        ['Esc', 'Close menu / overlay', 'Global'],
-    ];
+    /* The hotkey sheet renders from OFAPKEYS (keys.js) — the app's one shortcut map. The
+       hand-written list that used to live here drifted from the real bindings; it is gone. */
 
     const state = { open: false, filter: '', workspace: 'default', sources: [], active: '' };
 
@@ -245,12 +237,15 @@
     function paintHotkeys() {
         const host = el('hotkeySheet');
         if (!host) return;
-        host.innerHTML = `<div class="overlay-title">Hotkeys</div>
-            <table class="hk-table"><thead><tr><th>Keys</th><th>Action</th><th>Scope</th></tr></thead><tbody>`
-            + HOTKEYS.map(([keys, what, scope]) => `<tr><td class="hk-keys">${esc(keys)}</td><td>${esc(what)}</td>`
-                + `<td class="hk-scope ${scope === 'Global' ? 'on' : ''}">${esc(scope)}</td></tr>`).join('')
-            + `</tbody></table>
-            <div class="dim">Scope is a promise: Global works anywhere in the app; Engine applies where the engine has focus.</div>`;
+        const rows = (window.OFAPKEYS && OFAPKEYS.list) ? OFAPKEYS.list() : [];
+        host.innerHTML = `<div class="overlay-title">Hotkeys</div>`
+            + (rows.length
+                ? `<table class="hk-table"><thead><tr><th>Keys</th><th>Action</th><th>Scope</th></tr></thead><tbody>`
+                  + rows.map((r) => `<tr><td class="hk-keys">${esc(r.keys)}</td><td>${esc(r.label)}</td>`
+                    + `<td class="hk-scope ${r.scope === 'Global' ? 'on' : ''}">${esc(r.scope)}</td></tr>`).join('')
+                  + `</tbody></table>`
+                : '<div class="dim">the shortcut map is still loading…</div>')
+            + `<div class="dim">Generated from the one shortcut map (keys.js), so every key the app honours is here — and no key fires while the focus is in a field.</div>`;
     }
 
     /* ── open / close / keys ─────────────────────────────────────────────────── */
@@ -286,23 +281,17 @@
             const panel = el('menuPanel');
             if (state.open && panel && !panel.contains(ev.target) && ev.target !== el('menuBtn')) close();
         });
-        document.addEventListener('keydown', (ev) => {
-            const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((ev.target && ev.target.tagName) || '');
-            if (ev.key === 'Escape') { close(); showHotkeys(false); return; }
-            if (typing) return;
-            if (ev.key === '?' || ev.key === 'F1') { ev.preventDefault(); showHotkeys(true); return; }
-            if (ev.key === '/') { ev.preventDefault(); open(); return; }
-            const n = Number(ev.key);
-            if (n >= 1 && n <= 9) {
-                const rail = [...document.querySelectorAll('.rail .nav-item')];
-                if (rail[n - 1]) rail[n - 1].click();
-            }
-        });
+        /* The keys that used to live here are in keys.js's map now — Escape and 1-9 in the core,
+           the palette in search.js, and this sheet's own `?` / F1 registered below. */
+        if (window.OFAPKEYS) {
+            OFAPKEYS.bind({ id: 'hotkey-sheet', keys: ['?', 'f1'], scope: 'Global',
+                label: 'this hotkey map', run: () => showHotkeys(true) });
+        }
         document.addEventListener('ofap:paused', paintStatus);
     }
 
     window.OFAPMenu = { open, close, showHotkeys, saveWorkspace, deleteWorkspace, readWorkspaces,
-        loadWorkspaces, GROUPS, HOTKEYS, state };
+        loadWorkspaces, GROUPS, state };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
     else wire();
 })();

@@ -257,6 +257,11 @@
         if (path === 'ofx.sweep_c' && window.OFX) OFX.setParams({ sweepC: value });
         if (path === 'ofx.min_block' && window.OFX) OFX.setParams({ minBlock: value });
         if (path === 'ofx.lambda_ms' && window.OFX) OFX.setParams({ lambda: value });
+        if (path.startsWith('expression.')) {
+            /* Both chart surfaces keep their own mode + palette, and the menu has no idea which is
+               live: announce the write instead of calling into either one. */
+            document.dispatchEvent(new CustomEvent('ofap:expression', { detail: { path: path, value: value } }));
+        }
         if (path.startsWith('atlas.') && window.OFAPAtlasSettings && OFAPAtlasSettings.reload) OFAPAtlasSettings.reload();
     }
 
@@ -409,8 +414,8 @@
     function menus() {
         return [
             { id: 'file', label: 'File', items: [
-                { label: 'New workspace…', run: () => saveWorkspacePrompt(true) },
-                { label: 'Save workspace', accel: 'Ctrl+S', run: () => saveWorkspacePrompt(false) },
+                { label: 'New workspace…', keepOpen: true, run: () => saveWorkspacePrompt(true) },
+                { label: 'Save workspace', accel: 'Ctrl+S', keepOpen: true, run: () => saveWorkspacePrompt(false) },
                 { label: 'Open workspace', submenu: workspaceItems() },
                 sep(),
                 { label: 'Open user folder', run: () => openFolder('config') },
@@ -554,13 +559,17 @@
         }));
     }
     async function saveWorkspacePrompt(asNew) {
-        const name = window.prompt ? window.prompt('Workspace name', asNew ? 'workspace' : '') : '';
+        /* §56 carry-over: asked for IN PLACE (askText renders in the open menu) — window.prompt
+           is not guaranteed to render in the frozen WebView, so the old call could silently
+           do nothing at all. */
+        askText(asNew ? 'New workspace name' : 'Workspace name', asNew ? 'workspace' : '', async (name) => {
         if (!name) return;
         try {
             const res = await api('/api/control/workspaces', { method: 'POST', body: { save: { name, data: snapshot() } } });
             state.workspaces = (res && res.workspaces) || state.workspaces;
             note(`workspace "${name}" saved`);
         } catch (err) { note('workspace save failed: ' + err); }
+        });
     }
     function snapshot() {
         const view = (document.querySelector('.view.active') || {}).dataset || {};
@@ -784,9 +793,16 @@
                 if (items.length && here >= 0) { ev.preventDefault(); items[(here - 1 + items.length) % items.length].focus(); }
             }
         });
-        document.addEventListener('keydown', (ev) => {
-            if (ev.key === 'z' && ev.altKey) { ev.preventDefault(); toggleZen(); }
-        }, true);
+        /* Alt+Z (zen) is registered into keys.js's map below. It used to be a capture listener
+           here with no field check at all — it fired mid-typing; the map's dispatcher fixes that. */
+        if (window.OFAPKEYS) {
+            OFAPKEYS.bind({ id: 'zen', keys: ['alt+z'], scope: 'Global',
+                label: 'zen mode — hide the chrome', run: toggleZen });
+            OFAPKEYS.document([
+                { keys: '← → / ↑ ↓ / Enter', label: 'walk the menu bar, its menus and their items', scope: 'Menu bar' },
+                { keys: 'Tab', label: 'close the open menu', scope: 'Menu bar' },
+            ]);
+        }
     }
     function syncOpen() {
         state.bar.querySelectorAll('.mb-slot').forEach((slot) => {
@@ -820,6 +836,6 @@
             syncOpen();
             return true;
         },
-        menus, reload: boot,
+        menus, reload: boot, toggleZen,
     };
 })();

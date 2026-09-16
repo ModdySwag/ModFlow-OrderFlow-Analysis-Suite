@@ -54,6 +54,10 @@
         paint();
     }
 
+    /* The P key lands here (registered into keys.js's map in wire), so the chip's click and the
+       key can never disagree about what the state is. */
+    function toggle() { setPaused(!state.paused); }
+
     function register(id, restart) {
         if (typeof id === 'number') timers.set(id, restart);
         /* The callback is kept even after its timer is cleared on pause: a resume rebuilds the
@@ -71,18 +75,18 @@
     function wire() {
         const chip = chipEl();
         if (chip) chip.addEventListener('click', () => setPaused(!state.paused));
-        document.addEventListener('keydown', (ev) => {
-            if (ev.key !== 'p' && ev.key !== 'P') return;
-            const tag = (ev.target && ev.target.tagName) || '';
-            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || ev.metaKey || ev.ctrlKey) return;
-            setPaused(!state.paused);
-        });
+        /* P is the map's 'freeze' binding: registered here because this module owns the action,
+           dispatched by keys.js so it carries the shared typing guard and shows up in the sheet. */
+        if (window.OFAPKEYS) {
+            OFAPKEYS.bind({ id: 'freeze', keys: ['p'], scope: 'Global',
+                label: 'freeze / resume every background refresh', run: toggle });
+        }
         let remembered = false;
         try { remembered = localStorage.getItem(KEY) === '1'; } catch (err) { remembered = false; }
         setPaused(remembered, false);
     }
 
-    window.OFAPPause = { state, register, unregister, setPaused, isPaused: () => state.paused };
+    window.OFAPPause = { state, register, unregister, setPaused, toggle, isPaused: () => state.paused };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
     else wire();
 })();

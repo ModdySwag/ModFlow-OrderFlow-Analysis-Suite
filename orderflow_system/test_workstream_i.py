@@ -22,9 +22,17 @@ def test_two_ramps_and_the_active_one_is_used():
 
 
 def test_pinch_is_the_price_axis_with_the_browser_zoom_cancelled():
-    assert "ev.ctrlKey" in OFX
-    body = OFX[OFX.index("ev.ctrlKey"):OFX.index("ev.ctrlKey") + 700]
-    assert "preventDefault" in body and "scaleY" in body, "pinch must zoom price, not the page"
+    # ctrl+wheel is a trackpad pinch. P1-9 routed the wheel through zoomTime()/zoomPrice() (one home
+    # for the anchor arithmetic), so this pins the routing rather than the old inline maths: the
+    # browser's page zoom is cancelled, and a pinch lands on the price axis, never the time axis.
+    start = OFX.index("canvas.addEventListener('wheel'")
+    body = OFX[start:OFX.index("}, { passive: false });", start)]
+    assert "preventDefault" in body, "the wheel must cancel the browser's own zoom"
+    assert "!ev.ctrlKey" in body, "ctrl+wheel must not reach the time branch"
+    branch = body[body.index("} else {"):]
+    assert "zoomPrice(" in branch and "zoomTime(" not in branch, "pinch must zoom price, not time"
+    price = OFX[OFX.index("function zoomPrice"):OFX.index("function zoomPrice") + 600]
+    assert "scaleY" in price, "the price zoom must move the price scale"
 
 
 def test_cursor_link_is_a_store_with_a_clear():

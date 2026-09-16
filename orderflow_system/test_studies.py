@@ -13,7 +13,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 UI = ROOT / "orderflow_system" / "desktop" / "ui"
@@ -227,3 +226,20 @@ console.log(JSON.stringify({ files: files.length, registered: StudyAPI.registry.
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     assert payload["bad"] == [], payload["bad"]
     assert payload["files"] >= 6 and payload["registered"] == payload["files"]
+
+
+# ── the Guide section it contributes ───────────────────────────────────────────────
+def test_every_guide_section_it_pushes_uses_the_heading_shape():
+    """GUIDE_SECTIONS entries are {h, body} — the Guide renders `s.h` as the card title and the
+    palette indexes `s.h` as the search title.
+
+    The studies entry shipped as {title, lead, body}, so the Guide card read "undefined" and every
+    non-empty palette query threw `Cannot read properties of undefined (reading 'toLowerCase')` in
+    searchScore (found live in the P1-9 pass, §44). A push block without `h:` is that bug again.
+    """
+    import re
+    for name in ("studies.js", "guide.js"):
+        text = (UI / name).read_text(encoding="utf-8", errors="replace")
+        for match in re.finditer(r"GUIDE_SECTIONS\.push\(\{", text):
+            block = text[match.end():match.end() + 400]
+            assert re.search(r"\bh:", block), f"{name}: a GUIDE_SECTIONS.push without an `h:` heading"
