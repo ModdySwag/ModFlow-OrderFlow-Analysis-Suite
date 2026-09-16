@@ -21,6 +21,9 @@ KINDS = (
     "speed_spike", "cvd_divergence", "heat_pull", "heat_stack", "wall",
     "stacked_imbalance", "intent_pressure", "pulled_size", "trapped_traders",
     "vwap_cross", "depth_execution", "depth_refill",
+    # the depth map's own kind (P1-6): a level that keeps holding. It is what a heatmap level alert
+    # creates with "alert: if this level holds", and `wall_age` events carry `held_ms`.
+    "wall_age",
 )
 
 DEFAULT_RULES: list[dict[str, Any]] = [
@@ -77,6 +80,13 @@ def _price_of(payload: Any) -> Optional[float]:
         v = d.get(key)
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             return float(v)
+    return None
+def _held_ms_of(payload: Any) -> Optional[float]:
+    """How long a level had held when the event fired, when the event says so (wall_age does)."""
+    d = _payload_dict(payload)
+    v = d.get("held_ms")
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
     return None
 
 
@@ -180,6 +190,14 @@ class AlertEngine:
             if at_price is not None:
                 px = _price_of(payload)
                 if px is None or abs(px - float(at_price)) > float(params.get("at_tol", 0) or 0):
+                    continue
+            # A rule can also be scoped by how long a level has held, and that scope is generic for
+            # the same reason the price is: the heatmap's hold-alert asks for minutes, and an event
+            # that does not say how long it held is no evidence for it.
+            hold_s = float(params.get("min_age_s") or 0)
+            if hold_s > 0:
+                held_ms = _held_ms_of(payload)
+                if held_ms is None or held_ms < hold_s * 1000:
                     continue
             if not self._passes(rule.kind, params, payload):
                 continue
@@ -298,6 +316,10 @@ class AlertEngine:
             return float(get("strength", 0) or 0) >= float(params.get("min_strength", 0) or 0)
         if kind in ("heat_pull", "heat_stack"):
             return float(get("size", 0) or 0) >= float(params.get("min_size", 0) or 0)
+        if kind == "wall_age":
+            # the same size floor the heatmap's hold-alert writes (it defaults it to 80 % of the
+            # selected level), on a kind whose event is the level still holding
+            return float(get("size", 0) or 0) >= float(params.get("min_size", 0) or 0)
         if kind == "wall":
             return float(get("size", 0) or 0) >= float(params.get("min_size", 0) or 0)
         if kind == "vwap_cross":
@@ -335,6 +357,14 @@ class AlertEngine:
             return f"{symbol}: {get('kind')} CVD divergence — {get('note')}"
         if k in ("heat_pull", "heat_stack"):
             return f"{symbol}: {get('detail', k)} @ {get('price')}"
+        if k == "wall_age":
+            detail = get("detail", "") or ""
+            if not detail:
+                held = get("held_ms")
+                detail = (f"held {float(held) / 60000.0:.1f} min"
+                          if isinstance(held, (int, float)) and not isinstance(held, bool) and held
+                          else "level still holding")
+            return f"{symbol}: {detail} @ {get('price')}"
         if k == "vwap_cross":
             return (f"{symbol}: price crossed {'above' if get('side') == 'above' else 'below'} VWAP "
                     f"({float(get('ticks', 0)):+.2f} ticks, VWAP {get('vwap')})")

@@ -29,9 +29,10 @@ from __future__ import annotations
 import math
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
+from orderflow_system.atlas.clock import as_epoch_ms
 from orderflow_system.data.models import OrderbookSnapshot, Tick
 from orderflow_system.data.enums import as_value
 
@@ -40,32 +41,6 @@ from orderflow_system.data.enums import as_value
 
 def _side(tick: Tick) -> str:
     return as_value(tick.side)
-
-
-def _as_epoch_ms(value: Any) -> int:
-    """Normalise a venue timestamp: seconds → ms, and reject non-clocks.
-
-    Two traps live here, both seen with real Bybit data:
-
-    * the deeper (``orderbook.200``) feed stamps its snapshots in **seconds** while
-      the trade feed uses milliseconds;
-    * the same snapshot can carry the book's **update id** (``u``) as its timestamp —
-      an integer of ~1e8 that is not a clock at all. Treating it as one made every
-      book look decades stale, which silently disabled the tape classification.
-
-    Anything that is not plausible as a 2020-or-later epoch is replaced with now.
-    """
-    try:
-        ms = int(value)
-    except (TypeError, ValueError):
-        return int(time.time() * 1000)
-    if ms <= 0:
-        return int(time.time() * 1000)
-    if ms < 10_000_000_000:              # seconds (2286-11) → ms
-        ms *= 1000
-    if ms < 1_577_000_000_000:           # before 2020-01-01 → not a clock (update id)
-        return int(time.time() * 1000)
-    return ms
 
 
 @dataclass
@@ -186,7 +161,7 @@ class ParticipantIntent:
     # ── ingest ────────────────────────────────────────────────
     def on_orderbook(self, snapshot: OrderbookSnapshot, ts_ms: Optional[int] = None) -> dict[str, Any]:
         """Update pressure, depth changes and pulled-size watching. Returns alerts."""
-        ts = _as_epoch_ms(ts_ms or snapshot.timestamp_ms)
+        ts = as_epoch_ms(ts_ms or snapshot.timestamp_ms)
         if not self._started_ms:
             self._started_ms = ts
         self.version += 1
@@ -293,7 +268,7 @@ class ParticipantIntent:
 
     def on_tick(self, tick: Tick) -> dict[str, Any]:
         """Update tape quality, aggression buckets, absorption and traps."""
-        ts = _as_epoch_ms(tick.timestamp_ms)
+        ts = as_epoch_ms(tick.timestamp_ms)
         if not self._started_ms:
             self._started_ms = ts
         self.version += 1

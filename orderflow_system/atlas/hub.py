@@ -274,7 +274,12 @@ class FeatureHub:
     def on_orderbook(self, symbol: str, snapshot: OrderbookSnapshot) -> None:
         feats = self.ensure(symbol)
         self.counters["orderbooks"] += 1
-        feats.heatmap.on_orderbook(snapshot)
+        # The depth map's own detections are events too. `_dispatch` has mapped "pull"/"stack" to
+        # their heat kinds since the atlas package landed, but nothing ever called it with those
+        # kinds — so heat_pull / heat_stack / wall_age rules, including every rule the heatmap's
+        # alert buttons create, could not fire. What the map records is what gets dispatched.
+        for event in feats.heatmap.on_orderbook(snapshot):
+            self._dispatch(symbol, event.kind, event)
         # participants' intent: DOM pressure + pulled size, both read from this book
         events = feats.intent.on_orderbook(snapshot)
         for ev in events.get("intent_pressure", []):
@@ -295,7 +300,7 @@ class FeatureHub:
         self._dispatch(symbol, "liquidation", {"price": price, "size": size, "side": side, "ts_ms": ts_ms})
 
     def on_block_trade(self, symbol: str, price: float, size: float, side: str, ts_ms: int) -> None:
-        feats = self.ensure(symbol)
+        self.ensure(symbol)
         self.counters["blocks"] += 1
         payload = {"price": price, "size": size, "side": side, "ts_ms": ts_ms, "multiple": 3.0, "exchange_block": True}
         self._dispatch(symbol, "block_trade", payload)

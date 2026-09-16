@@ -22,6 +22,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from orderflow_system.atlas.clock import as_epoch_ms
 from orderflow_system.data.models import OrderbookSnapshot, Tick
 from orderflow_system.data.enums import as_value
 
@@ -121,16 +122,18 @@ class TradeDetector:
         self._median_cache = 0.0
         self._since_median = 0
         self._last_book_ms = 0
+        #: the newest clock this detector has seen from EITHER feed — the fallback for a stamp
+        #: that is not a clock (the book's update id), so a duration never goes backwards
+        self._last_event_ms = 0
         self.version = 0
 
     # ── booking ───────────────────────────────────────────────────
     def on_orderbook(self, snapshot: OrderbookSnapshot, ts_ms: Optional[int] = None) -> dict[str, Any]:
         """Refresh the resting-size map and look for refills of eaten levels."""
-        ts = int(ts_ms or snapshot.timestamp_ms or 0)
-        if ts <= 0:
-            return {}
+        ts = as_epoch_ms(ts_ms or snapshot.timestamp_ms, fallback_ms=self._last_event_ms or None)
         self.version += 1
         self._last_book_ms = ts
+        self._last_event_ms = max(self._last_event_ms, ts)
         fresh: dict[float, float] = {}
         for rows in (snapshot.bids[:LEVELS_TRACKED], snapshot.asks[:LEVELS_TRACKED]):
             for level in rows:
@@ -187,8 +190,9 @@ class TradeDetector:
             return {}
         if price <= 0 or size <= 0:
             return {}
-        ts = int(tick.timestamp_ms or 0)
+        ts = as_epoch_ms(tick.timestamp_ms, fallback_ms=self._last_event_ms or None)
         self.version += 1
+        self._last_event_ms = max(self._last_event_ms, ts)
         self._prints.append(size)
         self._since_median += 1
 

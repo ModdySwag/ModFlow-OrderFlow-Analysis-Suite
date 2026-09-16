@@ -30,11 +30,11 @@ tick size so the heatmap aligns exactly with the footprint chart.
 from __future__ import annotations
 
 import math
-import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
+from orderflow_system.atlas.clock import as_epoch_ms
 from orderflow_system.data.models import OrderbookSnapshot, Tick
 
 
@@ -66,32 +66,15 @@ class HeatColumn:
 class LevelEvent:
     """Something noteworthy that happened at a price level."""
 
-    kind: str            # wall | pull | stack | iceberg | stop_run | sweep
+    kind: str            # wall | pull | stack | iceberg | stop_run | sweep | wall_age
     price: float
     ts_ms: int
     size: float
     detail: str = ""
     direction: str = ""  # bid | ask | buy | sell
-
-
-#: Values below this are not plausible epoch milliseconds (≈ 2001-09-09).
-_EPOCH_MS_FLOOR = 1_000_000_000_000
-
-
-def _as_epoch_ms(value: Optional[int]) -> int:
-    """Normalise a timestamp to real wall-clock milliseconds.
-
-    The base repo's Bybit feed stores Bybit's ``u`` *update sequence id* in
-    ``OrderbookSnapshot.timestamp_ms`` — a number in the thousands, not a clock.
-    Bucketing raw by that value collapses the heatmap into ~50 columns per
-    second, so anything implausible is replaced with the current time.
-    """
-    now = int(time.time() * 1000)
-    try:
-        ts = int(value or 0)
-    except (TypeError, ValueError):
-        return now
-    return ts if ts >= _EPOCH_MS_FLOOR else now
+    #: how long the level had held when this fired (wall_age only, 0.0 elsewhere) — a rule's
+    #: `min_age_s` scope reads it, and the alert message says it in words.
+    held_ms: float = 0.0
 
 
 class DepthHeatmap:
@@ -152,8 +135,16 @@ class DepthHeatmap:
         self.snapshot_builds = 0
 
     # ── ingest ────────────────────────────────────────────────
-    def on_orderbook(self, snapshot: OrderbookSnapshot, ts_ms: Optional[int] = None) -> None:
-        ts = _as_epoch_ms(ts_ms or snapshot.timestamp_ms)
+    def on_orderbook(self, snapshot: OrderbookSnapshot, ts_ms: Optional[int] = None) -> list[LevelEvent]:
+        """Fold one book snapshot in, and RETURN the level events it recorded.
+
+        The events used to stop here: the map kept them for its own payload while the alert engine
+        never saw one, so a rule of kind `heat_pull` / `heat_stack` / `wall_age` — every rule the
+        heatmap's own alert buttons create — could not fire at all. The hub dispatches what this
+        returns (hub.on_orderbook), which is what makes those kinds live.
+        """
+        ts = as_epoch_ms(ts_ms or snapshot.timestamp_ms)
+        recorded: list[LevelEvent] = []
         self._version += 1
         col = self._column(ts)
         col.best_bid = snapshot.best_bid
@@ -175,6 +166,14 @@ class DepthHeatmap:
         for price, cur in levels.items():
             old = self._prev.get(price)
             if cur.total >= threshold:
+                # §56 carry-over: a level ENTERING the band is the `wall` event rules of kind
+                # `wall` wait for. Entry-triggered (previous size below the same threshold), so a
+                # standing wall fires once and the hold that follows stays `wall_age`'s business.
+                if old is None or old.total < threshold:
+                    share = cur.total / max(1e-9, sum(lv.total for lv in levels.values()))
+                    recorded.append(self._record("wall", price, ts, cur.total,
+                                                 f"wall — {share * 100:.0f}% of visible resting size",
+                                                 "bid" if cur.bid >= cur.ask else "ask"))
                 self._walls[price] = cur.total
                 self._wall_seen[price] = ts
                 # Freshness and duration are different questions. _wall_seen answers "is it
@@ -184,25 +183,27 @@ class DepthHeatmap:
                 held_ms = ts - began
                 if held_ms >= self.wall_age_ms and ts - self._wall_age_fired.get(price, 0) >= self.wall_age_ms:
                     self._wall_age_fired[price] = ts
-                    self._record("wall_age", price, ts, cur.total,
-                                 f"held {held_ms / 60000.0:.1f} min", "bid" if cur.bid >= cur.ask else "ask")
+                    recorded.append(self._record("wall_age", price, ts, cur.total,
+                                                 f"held {held_ms / 60000.0:.1f} min",
+                                                 "bid" if cur.bid >= cur.ask else "ask", held_ms=held_ms))
             else:
                 self._wall_first.pop(price, None)     # the streak broke
             if old is None:
                 continue
             old_total, new_total = old.total, cur.total
             if old_total > 0 and new_total >= old_total * self.stack_pct and new_total >= threshold:
-                self._record("stack", price, ts, new_total, f"+{new_total - old_total:.2f} stacked", "bid" if cur.bid >= cur.ask else "ask")
+                recorded.append(self._record("stack", price, ts, new_total, f"+{new_total - old_total:.2f} stacked", "bid" if cur.bid >= cur.ask else "ask"))
             if old_total > 0 and new_total <= old_total * (1 - self.pull_pct) and old_total >= threshold:
                 near = self._price_is_near(price)
                 if near:
-                    self._record("pull", price, ts, old_total, f"-{old_total - new_total:.2f} pulled near price", "bid" if old.bid >= old.ask else "ask")
+                    recorded.append(self._record("pull", price, ts, old_total, f"-{old_total - new_total:.2f} pulled near price", "bid" if old.bid >= old.ask else "ask"))
 
         self._prev = levels
         col.levels.update(levels)
+        return recorded
 
     def on_tick(self, tick: Tick) -> None:
-        ts = _as_epoch_ms(tick.timestamp_ms)
+        ts = as_epoch_ms(tick.timestamp_ms)
         self._version += 1
         col = self._column(ts)
         price = self._bucket(tick.price)
@@ -404,9 +405,13 @@ class DepthHeatmap:
             return False
         return abs(price - self._last_tick_price) <= self.pull_near_ticks * self.tick_size
 
-    def _record(self, kind: str, price: float, ts: int, size: float, detail: str, direction: str) -> None:
+    def _record(self, kind: str, price: float, ts: int, size: float, detail: str, direction: str,
+                held_ms: float = 0.0) -> LevelEvent:
         self._version += 1
-        self._events.append(LevelEvent(kind=kind, price=price, ts_ms=ts, size=round(size, 6), detail=detail, direction=direction))
+        event = LevelEvent(kind=kind, price=price, ts_ms=ts, size=round(size, 6), detail=detail,
+                           direction=direction, held_ms=float(held_ms or 0))
+        self._events.append(event)
+        return event
 
     def _visible_range(self, cols: Iterable[HeatColumn]) -> tuple[float, float]:
         prices: list[float] = []

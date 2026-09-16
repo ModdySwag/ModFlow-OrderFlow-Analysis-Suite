@@ -984,6 +984,32 @@ def test_trade_detector_marks_a_refill_and_ignores_an_empty_level():
     assert empty.on_tick(tick(NOW() + 5, 100.0, 99.0, "buy")) == {}, "no depth to eat"
 
 
+def test_a_refill_latency_is_a_duration_not_a_sequence_number():
+    """The book feed stamps snapshots with the venue's update id while the print feed stamps epoch
+    milliseconds, and subtracting one from the other made every refill read "refilled
+    -1789344734.5s after being eaten" in the alert log (measured live). `atlas.clock` is the one
+    reading of a venue timestamp; a stamp that is not a clock falls back to the newest clock this
+    detector has seen, so a duration never goes backwards."""
+    from orderflow_system.atlas.clock import as_epoch_ms
+    from orderflow_system.atlas.tradedepth import TradeDetector
+
+    assert as_epoch_ms(1_789_495_946_839) == 1_789_495_946_839        # ms stays ms
+    assert as_epoch_ms(1_789_495_946) == 1_789_495_946_000            # seconds become ms
+    assert as_epoch_ms(3_212_004) > 1_577_000_000_000                 # an update id is not a clock
+    assert as_epoch_ms(None) > 1_577_000_000_000
+
+    d = TradeDetector("T", tick_size=0.1, min_share=0.2, size_mult=2.0, refill_ms=5000)
+    now = NOW()
+    d.on_orderbook(_book(now, [40.0, 5.0], [1.0, 1.0]))
+    for _ in range(20):
+        d.on_tick(tick(now, 100.0, 0.1, "sell"))
+    d.on_tick(tick(now + 100, 100.0, 20.0, "sell"))                   # eats half the level
+    out = d.on_orderbook(_book(3_212_005, [38.0, 5.0], [1.0, 1.0]))   # a sequence-stamped book
+    assert out["depth_refill"], "the refill is still detected"
+    lat = out["depth_refill"][0]["refill_ms"]
+    assert 0 <= lat <= 5000, f"a refill latency of {lat} ms is not a duration"
+
+
 def test_delta_bars_close_on_trend_and_reversal():
     """Delta bars are built from effort, not time (the reference platform Price-On-Volume idea)."""
     from orderflow_system.atlas.frames import DeltaBars
