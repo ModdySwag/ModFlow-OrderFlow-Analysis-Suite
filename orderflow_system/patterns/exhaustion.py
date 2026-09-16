@@ -98,12 +98,18 @@ class ExhaustionDetector:
         if not vol_declining:
             return None
 
-        # Delta trend should also be declining (less buying conviction)
+        # Weakness gate: return None only when neither axis shows fading aggression. The
+        # delta slope is sign-mirrored between the two branches on purpose: an up-trend's
+        # delta is positive and fades DOWNWARD (delta_roc < 0); a down-trend's delta is
+        # negative and fades UPWARD toward zero (delta_roc > 0). Reading it as a raw
+        # "< 0" on both sides would demand *strengthening* selling for a bearish set-up —
+        # the opposite of exhaustion. The exact fire/no-fire bins are pinned by
+        # test_exhaustion_gates.py.
         vol_trend = delta_engine.get_volume_trend(lookback=n)
         delta_roc = delta_engine.get_delta_roc(lookback=n)
 
         if vol_trend >= 0 and delta_roc >= 0:
-            return None  # Both must show some weakness
+            return None  # neither axis weakening — not exhaustion
 
         # Optional: contrarian imbalance at extreme (sellers at the top)
         contrarian_bonus = 0
@@ -173,8 +179,11 @@ class ExhaustionDetector:
         vol_trend = delta_engine.get_volume_trend(lookback=n)
         delta_roc = delta_engine.get_delta_roc(lookback=n)
 
+        # Same weakness gate as the bullish branch, delta sign mirrored: here delta_roc > 0
+        # (delta rising toward zero from its negative down-trend base) is the "selling
+        # pressure fading" form. See _check_bullish_exhaustion for the full rationale.
         if vol_trend >= 0 and delta_roc <= 0:
-            return None
+            return None  # neither axis weakening — not exhaustion
 
         contrarian_bonus = 0
         if self.config.requires_contrarian_imbalance and footprint.levels:

@@ -20,14 +20,13 @@ Logic:
 from __future__ import annotations
 
 import time
-from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from orderflow_system.data.models import (
-    Tick, Candle, Signal, SignalType, Side, FootprintLevel,
+    Candle, Signal, SignalType, Side,
 )
-from orderflow_system.analytics.footprint import FootprintBar, FootprintEngine
+from orderflow_system.analytics.footprint import FootprintBar
 from orderflow_system.analytics.delta import DeltaResult
 from orderflow_system.config.settings import AbsorptionConfig
 
@@ -157,21 +156,31 @@ class AbsorptionDetector:
             return None
 
         now_ms = int(time.time() * 1000)
-        tick_size = self.tick_size
+        # True tick steps are the displacement unit (see the gate below): a level N ticks
+        # from the current price is N footprint levels away — the unit every instrument
+        # with tick >= 0.01 has always been measured in. The old max(tick_size, 0.01)
+        # floor redefined it below tick 0.01 (on EURUSD "2 ticks" meant 2,000). A
+        # non-positive tick cannot come from config; the 1-cent fallback keeps both the
+        # gate and the event keying away from a divide-by-zero.
+        tick_size = self.tick_size if self.tick_size and self.tick_size > 0 else 0.01
 
         for price, lv in footprint.levels.items():
             total = lv.total_volume
             if total < self.config.big_trade_filter:
                 continue
 
-            # Check: high volume at this level but price displaced little
-            price_disp = abs(current_price - price) / max(tick_size, 0.01)
+            # Check: high volume at this level but price displaced little (true ticks)
+            price_disp = abs(current_price - price) / tick_size
             effort_high = total >= self.config.min_aggressive_volume
             result_low = price_disp <= self.config.max_price_displacement_ticks
 
             if effort_high and result_low:
-                # Track repeated absorption
-                rounded = round(price, 4)
+                # Track repeated absorption, keyed by the instrument's tick-rounded price —
+                # the same bucketing footprint/volume-profile use everywhere else. The old
+                # fixed round(price, 4) merged two legitimately different levels (and
+                # inflated the attempts counter with them) on fine-tick instruments
+                # (forex 1e-5, DOGE/TRX) whose adjacent levels sit closer than 1e-4.
+                rounded = round(round(price / tick_size) * tick_size, 10)
                 if rounded not in self._active_absorptions:
                     self._active_absorptions[rounded] = AbsorptionEvent(
                         price=rounded,

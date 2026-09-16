@@ -29,9 +29,12 @@ _BASE_PRICES = {
     "EURGBP": 0.8550, "EURJPY": 164.20, "GBPJPY": 192.10,
     # Metals
     "XAUUSDT": 2920.0, "XAGUSD": 32.50,
-    # Indices
+    # Energy
+    "USOIL": 71.50, "UKOIL": 75.80,
+    # Indices (all nine shipped ones — a demo tour must not hit "no demo data" on any)
     "NAS100USDT": 21450.0, "SP500": 6100.0, "DJ30": 44200.0,
-    "DAX40": 18900.0, "UK100": 8350.0,
+    "DAX40": 18900.0, "UK100": 8350.0, "NIKKEI225": 39800.0,
+    "CAC40": 7820.0, "ASX200": 8480.0, "HK50": 23600.0,
     # Crypto (every shipped major, so enabling one in demo mode shows a sane chart
     # instead of the 1000.0 placeholder — the fallback is for symbols nobody listed)
     "BTCUSDT": 98500.0, "ETHUSDT": 2680.0, "SOLUSDT": 195.0,
@@ -45,14 +48,20 @@ _BASE_PRICES = {
     "NVDA": 138.0, "META": 680.0, "GOOGL": 185.0, "SPY": 560.0, "QQQ": 480.0,
 }
 
+# ── Demo tick sizes: chosen so the demo chart reads at a human scale (a live bank tick of
+# 1e-5 on EURUSD would pack hundreds of levels into a single demo candle). Like _BASE_PRICES
+# these are demo content, not config; `models_symbol` is the guard that keeps them honest.
 _TICK_SIZES = {
     # Forex
     **{s: 0.0001 for s in ["EURUSD","GBPUSD","AUDUSD","NZDUSD","USDCAD","USDCHF","EURGBP"]},
     **{s: 0.01 for s in ["USDJPY","EURJPY","GBPJPY"]},
     # Metals
     "XAUUSDT": 0.10, "XAGUSD": 0.01,
+    # Energy
+    "USOIL": 0.01, "UKOIL": 0.01,
     # Indices
     "NAS100USDT": 0.5, "SP500": 0.25, "DJ30": 1.0, "DAX40": 0.5, "UK100": 0.5,
+    "NIKKEI225": 1.0, "CAC40": 0.5, "ASX200": 0.5, "HK50": 1.0,
     # Crypto
     "BTCUSDT": 0.5, "ETHUSDT": 0.1, "SOLUSDT": 0.01, "XRPUSDT": 0.0001, "BNBUSDT": 0.1,
     **{s: 0.0001 for s in ["DOGEUSDT", "ADAUSDT", "TRXUSDT", "ARBUSDT", "OPUSDT", "POLUSDT", "SUIUSDT"]},
@@ -122,7 +131,6 @@ def demo_candles(symbol: str, tf: int = 60, range_s: int = 86400):
     """Generate realistic OHLC candle data — stable per symbol/tf/range."""
     rng = _stable_rng(symbol, tf, range_s)
     base = _base_price(symbol)
-    tick = _tick_size(symbol)
     now = int(time.time())
     start = now - range_s
     n_candles = range_s // tf
@@ -232,7 +240,6 @@ def demo_bias(symbol: str):
     """Generate daily bias data."""
     rng = _stable_rng(symbol, 0, 1)
     base = _base_price(symbol)
-    tick = _tick_size(symbol)
     direction = rng.choice(["long", "short", "neutral"])
     confidence = rng.randint(40, 95)
     shape = rng.choice(["P-shape", "D-shape", "b-shape", "Balanced"])
@@ -377,7 +384,6 @@ def demo_scanner():
 def demo_markers(symbol: str):
     """Generate a few chart markers for demo mode."""
     rng = _stable_rng(symbol, 0, 4)
-    base = _base_price(symbol)
     now = int(time.time())
     markers = []
 
@@ -389,7 +395,7 @@ def demo_markers(symbol: str):
         ("DIV", "#ff9800", "circle", "aboveBar"),
     ]
 
-    for i in range(8):
+    for _ in range(8):
         t, color, shape, pos = rng.choice(types)
         markers.append({
             "time": now - rng.randint(300, 80000),
@@ -652,7 +658,6 @@ def demo_signals():
         model = rng.choice(_models)
 
         base = _base_price(sym)
-        tick = _tick_size(sym)
         entry = round(base + rng.uniform(-base * 0.001, base * 0.001), 5)
         sl_dist = base * rng.uniform(0.001, 0.003)
         tp_dist = sl_dist * rng.uniform(1.5, 3.5)

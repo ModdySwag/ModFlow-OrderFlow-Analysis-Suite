@@ -20,11 +20,11 @@ from typing import Any, Optional
 from orderflow_system.config import settings
 from orderflow_system.config.settings import (
     DataSource,
-    Instrument,
     InstrumentConfig,
     get_all_configs,
 )
 from orderflow_system.desktop import config_store
+from orderflow_system.atlas import freshness as fresh
 
 logger = logging.getLogger(__name__)
 
@@ -349,10 +349,30 @@ def select_instruments(cfg: dict[str, Any]) -> tuple[list[InstrumentConfig], lis
     return out, skipped
 
 
+def clamp_data_settings(cfg: dict[str, Any]) -> tuple[int, int, int]:
+    """R4/R5: (session_start_hour, retention_days, prune_interval_hours) from the config's
+    `data` block, each clamped — junk falls back to the documented defaults, so a hand-edited
+    config.json can never break the session maths or the retention job. Pure."""
+    data_cfg = cfg.get("data") or {}
+
+    def _clamped(key: str, lo: int, hi: int, default: int) -> int:
+        try:
+            return max(lo, min(hi, int(data_cfg.get(key, default))))
+        except (TypeError, ValueError):
+            return default
+
+    return (_clamped("session_start_hour", 0, 23, 0),
+            _clamped("retention_days", 0, 3650, 7),
+            _clamped("prune_interval_hours", 1, 168, 6))
+
+
 def apply_settings(cfg: dict[str, Any]) -> None:
     """Push the JSON config into the repo's settings module (runtime, no edits)."""
     settings.DATA_SOURCE = DataSource(cfg.get("data_source", "bybit"))
     settings.DB_PATH = str(config_store.db_path())
+    # R4/R5: the `data` block, clamped by the one pure helper (tested directly, so the tests
+    # never have to call apply_settings and disturb global state).
+    settings.SESSION_START_HOUR, settings.RETENTION_DAYS, settings.PRUNE_INTERVAL_HOURS = clamp_data_settings(cfg)
     settings.LOG_LEVEL = str(cfg.get("logging", {}).get("level", "INFO")).upper()
 
     fp = ((cfg.get("atlas") or {}).get("footprint") or {})
@@ -418,20 +438,36 @@ def _verify_candle_wiring(system) -> None:
     pass, which persists it and broadcasts ``candle`` / ``delta``. Keeping the old wrapper
     as well would persist and broadcast every candle twice.
 
-    So all that is left here is an assertion: if a pipeline is missing the callback the
-    dashboard would silently fall back to demo candle data — say so loudly instead.
+    So all that is left here is an assertion. Presence alone is not enough — ``_on_candle_close``
+    (the analytics pass) and ``_on_candle_closed`` (the persistence pass) differ by one letter,
+    and a future edit that wires the wrong one would run analytics twice or persist twice.
+    So check *identity*: the analytics callback must sit on the pipeline's own candle builder,
+    and the persistence wire must point at the orchestrator's own ``_on_candle_closed``.
     """
-    missing = [
-        sym for sym, pipeline in system.pipelines.items()
-        if getattr(pipeline, "_on_candle_closed_callback", None) is None
-    ]
+    missing: list[str] = []
+    wrong: list[str] = []
+    for sym, pipeline in system.pipelines.items():
+        if pipeline._on_candle_close != getattr(pipeline.candle_builder, "on_candle_close", None):
+            wrong.append(sym)
+        wire = getattr(pipeline, "_on_candle_closed_callback", None)
+        if wire is None:
+            missing.append(sym)
+        elif wire != system._on_candle_closed:
+            wrong.append(sym)
     if missing:
         logger.error(
             "Candle persistence NOT wired for %d pipeline(s): %s — /api/candles and the "
             "hourly volume-profile rebuild will have no data for them.",
             len(missing), ", ".join(missing),
         )
-    else:
+    if wrong:
+        logger.error(
+            "Candle wiring MIS-ROUTED for %d pipeline(s): %s — the analytics pass or the "
+            "persistence wire points at the wrong method; a closed candle could be persisted "
+            "twice or have its analytics run twice.",
+            len(wrong), ", ".join(wrong),
+        )
+    if not missing and not wrong:
         logger.info("Candle persistence + WS broadcast wired in-orchestrator for %d pipeline(s)",
                     len(system.pipelines))
 
@@ -662,6 +698,8 @@ class EngineController:
 
         keys = ("tape", "footprint", "microstructure", "candles",
                 "volume_profile", "bias", "orderbook", "scanner", "strategy")
+        recent = (getattr(system, "_recent_ticks", {}) or {}) if system is not None else {}
+        last_candles = (getattr(system, "_last_candles", {}) or {}) if system is not None else {}
         if system is None:
             endpoints = {k: "demo" for k in keys}
         else:
@@ -680,8 +718,6 @@ class EngineController:
                     return "stale"
                 return "live" if any(s is not None for s in snapshots) else "warming"
 
-            recent = getattr(system, "_recent_ticks", {}) or {}
-            last_candles = getattr(system, "_last_candles", {}) or {}
             signals = getattr(system, "_recent_signals", {}) or {}
             pipelines = list(system.pipelines.values())
             has_candles = bool(last_candles)
@@ -699,20 +735,48 @@ class EngineController:
         overall = "demo"
         if running:
             overall = "live" if any(v == "live" for v in endpoints.values()) else "warming"
+        #: P1-10: the age of each endpoint's newest sample, from the same clocks the status route
+        #: exposes. The orderbook's timestamp is the VENUE's own clock (not comparable to ours,
+        #: see atlas/api.py's note), so its age is honestly unknown — never invented. Everything
+        #: with no clock at all reports age_known: false the same way.
+        #: `_last_candles` holds the newest CLOSED 1m candle (main.py stores it on close), so its
+        #: OPEN time is 60-120 s "old" while perfectly healthy — the age is measured from the
+        #: CLOSE (open + the interval), or every candle panel would read stale on a live feed.
+        newest_tick = max((int(getattr(d[-1], "timestamp_ms", 0)) for d in recent.values() if d), default=0)
+        newest_open = max((int(getattr(c, "timestamp_ms", 0)) for c in last_candles.values()), default=0)
+        newest_candle = (newest_open + CANDLE_INTERVAL_MS) if newest_open else 0
+        age = {
+            "tape": fresh.assess("trades", newest_tick),
+            "microstructure": fresh.assess("trades", newest_tick),
+            "footprint": fresh.assess("candles", newest_candle),
+            "candles": fresh.assess("candles", newest_candle),
+            "scanner": fresh.assess("candles", newest_candle),
+            "strategy": fresh.assess("candles", newest_candle),
+            "volume_profile": fresh.assess("candles", newest_candle),
+            "bias": fresh.assess("candles", newest_candle),
+            "orderbook": fresh.assess("depth", 0),
+        }
         return {
             "state": self._state,
             "overall": overall,
             "endpoints": endpoints,
+            "age": age,
             "symbols": self._symbols,
             "source": self._source,
         }
 
     def status(self) -> dict[str, Any]:
         per_symbol = []
+        #: P1-10: the same clocks live_status() reads — the newest tick and the newest candle per
+        #: symbol, so every panel bound to this route can show the AGE of what it displays.
+        recent = (getattr(self._system, "_recent_ticks", {}) or {}) if self._system is not None else {}
+        last_candles = (getattr(self._system, "_last_candles", {}) or {}) if self._system is not None else {}
         if self._system is not None:
             for sym, pipeline in self._system.pipelines.items():
                 stats = pipeline.stats
                 trade = self._system.aggregator.get_active_trade(sym)
+                ticks_deque = recent.get(sym)
+                candle = last_candles.get(sym)
                 per_symbol.append({
                     "symbol": sym,
                     "price": stats.get("price", 0.0),
@@ -721,6 +785,8 @@ class EngineController:
                     "cum_delta": stats.get("cum_delta", 0.0),
                     "trade_phase": getattr(getattr(trade, "phase", None), "value", "none"),
                     "trade_direction": getattr(trade, "direction", "none"),
+                    "last_tick_ms": int(getattr(ticks_deque[-1], "timestamp_ms", 0)) if ticks_deque else 0,
+                    "last_candle_ms": int(getattr(candle, "timestamp_ms", 0)) if candle is not None else 0,
                 })
         return {
             "state": self._state,
@@ -734,6 +800,11 @@ class EngineController:
             "per_symbol": per_symbol,
             "ws_clients": getattr(self._system, "ws_manager", None).client_count if self._system else 0,
         }
+
+
+#: The engine closes one '1m' candle per interval (main.py stores the newest CLOSED candle as
+#: `_last_candles[sym]`, so its timestamp is the OPEN time and the close is +60 s).
+CANDLE_INTERVAL_MS = 60_000
 
 
 engine = EngineController()

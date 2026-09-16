@@ -23,8 +23,8 @@ from __future__ import annotations
 from typing import Optional
 
 from orderflow_system.data.models import Candle, Signal, SignalType, Side
-from orderflow_system.analytics.delta import DeltaResult, DeltaEngine
-from orderflow_system.analytics.footprint import FootprintBar, FootprintEngine
+from orderflow_system.analytics.delta import DeltaResult
+from orderflow_system.analytics.footprint import FootprintBar
 from orderflow_system.config.settings import InitiativeConfig
 
 
@@ -78,9 +78,12 @@ class InitiativeDetector:
         if vol_accel < self.config.volume_acceleration_min:
             return None
 
-        # 3. Price displacement (candle body must be meaningful)
-        tick_size = self.tick_size  # Use instrument tick size
-        price_displacement = candle.body_size / max(tick_size, 0.01)
+        # 3. Price displacement (candle body must be meaningful), in TRUE tick steps —
+        #    the unit every tick >= 0.01 instrument has always been measured in. The old
+        #    max(tick_size, 0.01) floor made "3 ticks" a ~300-pip body on EURUSD, so this
+        #    signal could never fire there. Non-positive tick: fall back, never crash.
+        tick_size = self.tick_size if self.tick_size and self.tick_size > 0 else 0.01
+        price_displacement = candle.body_size / tick_size
         if price_displacement < self.config.min_price_displacement_ticks:
             return None
 
