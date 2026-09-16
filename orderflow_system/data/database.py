@@ -8,10 +8,9 @@ from __future__ import annotations
 import aiosqlite
 import json
 import logging
-from pathlib import Path
 from typing import Optional
 
-from orderflow_system.data.models import Tick, Side, Candle, Signal, SignalType, VolumeProfileResult
+from orderflow_system.data.models import Tick, Side, Candle, FootprintLevel, Signal, VolumeProfileResult
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +158,115 @@ class Database:
 
     # ── Candles ──
 
+    # ── R5: storage retention ─────────────────────────────────────────────
+
+    async def prune_ticks(self, cutoff_ms: int, instruments: list[str], batch: int = 50_000) -> int:
+        """Delete ticks older than *cutoff_ms*; returns the rows deleted.
+
+        Per instrument (the composite index leads with `instrument`), in bounded batches —
+        SQLite here has no `DELETE … LIMIT`, so each batch deletes by rowid subquery and
+        commits, keeping the writer's lock windows short.
+        """
+        if not self._db or cutoff_ms <= 0:
+            return 0
+        total = 0
+        for inst in instruments or []:
+            while True:
+                cur = await self._db.execute(
+                    "DELETE FROM ticks WHERE rowid IN ("
+                    " SELECT rowid FROM ticks WHERE instrument = ? AND timestamp_ms < ? LIMIT ?)",
+                    (inst, int(cutoff_ms), int(batch)),
+                )
+                n = cur.rowcount or 0
+                await self._db.commit()
+                total += n
+                if n < batch:
+                    break
+        return total
+
+    async def tick_instruments(self) -> list[str]:
+        """Every instrument with tick rows — the prune covers the DB's own contents, not
+        just the symbols this boot happens to have enabled."""
+        if not self._db:
+            return []
+        try:
+            cur = await self._db.execute("SELECT DISTINCT instrument FROM ticks")
+            rows = await cur.fetchall()
+            return [str(r[0]) for r in rows if r and r[0]]
+        except Exception:                                  # noqa: BLE001
+            return []
+
+    async def storage_snapshot(self) -> dict:
+        """File sizes, per-table row counts and the tick span.
+
+        `COUNT(*)` over millions of rows is not free — callers cache this (the route does,
+        30 s; the prune job reports it once per pass).
+        """
+        import os
+
+        db_file = str(self.db_path)
+        out = {"db_path": db_file, "bytes": 0, "wal_bytes": 0, "tables": {},
+               "ticks": {"oldest_ms": 0, "newest_ms": 0}}
+        for suffix, key in (("", "bytes"), ("-wal", "wal_bytes")):
+            try:
+                out[key] = os.path.getsize(db_file + suffix)
+            except OSError:
+                out[key] = 0
+        if not self._db:
+            return out
+        for table in ("ticks", "candles", "volume_profiles", "signals", "trade_journal"):
+            try:
+                cur = await self._db.execute(f"SELECT COUNT(*) FROM {table}")
+                row = await cur.fetchone()
+                out["tables"][table] = int(row[0]) if row else 0
+            except Exception:                              # noqa: BLE001 — a missing table is 0-ish, not fatal
+                out["tables"][table] = -1
+        try:
+            cur = await self._db.execute("SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM ticks")
+            row = await cur.fetchone()
+            out["ticks"] = {"oldest_ms": int(row[0] or 0), "newest_ms": int(row[1] or 0)}
+        except Exception:                                  # noqa: BLE001
+            pass
+        return out
+
+    async def ensure_incremental_autovacuum(self) -> str:
+        """Make the DB reclaimable: `PRAGMA incremental_vacuum` is a NO-OP until the file is
+        converted once with a full VACUUM (`auto_vacuum=INCREMENTAL`). Returns 'already',
+        'converted' or 'failed' — reported, never faked; a locked DB just retries next
+        interval."""
+        if not self._db:
+            return "failed"
+        try:
+            cur = await self._db.execute("PRAGMA auto_vacuum")
+            row = await cur.fetchone()
+            if row and int(row[0]) == 2:
+                return "already"
+            await self._db.commit()
+            await self._db.execute("PRAGMA auto_vacuum=INCREMENTAL")
+            await self._db.execute("VACUUM")
+            await self._db.commit()
+            cur = await self._db.execute("PRAGMA auto_vacuum")
+            row = await cur.fetchone()
+            return "converted" if row and int(row[0]) == 2 else "failed"
+        except Exception as exc:                           # noqa: BLE001
+            logger.warning("auto-vacuum conversion failed (retries next prune): %s", exc)
+            return "failed"
+
+    async def vacuum_incremental(self) -> None:
+        """Hand freed pages back to the OS — bounded work after a prune."""
+        if not self._db:
+            return
+        try:
+            await self._db.execute("PRAGMA incremental_vacuum")
+            await self._db.commit()
+            # The vacuum's own traffic parks in the WAL until a checkpoint; without this the
+            # file "shrinks" while the footprint on disk does not (measured: 677 MB of WAL
+            # after the first real prune on the live DB). TRUNCATE hands the space back now.
+            await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            await self._db.commit()
+        except Exception as exc:                           # noqa: BLE001
+            logger.warning("incremental vacuum failed: %s", exc)
+
     async def insert_candle(self, instrument: str, timeframe: str, candle: Candle):
         fp_json = json.dumps({
             str(price): {"bid": lvl.bid_volume, "ask": lvl.ask_volume}
@@ -182,7 +290,7 @@ class Database:
     ) -> list[Candle]:
         cursor = await self._db.execute(
             "SELECT timestamp_ms, open, high, low, close, volume, "
-            "buy_volume, sell_volume, tick_count FROM candles "
+            "buy_volume, sell_volume, tick_count, footprint_json FROM candles "
             "WHERE instrument = ? AND timeframe = ? "
             "AND timestamp_ms >= ? AND timestamp_ms <= ? "
             "ORDER BY timestamp_ms",
@@ -193,9 +301,38 @@ class Database:
             Candle(
                 timestamp_ms=r[0], open=r[1], high=r[2], low=r[3], close=r[4],
                 volume=r[5], buy_volume=r[6], sell_volume=r[7], tick_count=r[8],
+                footprint=self._decode_footprint(r[9]),
             )
             for r in rows
         ]
+
+    @staticmethod
+    def _decode_footprint(raw: Optional[str]) -> dict[float, FootprintLevel]:
+        """Deserialize the footprint JSON that insert_candle wrote.
+
+        Without this the DB round trip dropped the per-level bid/ask, so the hourly
+        volume-profile rebuild (get_candles → compute_from_candles) silently fell back to
+        distributing each candle's volume evenly across its OHLC range — a cruder profile
+        than the live path on a system that claims tick-level microstructure. Rows written
+        before this change carry '{}' or NULL: that is an empty footprint, not an error.
+        """
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            return {}
+        out: dict[float, FootprintLevel] = {}
+        for price, lv in (data or {}).items():
+            try:
+                out[float(price)] = FootprintLevel(
+                    price=float(price),
+                    bid_volume=float(lv.get("bid", 0.0) or 0.0),
+                    ask_volume=float(lv.get("ask", 0.0) or 0.0),
+                )
+            except (TypeError, ValueError, AttributeError):
+                continue
+        return out
 
     # ── Volume Profiles ──
 
