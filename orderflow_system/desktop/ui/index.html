@@ -22,6 +22,9 @@
 <link rel="stylesheet" href="/desktop/themes/contrast.css">
 <link rel="stylesheet" href="/desktop/themes/accents.css">
 <link rel="stylesheet" href="/desktop/themes/density.css">
+<!-- §79: the Help Centre's own styles — scoped to .help-*, so nothing in it restyles a panel that
+     exists without it. -->
+<link rel="stylesheet" href="/desktop/help.css">
 <script>
 /* appearance before the first paint: the config file is the record, this mirror only kills the flash
    (theme.js reads the config on load and the config wins where the two disagree) */
@@ -877,6 +880,13 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
 <script src="/desktop/news.js"></script>
 <script src="/desktop/fundamentals.js"></script>
 <script src="/desktop/options.js"></script>
+<!-- §79: the Help Centre. help-data.js is the topic corpus (pure data), help-search.js the search
+     engine (pure, pinned by help-search.selftest.js under node) and help.js the panel itself: the
+     two interfaces, the status-bar dock, the floating launcher and the About card. help.js binds F1
+     through keys.js's own map, so the key it honours is the key the hotkey sheet lists. -->
+<script src="/desktop/help-data.js"></script>
+<script src="/desktop/help-search.js"></script>
+<script src="/desktop/help.js"></script>
   <div class="statusbar">
     <span>source: <b id="statusSource">—</b></span>
     <span>workspace: <b id="statusWorkspace">default</b></span>

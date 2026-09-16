@@ -215,6 +215,7 @@
               <div class="menu-row menu-ws-list">${wsList}</div>
             </div>
             <div class="menu-group"><div class="menu-group-title">Help</div>
+              <button class="menu-item" id="menuHelpCentre"><span class="menu-label">Help Centre</span><span class="menu-hint">everything, searchable — F1 · Simple or Advanced</span></button>
               <button class="menu-item" id="menuHotkeys"><span class="menu-label">Hotkeys</span><span class="menu-hint">the full map, with scopes</span></button>
               <button class="menu-item" id="menuGuide"><span class="menu-label">Guide</span><span class="menu-hint">how the panels fit together</span></button>
             </div>
@@ -227,6 +228,11 @@
         host.querySelectorAll('[data-ws-del]').forEach((b) => { b.onclick = () => deleteWorkspace(b.dataset.wsDel); });
         if (el('menuWsSave')) el('menuWsSave').onclick = () => saveWorkspace((el('menuWsName').value || '').trim() || 'layout ' + (names.length + 1));
         if (el('menuWsReset')) el('menuWsReset').onclick = () => applyWorkspace(state.workspace, readWorkspaces()[state.workspace]);
+        if (el('menuHelpCentre')) el('menuHelpCentre').onclick = () => {
+            close();
+            if (window.OFAPHELP && typeof OFAPHELP.open === 'function') OFAPHELP.open('');
+            else showView('help');
+        };
         if (el('menuHotkeys')) el('menuHotkeys').onclick = () => { close(); showHotkeys(true); };
         if (el('menuGuide')) el('menuGuide').onclick = () => { close(); if (typeof showHelp === 'function') showHelp(); else showView('overview'); };
     }
@@ -286,9 +292,11 @@
             if (state.open && panel && !panel.contains(ev.target) && ev.target !== el('menuBtn')) close();
         });
         /* The keys that used to live here are in keys.js's map now — Escape and 1-9 in the core,
-           the palette in search.js, and this sheet's own `?` / F1 registered below. */
+           the palette in search.js, and this sheet's own `?` registered below. F1 belongs to the Help
+           Centre (§79) and is bound there, so it is not claimed twice: the first registration wins a
+           tie, which is exactly how F1 would have kept opening the hotkey sheet instead. */
         if (window.OFAPKEYS) {
-            OFAPKEYS.bind({ id: 'hotkey-sheet', keys: ['?', 'f1'], scope: 'Global',
+            OFAPKEYS.bind({ id: 'hotkey-sheet', keys: ['?'], scope: 'Global',
                 label: 'this hotkey map', run: () => showHotkeys(true) });
         }
         document.addEventListener('ofap:paused', paintStatus);

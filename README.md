@@ -5,14 +5,54 @@
 [![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](.)
 [![License](https://img.shields.io/badge/license-MIT-informational?style=for-the-badge)](LICENSE)
 [![Instruments](https://img.shields.io/badge/instruments-49-blue?style=for-the-badge)](.)
-[![Code](https://img.shields.io/badge/code-~68k%20lines-brightgreen?style=for-the-badge)](.)
-[![API](https://img.shields.io/badge/API-133%20routes-orange?style=for-the-badge)](.)
-[![Tests](https://img.shields.io/badge/tests-843%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+[![Code](https://img.shields.io/badge/code-~73k%20lines-brightgreen?style=for-the-badge)](.)
+[![API](https://img.shields.io/badge/API-138%20routes-orange?style=for-the-badge)](.)
+[![Tests](https://img.shields.io/badge/tests-881%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+
+---
+
+## See It Running
+
+Everything below is the packaged desktop app streaming the live Bybit feed — no mock-ups.
+
+![ModFlow OrderFlow Analysis Suite — tour](docs/screenshots/ofap-tour.gif)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/heatmap.png" alt="Heatmap — traded volume by price and time"></td>
+    <td width="50%"><img src="docs/screenshots/orderflow.png" alt="Order flow — the bid/ask footprint inside each candle"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/cvd.png" alt="Cumulative delta with the per-bar delta histogram"></td>
+    <td><img src="docs/screenshots/tape.png" alt="Time &amp; Sales — every print, side-coloured"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/frames.png" alt="Volume profile framing — P/b/D shapes and qualified levels"></td>
+    <td><img src="docs/screenshots/instruments.png" alt="The instrument catalogue"></td>
+  </tr>
+</table>
+
+All thirty screenshots — one per view, plus the terminal board and the Help Centre search — live in
+**[docs/SCREENSHOTS.md](docs/SCREENSHOTS.md)** with captions.
+
+---
+
+## Credit & Lineage
+
+The original **OrderFlow Analysis Pro** — the microstructure engines, the five pattern detectors,
+the volume-profile framing, the dashboard foundation — is
+**[mahmoud20138/OrderFlow-Analysis-Pro](https://github.com/mahmoud20138/OrderFlow-Analysis-Pro)**,
+MIT licensed. This distribution began from that repository (commit `b2ff4ee`) and grew into the
+desktop suite you see here; the original copyright notice is retained in [LICENSE](LICENSE)
+alongside the notice for the modifications. If the original project is useful to you,
+give it a star: **<https://github.com/mahmoud20138/OrderFlow-Analysis-Pro>**
 
 ---
 
 ## Table of Contents
 
+- [See It Running](#see-it-running)
+- [Credit & Lineage](#credit--lineage)
 - [What Is OrderFlow Analysis?](#what-is-orderflow-analysis)
 - [System Overview](#system-overview)
 - [Architecture](#architecture)
@@ -96,7 +136,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 │               │                                  │                          │
 │  ┌────────────▼──────────┐  ┌───────────────────▼────────────────────┐     │
 │  │   Telegram Alerts     │  │   FastAPI Dashboard                    │     │
-│  │   Entry/BE/Trail/Exit │  │   133 REST/WS routes + streams         │     │
+│  │   Entry/BE/Trail/Exit │  │   138 REST/WS routes + streams         │     │
 │  │   Daily Bias updates  │  │   Charts, VP, Footprint, Orderbook     │     │
 │  └───────────────────────┘  │   Scanner, Strategy Status, Tape       │     │
 │                              └───────────────────────────────────────┘     │
@@ -176,7 +216,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
  ┌──────────┐ ┌──────────┐  ┌───────────────┐
  │ Telegram │ │Dashboard │  │  Database     │
  │ Bot      │ │ FastAPI  │  │  Journal      │
- │ (201L)   │ │ (1371L)  │  │  Logging      │
+ │ (201L)   │ │ (1381L)  │  │  Logging      │
  └──────────┘ └──────────┘  └───────────────┘
 ```
 
@@ -185,7 +225,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 ```
 main.py (857L) ─── System orchestrator
     │
-    ├── config/settings.py (821L) ─── 31 instrument configs, 14 config dataclasses
+    ├── config/settings.py (822L) ─── 31 instrument configs, 14 config dataclasses
     │
     ├── data/
     │   ├── models.py (330L) ─── 9 dataclasses: Tick, Candle, Signal, FootprintLevel, TradeState...
@@ -228,7 +268,7 @@ main.py (857L) ─── System orchestrator
     │   ├── launcher.py ─── pywebview window / --headless server
     │   ├── api.py ─── /api/control/* (config, feeds, alerts, exports, layouts)
     │   ├── engine.py ─── the live pipeline host the UI reads from
-    │   └── ui/ ─── vanilla-JS modules (~30,100L across 75 files) + index.html
+    │   └── ui/ ─── vanilla-JS modules (~34,300L across 79 files) + index.html
 ```
 
 ---
@@ -532,7 +572,7 @@ The system auto-discovers instruments across 200+ broker-specific naming variant
 
 ### Frontend Components
 
-The current UI is the desktop suite: **75 vanilla-JS modules** (22 of them selftests) in `orderflow_system/desktop/ui/`
+The current UI is the desktop suite: **79 vanilla-JS modules** (23 of them selftests) in `orderflow_system/desktop/ui/`
 (shell and menus, chart, the order-flow engine, heatmap, tape, alerts, options, fundamentals, news,
 search, watchlist, studies — no build step, no framework). The 8 modules listed below are the legacy
 dashboard page's assets, still served at `/static/`:
@@ -820,7 +860,7 @@ orderflow_system/
 ├── test_integration.py              # Integration tests (309L)
 │
 ├── config/
-│   └── settings.py                  # 31 instrument configs, 14 config dataclasses (821L)
+│   └── settings.py                  # 31 instrument configs, 14 config dataclasses (822L)
 │
 ├── data/
 │   ├── models.py                    # 9 dataclasses: Tick, Candle, Signal, FootprintLevel, TradeState... (330L)
@@ -850,7 +890,7 @@ orderflow_system/
 │   └── telegram_bot.py              # Telegram notifications (201L)
 │
 └── dashboard/
-    ├── app.py                       # FastAPI REST + WebSocket (1371L)
+    ├── app.py                       # FastAPI REST + WebSocket (1381L)
     ├── websocket_manager.py         # 10-channel broadcast manager (293L)
     ├── demo_data.py                 # Deterministic demo data generator (806L)
     ├── __main__.py                  # Standalone launcher (35L)
@@ -872,17 +912,17 @@ orderflow_system/
 
 | Area | Files | Python Lines | UI Lines (JS/CSS/HTML) | Total Lines |
 |------|-------|-------------|------------------------|-------------|
-| Config | 2 | 821 | — | 821 |
-| Data feeds + storage | 16 | 6,058 | — | 6,058 |
+| Config | 2 | 822 | — | 822 |
+| Data feeds + storage | 16 | 6,081 | — | 6,081 |
 | Analytics (delta, footprint, volume profile, patterns, signals, alerts) | 17 | 3,077 | — | 3,077 |
 | Atlas (live analytics + `/api/atlas/*`) | 26 | 7,558 | — | 7,558 |
-| Desktop app (desktop package + packaging scripts) | 25 | 9,529 | — | 9,529 |
-| Desktop UI (vanilla JS + CSS + HTML, no build step) | 84 | — | 32,469 | 32,469 |
-| Legacy dashboard (host + legacy page assets) | 14 | 2,506 | 4,667 | 7,173 |
+| Desktop app (desktop package + packaging scripts) | 26 | 10,070 | — | 10,070 |
+| Desktop UI (vanilla JS + CSS + HTML, no build step) | 89 | — | 36,964 | 36,964 |
+| Legacy dashboard (host + legacy page assets) | 14 | 2,516 | 4,667 | 7,183 |
 | Orchestrator (`main.py`) | 1 | 857 | — | 857 |
-| **Total (excluding tests)** | **185** | **30,406** | **37,136** | **67,542** |
+| **Total (excluding tests)** | **191** | **30,981** | **41,631** | **72,612** |
 
-Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 76 files / 15,091 lines. The desktop UI also ships its icon assets and the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`), which the columns above do not count.
+Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 78 files / 15,664 lines. The desktop UI also ships its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the nine Help Centre screenshots (`orderflow_system/desktop/ui/help/`), which the columns above do not count.
 
 ---
 
@@ -891,7 +931,7 @@ Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest
 ### REST Endpoints (legacy dashboard API)
 
 The app additionally serves `/api/atlas/*` (45 routes — heatmap, tape, CVD, profiles, imbalance,
-trades, scanner, alerts, replay) and `/api/control/*` (72 routes — config, feeds, exports, layouts).
+trades, scanner, alerts, replay) and `/api/control/*` (77 routes — config, feeds, exports, layouts, backfill, windows, help).
 The always-current list is the running app's OpenAPI schema at `/docs`. The endpoints below are the
 legacy dashboard set, kept for compatibility:
 

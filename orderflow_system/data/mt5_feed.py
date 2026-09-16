@@ -40,6 +40,25 @@ TICK_FLAG_BUY = 0x20
 TICK_FLAG_SELL = 0x40
 
 
+def _book_quantity(entry) -> float:
+    """Quantity for one DOM entry, across MetaTrader5 package builds.
+
+    Measured against a live terminal (MetaQuotes-Demo, package 5.0.6180, 2026-09-17):
+    ``BookInfo`` exposes ``type, price, volume, volume_dbl`` — the feed's original
+    ``volume_real`` read raised on every poll and killed DOM entirely. ``volume_dbl``
+    (current), ``volume_real`` (older documented builds) and integer ``volume`` are all
+    tried; the first positive one wins.
+    """
+    for attr in ("volume_dbl", "volume_real", "volume"):
+        try:
+            q = float(getattr(entry, attr, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if q > 0:
+            return q
+    return 0.0
+
+
 class MT5Feed:
     """
     Real-time and historical data feed from MetaTrader 5 terminal.
@@ -92,8 +111,12 @@ class MT5Feed:
         # Enable market book for each symbol (DOM data)
         if self.enable_book:
             for _internal, mt5_sym in self.symbols.items():
-                self._mt5.market_book_add(mt5_sym)
-                logger.info(f"Market book enabled for {mt5_sym}")
+                if self._mt5.market_book_add(mt5_sym):
+                    logger.info(f"Market book enabled for {mt5_sym}")
+                else:
+                    logger.warning(
+                        f"Market book unavailable for {mt5_sym} — no DOM from this broker"
+                    )
 
         logger.info(
             f"MT5 feed started. Polling {len(self.symbols)} symbols "
@@ -348,7 +371,7 @@ class MT5Feed:
         for entry in book:
             level = OrderbookLevel(
                 price=entry.price,
-                quantity=float(entry.volume_real if entry.volume_real > 0 else entry.volume),
+                quantity=_book_quantity(entry),
             )
             # MT5 book type: 1 = SELL (ask side), 2 = BUY (bid side)
             if entry.type == 1:  # BOOK_TYPE_SELL

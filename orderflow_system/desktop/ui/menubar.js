@@ -482,13 +482,29 @@
                 planned('Studies library', 'phase 2 — deep-link into the Studies view settings'),
             ] },
             { id: 'help', label: 'Help', items: [
+                /* §79: the front door. Every item runs the app's own function; the About card at the
+                   bottom is rendered from the live facts (`/api/control/help`), so the version and the
+                   credits are the program's own rather than a copy that can drift. */
+                { label: 'Help Centre…', accel: 'F1', run: () => helpCentre('') },
+                { label: 'Search the help…', accel: 'Ctrl+Shift+H', run: () => helpCentre('') },
+                { label: 'Advanced user interface', checked: helpMode() === 'advanced',
+                  hint: 'every topic, including the under-the-hood material', run: () => setHelpMode('advanced') },
+                { label: 'Simple interface', checked: helpMode() === 'simple',
+                  hint: 'the safe subset, with the system check on top', run: () => setHelpMode('simple') },
+                { label: 'Where help lives', submenu: [
+                    { label: 'Status bar (the app\'s taskbar)', checked: helpDock() === 'taskbar',
+                      run: () => setHelpDock('taskbar') },
+                    { label: 'Floating button', checked: helpDock() === 'floating', run: () => setHelpDock('floating') },
+                    { label: 'Hidden (F1 still opens it)', checked: helpDock() === 'off', run: () => setHelpDock('off') },
+                ] },
+                { label: helpCheckItem(), run: () => helpCheck() },
+                sep(),
                 { label: 'Setup guide…', run: () => { if (typeof window.openWizard === 'function') openWizard(true); else note('the wizard is available from the Overview view'); } },
                 { label: 'Legend & keys', run: toggleLegend },
+                { label: 'Hotkeys…', accel: '?', run: () => document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true })) },
                 { label: 'Platforms (the DTC platform DTC, the reference platform)', run: () => showView('platforms') },
                 sep(),
-                { label: 'About / diagnostics', run: about },
-                planned('Table of contents', 'phase 5 — deep links into every settings dialog'),
-                planned('Support bundle', 'phase 5 — zip the config, log and diagnostics'),
+                { about: true },
             ] },
         ];
     }
@@ -622,6 +638,107 @@
             note('clipboard blocked — diagnostics printed to the console');
         }
     }
+    /* ── §79: the Help Centre's front door ──────────────────────────────────
+       The menu bar asks the help module for everything it shows — the interface it is in, where its
+       launcher lives, how the system check stands, and the facts the About card prints. Nothing here
+       keeps a second copy of that state, so the menu and the panel cannot drift apart. */
+    function helpApi() { return window.OFAPHELP || null; }
+    function helpFacts() {
+        const H = helpApi();
+        return (H && typeof H.facts === 'function' && H.facts()) || null;
+    }
+    function helpCentre(query) {
+        const H = helpApi();
+        closeAll();
+        if (H && typeof H.open === 'function') { H.open(query || ''); return; }
+        if (window.showView) showView('help');
+        note('the Help Centre is still loading…');
+    }
+    function helpMode() { const H = helpApi(); return (H && typeof H.mode === 'function' && H.mode()) || 'advanced'; }
+    function setHelpMode(mode) {
+        const H = helpApi();
+        if (H && typeof H.setMode === 'function') { H.setMode(mode); return; }
+        note('the Help Centre is still loading…');
+    }
+    function helpDock() { const H = helpApi(); return (H && typeof H.dock === 'function' && H.dock()) || 'taskbar'; }
+    function setHelpDock(dock) {
+        const H = helpApi();
+        if (H && typeof H.setDock === 'function') { H.setDock(dock); return; }
+        note('the Help Centre is still loading…');
+    }
+    function helpCheckItem() {
+        const H = helpApi();
+        const check = H && typeof H.check === 'function' && H.check();
+        const counts = (check && check.counts) || {};
+        const bad = (counts.error || 0) + (counts.warn || 0);
+        return bad ? `System check — ${bad} item(s) to look at`
+            : 'System check — ' + (counts.total ? 'all clear' : 'not run yet');
+    }
+    function helpCheck() {
+        const H = helpApi();
+        closeAll();
+        if (H && typeof H.openCheck === 'function') { H.openCheck(); return; }
+        helpCentre('system check');
+    }
+
+    /* The About card, rendered from the live facts: version, what this distribution is, who made it
+       and on whose work it stands, plus the four places worth reaching and the folders it writes to.
+       It carries the tool's own mark (the same badge the rail shows) — deliberately small. */
+    function aboutCard() {
+        const facts = helpFacts() || {};
+        const H = helpApi();
+        const credits = (H && typeof H.credits === 'function' && H.credits()) || {};
+        const links = ((H && typeof H.links === 'function' && H.links()) || []).slice(0, 3);
+        const version = facts.version
+            ? `${escp(facts.version)}-${escp(facts.channel || '')}`
+            : 'version loading…';
+        return ''
+            + '<div class="mb-about-head">'
+            +   '<img src="/desktop/brand-icon.png" alt="ModFlow" width="26" height="26">'
+            +   '<div><div class="mb-about-name">' + escp(facts.name || 'ModFlow OrderFlow Analysis Suite') + '</div>'
+            +   '<div class="mb-about-ver">' + version + ' · ' + escp(facts.licence || 'MIT')
+            +   (facts.frozen ? ' · packaged build' : ' · from source') + '</div></div>'
+            + '</div>'
+            + '<div class="mb-about-copy">' + escp(facts.tagline || 'Order-flow analysis workstation') + '. '
+            +   'Made by <b>' + escp(credits.made_by || 'Moddy') + '</b> — '
+            +   '<a href="' + escp(credits.made_by_url || 'https://moddys.net') + '" target="_blank" rel="noopener noreferrer">'
+            +   escp((credits.made_by_url || 'https://moddys.net').replace(/^https?:\/\//, '')) + ' ↗</a>. '
+            +   'Builds on <b>' + escp(credits.upstream || 'the original project') + '</b> (MIT) and follows '
+            +   escp(credits.methodology || 'the orderflow methodology') + '.</div>'
+            + (credits.thanks_line ? '<div class="mb-about-thanks">' + escp(credits.thanks_line) + '</div>' : '')
+            + '<div class="mb-about-links">'
+            +   links.map((l) => '<a href="' + escp(l.url) + '" target="_blank" rel="noopener noreferrer">'
+                + escp(l.label) + ' ↗</a>').join('')
+            + '</div>'
+            + '<div class="mb-about-btns">'
+            +   '<button data-about="open" title="Version, credits, thanks, links and the folders it writes to">About this program…</button>'
+            +   '<button data-about="diag" title="Version, paths, source and telemetry — nothing secret">Copy diagnostics</button>'
+            +   '<button data-about="folder" data-folder="config" title="Settings, drawings, alert rules, exports">User folder</button>'
+            + '</div>';
+    }
+
+    /* The About card is a block, not a menu row, so its buttons are wired here (the item map does not
+       cover them). Runs after every paint of an open menu. */
+    function bindAbout(host) {
+        const scope = host || state.bar;
+        if (!scope || !scope.querySelectorAll) return;
+        scope.querySelectorAll('[data-about]').forEach((btn) => {
+            btn.onclick = (ev) => {
+                ev.stopPropagation();
+                const what = btn.dataset.about;
+                if (what === 'open') {
+                    closeAll();
+                    const H = helpApi();
+                    if (H && typeof H.openAbout === 'function') H.openAbout();
+                    else helpCentre('');
+                    return;
+                }
+                if (what === 'diag') { void copyDiagnostics(); return; }
+                if (what === 'folder') { void openFolder(btn.dataset.folder || 'config'); }
+            };
+        });
+    }
+
     async function about() {
         try {
             const res = await api('/api/control/bootstrap');
@@ -645,6 +762,10 @@
             map.set(key, item);
             if (item.separator) return '<div class="mb-sep"></div>';
             if (item.header) return `<div class="mb-header">${escp(item.header)}</div>`;
+            /* §79: the About card lives IN the Help dropdown (the ask: a short about under the help
+               links), rendered from the live facts rather than a copy that can drift. It is a block,
+               not a menu row, so it bypasses the item button path entirely. */
+            if (item.about) return `<div class="mb-about">${aboutCard()}</div>`;
             const cls = ['mb-item'];
             if (item.disabled) cls.push('mb-disabled');
             if (item.submenu) cls.push('mb-has-sub');
@@ -671,6 +792,7 @@
         state.itemMap = new Map();
         host.innerHTML = promptBlock() || editorBlock() || itemsHtml(menu.items, menu.id, state.itemMap);
         bindEditor();
+        bindAbout(host);
     }
 
     function bindEditor() {

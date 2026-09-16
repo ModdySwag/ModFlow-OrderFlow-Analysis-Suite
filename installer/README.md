@@ -11,8 +11,8 @@ this machine (see "Verified journey" at the bottom).
 - `build\...\DiskImages\DISK1\setup.exe` — raw IsCmdBld output (compressed network image)
 - `..\dist\ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe` — the release artifact
 
-Latest build: 28,412,633 bytes (27.1 MB), sha256
-`B2309CC97AA61DA4473E204A84A70D1B9633620BECE71CAAC5BB8F549FB87EF5`
+Latest build: 40,826,742 bytes (38.94 MB), sha256
+`1A1A9F49D59FE9CB9AB0965C0F3ECF493D0531ABF46771684FAAE9A2C31E62DC`
 
 ## How to rebuild
 

@@ -1,0 +1,326 @@
+/* ══════════════════════════════════════════════════════════════════
+   help.css — the Help Centre's own styles.
+
+   Everything here is scoped to the help module's own classes (help-*) plus the three pieces it
+   docks into the shell (.help-dock in the status bar, .help-fab floating, .help-quick the small
+   panel they open). Nothing in this file restyles a panel that exists without it, so the module can
+   be dropped or removed without touching the rest of the interface.
+
+   Colours come from the theme tokens only (--text-primary/secondary/muted, --border, --green,
+   --red, --orange, --blue, --purple), so all three themes and all eight accents carry the module
+   without a second palette.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── the view: a browsable tree beside the article ─────────────────────────── */
+
+.help-wrap {
+    display: grid;
+    grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+    min-height: 0;
+}
+@media (max-width: 900px) {
+    .help-wrap { grid-template-columns: 1fr; }
+}
+
+.help-nav {
+    position: sticky;
+    top: 0;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px;
+    max-height: calc(100vh - 190px);
+    overflow: auto;
+}
+
+.help-search { position: relative; }
+
+.help-search input {
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    color: var(--text-primary);
+    padding: 7px 9px;
+    font-size: 13px;
+}
+.help-search input:focus { outline: 1px solid var(--border-active); border-color: var(--border-active); }
+
+/* the autofill list: one row per completion, keyboard-walkable */
+.help-suggest {
+    position: absolute;
+    left: 0; right: 0; top: calc(100% + 4px);
+    z-index: 40;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, .45);
+    overflow: hidden;
+    display: none;
+}
+.help-suggest.on { display: block; }
+.help-sug-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 9px; cursor: pointer; font-size: 12.5px;
+    border-bottom: 1px solid var(--border);
+}
+.help-sug-row:last-child { border-bottom: 0; }
+.help-sug-row.on, .help-sug-row:hover { background: var(--bg-panel-hover); }
+.help-sug-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.help-sug-text b { color: var(--text-primary); }
+
+.help-badge {
+    flex: 0 0 auto;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+    padding: 1px 5px; border-radius: 4px;
+    border: 1px solid var(--border-strong);
+    color: var(--text-muted);
+}
+.help-badge.topic { color: var(--blue); border-color: var(--blue); }
+.help-badge.command { color: var(--green); border-color: var(--green); }
+.help-badge.keyword { color: var(--purple); border-color: var(--purple); }
+.help-badge.alias { color: var(--orange); border-color: var(--orange); }
+
+.help-mode {
+    display: flex; gap: 0; margin-bottom: 10px;
+    border: 1px solid var(--border-strong); border-radius: 7px; overflow: hidden;
+}
+.help-mode button {
+    flex: 1; background: transparent; border: 0; color: var(--text-secondary);
+    padding: 6px 8px; font-size: 12px; cursor: pointer;
+}
+.help-mode button + button { border-left: 1px solid var(--border-strong); }
+.help-mode button.on { background: var(--blue-bg); color: var(--text-primary); font-weight: 600; }
+.help-mode-note { font-size: 11px; color: var(--text-muted); margin: 0 0 8px; }
+
+.help-group-title {
+    margin: 12px 0 4px;
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--text-muted);
+}
+.help-item {
+    display: flex; align-items: center; gap: 7px; width: 100%;
+    background: transparent; border: 0; border-radius: 6px;
+    color: var(--text-secondary); text-align: left;
+    padding: 5px 7px; font-size: 12.5px; cursor: pointer;
+}
+.help-item:hover { background: var(--bg-panel-hover); color: var(--text-primary); }
+.help-item.on { background: var(--blue-bg); color: var(--text-primary); }
+.help-item .help-lock { margin-left: auto; font-size: 10px; color: var(--text-muted); }
+.help-empty { color: var(--text-muted); font-size: 12px; padding: 8px 4px; }
+.help-recents { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+
+/* ── the article ───────────────────────────────────────────────────────────── */
+
+.help-doc {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    min-width: 0;
+    line-height: 1.6;
+}
+.help-doc-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.help-doc-brand { flex: 0 0 auto; opacity: .55; }
+
+/* The tool's own mark, kept subtle: a small badge in the header and a watermark in About. */
+.help-brand { width: 22px; height: 22px; }
+.help-doc-title { font-size: 18px; font-weight: 650; }
+.help-doc-group { color: var(--text-muted); font-size: 11.5px; }
+.help-doc-sum { color: var(--text-secondary); margin: 8px 0 14px; font-size: 13px; }
+.help-block { margin: 0 0 14px; }
+.help-block h4 { margin: 0 0 6px; font-size: 13px; color: var(--text-primary); }
+.help-block p { margin: 0 0 8px; color: var(--text-secondary); }
+.help-block ul { margin: 0 0 8px 18px; padding: 0; color: var(--text-secondary); }
+.help-block li { margin: 3px 0; }
+.help-block b, .help-block strong { color: var(--text-primary); }
+.help-block code {
+    font-family: var(--font-mono); font-size: 12px;
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 4px; padding: 0 4px;
+}
+.help-block table { width: 100%; border-collapse: collapse; }
+.help-block td { padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 12.5px; color: var(--text-secondary); }
+.help-block td:first-child { width: 30%; color: var(--text-primary); font-weight: 600; }
+
+.help-steps { margin: 0; padding: 0; list-style: none; counter-reset: hstep; }
+.help-step { display: flex; gap: 10px; margin-bottom: 10px; }
+.help-num {
+    flex: 0 0 22px; height: 22px; border-radius: 50%;
+    background: var(--blue-bg); color: var(--text-primary);
+    display: grid; place-items: center; font-size: 11.5px; font-weight: 650;
+}
+.help-step-t { color: var(--text-primary); font-weight: 600; }
+.help-step-d { color: var(--text-secondary); font-size: 12.5px; }
+.help-cmd {
+    display: flex; align-items: center; gap: 8px; margin: 5px 0;
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 8px;
+}
+.help-cmd code { flex: 1; min-width: 0; overflow: auto; background: none; border: 0; padding: 0; }
+
+.help-note, .help-warn {
+    border-left: 3px solid var(--blue);
+    background: var(--blue-bg);
+    padding: 8px 10px; border-radius: 0 6px 6px 0;
+    color: var(--text-secondary); font-size: 12.5px;
+}
+.help-warn { border-left-color: var(--orange); background: var(--orange-bg); }
+.help-note b, .help-warn b { color: var(--text-primary); }
+
+.help-shot { margin: 0 0 14px; }
+.help-shot img {
+    width: 100%; max-width: 100%;
+    border: 1px solid var(--border-strong); border-radius: 8px;
+    background: var(--bg-secondary);
+    cursor: zoom-in;
+}
+.help-shot figcaption { color: var(--text-muted); font-size: 11.5px; margin-top: 5px; }
+.help-shot.zoom img { cursor: zoom-out; position: fixed; inset: 3vh 3vw; width: 94vw; height: 94vh; object-fit: contain; z-index: 600; background: rgba(0,0,0,.85); }
+
+.help-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 14px; }
+.help-related { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.help-related button, .help-actions button { cursor: pointer; }
+
+.help-keys { width: 100%; border-collapse: collapse; }
+.help-keys th { text-align: left; font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; padding: 4px 8px; }
+.help-keys td { padding: 4px 8px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text-secondary); }
+.help-keys td.help-key {
+    font-family: var(--font-mono); color: var(--text-primary); white-space: nowrap; width: 1%;
+}
+
+/* ── the system check ─────────────────────────────────────────────────────── */
+
+.help-check { display: flex; flex-direction: column; gap: 8px; }
+.help-check-row {
+    display: flex; gap: 10px; align-items: flex-start;
+    border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;
+    background: var(--bg-secondary);
+}
+.help-check-row.error { border-color: var(--red); background: var(--red-bg); }
+.help-check-row.warn { border-color: var(--orange); background: var(--orange-bg); }
+.help-check-row.notice { border-color: var(--border-strong); }
+.help-check-row.ok { border-color: var(--green); }
+.help-lvl {
+    flex: 0 0 auto; font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+    border-radius: 4px; padding: 1px 6px; border: 1px solid var(--border-strong); color: var(--text-muted);
+}
+.help-check-row.error .help-lvl { color: var(--red); border-color: var(--red); }
+.help-check-row.warn .help-lvl { color: var(--orange); border-color: var(--orange); }
+.help-check-row.ok .help-lvl { color: var(--green); border-color: var(--green); }
+.help-check-body { flex: 1; min-width: 0; }
+.help-check-t { color: var(--text-primary); font-weight: 600; font-size: 13px; }
+.help-check-d { color: var(--text-secondary); font-size: 12.5px; margin-top: 2px; }
+.help-check-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+.help-check-sum { color: var(--text-muted); font-size: 12px; margin: 2px 0 10px; }
+
+/* the gate: an advanced topic, refused in Simple mode until the user says so */
+.help-gate { border: 1px solid var(--orange); background: var(--orange-bg); border-radius: 8px; padding: 14px; }
+.help-gate h4 { margin: 0 0 6px; color: var(--text-primary); font-size: 14px; }
+.help-gate p { color: var(--text-secondary); margin: 0 0 10px; font-size: 12.5px; }
+
+/* ── the launcher: the status bar's own strip, or a floating button ───────── */
+
+.help-dock {
+    display: flex; align-items: center; gap: 6px;
+    margin-left: auto;               /* pushed to the right end of the status bar */
+    padding-left: 10px;
+    border-left: 1px solid var(--border);
+    position: relative;
+    min-width: 0;
+}
+.help-dock input {
+    width: 190px; min-width: 90px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text-primary);
+    font-size: 11.5px;
+    padding: 2px 6px;
+}
+.help-dock input:focus { outline: 1px solid var(--border-active); }
+.help-dock .help-dock-btn {
+    border: 1px solid var(--border-strong); border-radius: 5px;
+    background: transparent; color: var(--text-secondary);
+    padding: 2px 7px; font-size: 11.5px; cursor: pointer;
+}
+.help-dock .help-dock-btn:hover { color: var(--text-primary); border-color: var(--border-active); }
+
+/* The dock's and the quick panel's autofill list opens UPWARD: both sit at the bottom of the
+   window, so a downward list would render off-screen. */
+.help-dock .help-suggest, .help-quick .help-suggest {
+    top: auto; bottom: calc(100% + 6px);
+}
+
+.help-fab {
+    position: fixed; right: 18px; bottom: 44px; z-index: 300;
+    width: 34px; height: 34px; border-radius: 50%;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-elevated); color: var(--text-secondary);
+    font-size: 15px; cursor: pointer; box-shadow: 0 10px 24px rgba(0, 0, 0, .4);
+}
+.help-fab:hover { color: var(--text-primary); border-color: var(--border-active); }
+
+.help-quick {
+    position: fixed; right: 18px; bottom: 84px; z-index: 400;
+    width: min(460px, 92vw);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    box-shadow: 0 22px 50px rgba(0, 0, 0, .5);
+    padding: 10px;
+    display: none;
+}
+.help-quick.on { display: block; }
+.help-quick-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.help-quick-results { max-height: 320px; overflow: auto; }
+.help-quick-foot { color: var(--text-muted); font-size: 11px; margin-top: 8px; }
+
+/* Search result rows (shared by the quick panel and the view) */
+.help-result {
+    display: block; width: 100%; text-align: left;
+    background: transparent; border: 0; border-bottom: 1px solid var(--border);
+    padding: 7px 6px; cursor: pointer; color: var(--text-secondary);
+}
+.help-result:last-child { border-bottom: 0; }
+.help-result:hover, .help-result.on { background: var(--bg-panel-hover); }
+.help-result-t { color: var(--text-primary); font-weight: 600; font-size: 12.5px; }
+.help-result-s { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+.help-result b { color: var(--text-primary); background: var(--blue-bg); border-radius: 3px; padding: 0 1px; }
+.help-why { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+
+/* ── the About card inside the Help dropdown (§79) ─────────────────────────────
+   The menu bar renders it from the live facts; it carries the tool's own mark, the version, who
+   made it, on whose work it builds, and the folders worth reaching. */
+
+.mb-about {
+    border-top: 1px solid var(--border);
+    margin-top: 6px;
+    padding: 10px 12px 4px;
+    max-width: 340px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.mb-about-head { display: flex; align-items: center; gap: 9px; }
+.mb-about-head img { flex: 0 0 auto; opacity: .85; }
+.mb-about-name { color: var(--text-primary); font-weight: 650; font-size: 12.5px; line-height: 1.2; }
+.mb-about-ver { color: var(--text-muted); font-size: 11px; }
+.mb-about-copy { margin: 8px 0; line-height: 1.5; }
+.mb-about-copy b { color: var(--text-primary); }
+.mb-about-thanks { color: var(--text-muted); font-size: 11px; margin: 0 0 8px; line-height: 1.45; }
+.mb-about-links { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 8px; }
+.mb-about-links a { color: var(--blue); text-decoration: none; font-size: 11.5px; }
+.mb-about-links a:hover { text-decoration: underline; }
+.mb-about-btns { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 4px; }
+.mb-about-btns button {
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    border-radius: 5px;
+    color: var(--text-secondary);
+    font-size: 11.5px;
+    padding: 3px 7px;
+    cursor: pointer;
+}
+.mb-about-btns button:hover { color: var(--text-primary); border-color: var(--border-active); }

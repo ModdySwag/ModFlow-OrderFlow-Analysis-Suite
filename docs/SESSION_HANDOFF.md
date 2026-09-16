@@ -4329,6 +4329,245 @@ every venue, fresh `last_tick_ms`; tape `live` on bybit); backfill round trip BT
 registry + `config.json`; demo guards `[]`/neutral for `UNKNOWNXYZ`; 0 client errors.
 
 **Nothing pushed; no tag.** The owner's queue stands: the push decision, his physical
-multi-monitor pass (§78 if it finds anything), the release-notes review (with the F-06 lines),
+multi-monitor pass (§79 if it finds anything — §78 was the release-assurance audit below),
+the release-notes review (with the F-06 lines),
 then tag `v0.1.0-beta` with the zip + Setup + SBOM.
 
+---
+
+## §78 — the final release assurance audit: the packaged-UI defect found, fixed, and the artefacts rebuilt (closed 2026-09-17; nothing committed, nothing pushed, no tag)
+
+**Why.** The owner ran the `Desktop/final security audit prompt.txt` directive ("Executive final
+release assurance audit" — security, reliability, correctness, zero-leak; 14 required sections) for
+real against the tree and the package; hard constraint: nothing in the app may break. The full
+report is `docs/FINAL_RELEASE_ASSURANCE_AUDIT_v0.1.0-beta.md`.
+
+**The finding that mattered (F-01).** The §77 artefacts shipped **without**
+`orderflow_system/dashboard/static`. `scripts/build_exe.py` shipped `desktop/ui` and the Bookmap
+add-on but never listed that folder — and the **desktop shell's own `index.html` loads six widget
+modules from `/static/`** (`footprint`, `orderbook`, `tape`, `signals`, `performance`,
+`microstructure`) and instantiates their classes in `ui.js`. In the packaged app all six answered
+**404**, the classes stayed `undefined`, and six views (Footprint, Depth, Tape, Signals, Performance,
+Microstructure) silently never initialised — the Tape measured **0 rows** live. The repo tree was
+perfect (47/47 assets), which is exactly why every previous gate stayed green: the old script-tag
+guard only inspected `/desktop/` tags, and 404s never reach the app's client-error channel.
+
+**What landed (nothing committed).**
+1. `scripts/build_exe.py` — `REQUIRED_DATA_RELS` (ui + `dashboard/static`), refuses to build when a
+   required root is missing; the add-on stays optional.
+2. `orderflow_system/dashboard/app.py` — fail-loud WARNING when `dashboard/static` is absent
+   (cannot fire in a correct build).
+3. `orderflow_system/test_wiring.py` — +1 regression pin: every local asset `index.html` loads
+   exists on disk, and every root it loads from is inside the build's `REQUIRED_DATA_RELS`
+   (bite-proven twice — a renamed module and a doctored build list both fail it).
+4. `orderflow_system/test_platforms.py` — the add-on pin follows the renamed build constant.
+5. F-03 (comment drift): the two uncommitted 01:19 comment edits referenced a config key that does
+   not exist (`dashboard.expose_lan`) — reworded to the real `dashboard.host` mechanism.
+6. Docs: the audit report, this §78, RESUME, `RELEASE_EVIDENCE` (new hashes),
+   `installer/README.md`'s latest-build line.
+
+**Artefacts (rebuilt from the fixed tree).** exe 13,552,324 B `8016d948…` · zip 27,385,320 B
+`f8f58706…` (**512 entries** = 503 + the nine static files; `namelist()` + `testzip()` clean) ·
+Setup 28,455,930 B `35e3887e…` (0 errors / 4 warnings) · SBOM unchanged 430,051 B `97184c0b…`.
+No source file newer than the build.
+
+**Verified.** pytest **844/2** on 3.12 (24.6 s) and 3.11 (24.8 s); AUDIT CLEAN (74 modules); ruff
+clean; 22/22 selftests; `pip-audit` clean; `uv lock --check` green; bandit reviewed (1 High =
+non-security SHA1 mutex digest; 17 Medium = B314/B310/B608 false-positive classes — dispositions in
+the report §F-08). **Soak on the frozen exe** (8 × 28-view cycles + 96 s live bybit, instrumented
+CDP): intervals 24 **flat**, observers 13 **flat**, canvases 19 **flat**, DOM stabilised, heap
+5.7–22 MB **GC sawtooth no trend**, 0 page errors. **Frame time** (Engine view, live): median
+**16.7** / p95 16.7 / p99 16.8 / max 16.8 ms on both tree and exe. **Post-fix package:** **47/47**
+assets 200 (was 41/47), six widget classes live, Tape renders rows, guards 403/403/403/200, served
+`/desktop` hash-match `369fbbc6…`, 0 client errors. **Installer journey re-run on the rebuilt
+Setup:** silent install → **512 files**, installed exe sha256 == dist exe, installed smoke on 8096
+(healthz 200, hostile 403, 47/47, widgets live, 0 client errors) → silent uninstall clean (install
+dir + shortcut + ARP entry gone); the machine's dev shortcut backed up and restored; `%APPDATA%`
+untouched.
+
+**Queued (cosmetic, next source-changing pass).** `ConnectionResetError` log-noise filter (loop
+exception handler; logging-only) and `usedforsecurity=False` on the mutex digest — deliberately not
+landed here so this pass's artefact verification chain stays exact.
+
+**Nothing committed; nothing pushed; no tag.** The owner's queue: the push decision, his physical
+multi-monitor pass (§79 if it finds anything), the release-notes review, then tag `v0.1.0-beta`
+with the zip + Setup + SBOM.
+
+
+
+---
+
+## §79 — the Help Centre: two interfaces, one corpus, a live system check (built 2026-09-17; **nothing committed, nothing pushed, no tag**)
+
+**Why.** The owner's `Desktop/help.txt` directive: a comprehensive in-app help system in two selectable
+modes — **(1) Advanced user**, a menu-based, program-wide, searchable help with in-app clickable
+shortcuts, external links, screenshot guides and step-by-steps for the genuinely difficult areas;
+**(2) Simple**, the same search power minus what a first-time user should not be steered into, with
+configuration errors and system irregularities surfaced as warnings and a way up to the advanced
+topics for their own advancement. Both need **autofill suggestions as you type**, a **drop to the
+taskbar system**, and a **Help entry in the top nav menu bar with a short About underneath it**
+(program version, made by, thanks, relevant links) carrying his logo — with the logo also woven subtly
+into the help module itself.
+
+**What landed (nothing committed).**
+
+1. `orderflow_system/desktop/ui/help-data.js` — the corpus, and the deliverable's centre of gravity:
+   **68 topics** in 7 groups (Getting started · Panels, one by one · Working with the app ·
+   Connections and setup · Data, files and storage · Under the hood · Fixes and support), of which
+   **10 are `mode: 'advanced'`** (the under-the-hood material, the danger zone, security exposure,
+   the build). Each topic carries tags/aliases/summary/blocks/actions/links/related, and a block may
+   be a heading, paragraph, list, table, note, caution, numbered step (with copyable commands),
+   screenshot, *or* a live element: the shortcut map (`keys: true`) and the system check
+   (`check: true`), rendered from the app itself. A `VIEWS` map names the topic for every view the
+   shell has — **the coverage contract**, pinned by a test that reads index.html's own markup.
+2. `orderflow_system/desktop/ui/help-search.js` — the search engine, pure (no DOM, no API, no
+   storage): tokenise (case/punctuation/camelCase/snake, light stem, `ctrl+k`/`mt5`/`p99` survive),
+   weighted index (title 6 > tags 4 > alias 3.5 > summary 2.5 > heading 2 > body 1), AND-across-the-
+   query ranking with prefix hits, phrase bonuses and a `kindRank` that lets an explanation outrank a
+   program command on a tie, **type-ahead suggestions**, a bounded one-pass **"did you mean"** repair,
+   and highlight segments. `help-search.selftest.js` pins it under node — **26 checks, 0 failed**.
+3. `orderflow_system/desktop/ui/help.js` — the panel: the Advanced/Simple switch, the browsable tree
+   (advanced topics hidden in Simple, with a **gate** that explains and one-clicks up to Advanced
+   rather than a silent refusal), the search box with its autofill list, the article renderer, the
+   live **system check**, the **About page** (version, build shape, made by, thanks, links, the folders
+   it writes to, diagnostics), and the **launcher**: docked in the status bar (the app's taskbar, with
+   its own search box and an upward-opening autofill list), floating (`?` button → quick panel), or
+   hidden. `help.dock`/`help.mode` are config, mirrored to localStorage only for the first paint.
+   **F1** opens the Help Centre through keys.js's own map (bound `inField: true`, so it works
+   mid-typing), and the sheet lists it like every other key.
+4. `orderflow_system/desktop/ui/help.css` — module-scoped styles (`.help-*`) plus the menu bar's About
+   card (`.mb-about*`). Theme tokens only, so all three themes and eight accents carry it.
+5. `orderflow_system/desktop/ui/help/*.png` — nine screenshots, byte-identical to their
+   `docs/screenshots/` originals (1.7 MB total), used only where a picture beats a paragraph:
+   Overview, Chart, the Engine's selection readout and hidden-block count, the Heatmap (live +
+   wall-age tint), the held tape, an aux widget window, and the shared cursor spine.
+6. `orderflow_system/desktop/help.py` — what the browser cannot invent: **the facts** (name, version
+   `0.1.0-beta`, MIT, python/platform/frozen, the five paths), **the credits** (LICENSE's own words:
+   Mahmoud — original work; Moddy (ModdySwag) — this distribution; Fabio Testa's methodology; a
+   thanks list naming the venues and the open-source stack) and **the system check**: 18 checks over
+   the engine, the configured source, the optional integrations, storage, the log tail and how the
+   app is exposed. `check_report()` is a pure function of injected state, each finding naming at most
+   one topic, one view and one action from a closed `ACTIONS` set.
+7. `orderflow_system/desktop/api.py` — `GET /api/control/help` (facts + credits + links + the check +
+   the stored prefs; read-only: never starts an engine, never touches the network) and
+   `POST /api/control/help` (patched preferences; a value outside the allowed set is ignored rather
+   than resetting what is stored; both lists bounded by the store).
+8. `orderflow_system/desktop/config_store.py` — the `help` block (`mode`, `dock`, `recents`,
+   `dismissed`) with clamps and a save/load round trip.
+9. `orderflow_system/desktop/ui/menubar.js` — the **Help menu rewritten**: Help Centre… (F1), Search
+   the help… (Ctrl+Shift+H), the two interfaces (checked), **Where help lives** (status bar /
+   floating / hidden), the system check item (named with its counts), the setup assistant, the legend,
+   the hotkey map, the platforms reference, and — the owner's ask — **an About card at the bottom of
+   the dropdown**, rendered from the live facts: the rail's own brand mark, the version, made-by with
+   the link, the thanks line, the first three links, and buttons for the About page, the diagnostics
+   and the user folder.
+10. `orderflow_system/desktop/ui/menu.js` — a Help Centre entry in the ☰ menu's Help group; **F1
+    released** (it used to open the hotkey sheet, and a tie goes to the first registration, so F1
+    would have kept the old behaviour).
+11. `orderflow_system/desktop/ui/index.html` — the two script tags + the stylesheet (order pinned:
+    after keys.js/menubar.js/menu.js).
+12. `orderflow_system/test_help.py` — **30 tests**: the modules parse, the selftest is green and has
+    not shrunk, the wiring (load order, audit coverage, F1 claimed once, no self-recursive `api`
+    guard, the boot adopts the stored preferences), the corpus is well-formed and **covers every view
+    in the shell**, every check topic/view/action resolves against the corpus and the UI's handler
+    table, the config block defaults + clamps + round trip, the check engine branch by branch, and
+    the two endpoints.
+13. `scripts/audit_ui_refs.py` — the three new modules added to `JS_FILES`.
+
+**Verified.** pytest **874 passed / 2 skipped** (24.8 s) — was 844/2, so +30; **AUDIT CLEAN** (78
+modules parse); **23/23 node selftests** (help-search 26 checks). **Live sandbox** (headless, port
+8097, scratch `APPDATA`): served `help.css` / `help-data.js` / `help.js` / `help/overview-live.png`
+all **hash-identical to disk**; the rail item, the 68-topic tree, the autofill list (topics, keywords
+and commands, ranked), 17 results for a three-letter query with the topic ranked first, an article
+with two screenshots loading at their real pixel size, the topic's action buttons, the **Simple**
+interface hiding exactly 10 topics and the **gate** firing on an advanced one (with "Read it anyway"
+escalating to Advanced), the **system check** rendering live rows with working dismiss + "show
+dismissed", the **About page** (logo 128 px, version `0.1.0-beta`, paths, links), **F1** (including
+with the cursor inside a field) focusing the search box, the **`#help` deep link**, the **status-bar
+dock** with its upward autofill popup (geometry asserted: list bottom ≤ field top) and Enter opening
+the top hit, the **floating launcher** + quick panel, the **Help dropdown** with the About card, and
+the ☰ menu's Help Centre button. **30 views cycled with zero page errors**; the sandbox log carries
+**0 error / client-error / traceback lines**; `mode`, `dock`, `recents` and `dismissed` all read back
+from the sandbox `config.json` (the API is the writer).
+
+**Teething problems fixed mid-pass (all found by the receipts, not by reading):** an advanced-only
+tie-break that let a menu command outrank the topic it was explaining (fixed by `kindRank`); a
+block renderer that dropped the step list of a heading+steps block; the boot never adopting the
+stored preferences (mode/recents/dismissals would have reset on every launch — now pinned by a
+wiring test); an idle server holding the pre-patch `help.py` in memory while the browser held the
+pre-patch `menubar.js` — both worth remembering when verifying a help change live.
+
+**Not done (the queue for the next session, in order).**
+1. **`dist/` is NOT rebuilt** — the exe/zip/Setup still carry §78. The Help Centre adds ~1.7 MB of
+   screenshots plus three modules and needs a payload-changing rebuild, which re-owes the Setup
+   journey (silent install → installed hash == dist → smoke → silent uninstall) and a refreshed
+   `docs/RELEASE_EVIDENCE_v0.1.0-beta.md`.
+2. **README counts** were not re-derived (the tree gained 6 files under `ui/` + 9 assets): the
+   `(NNNL)` per-file counts, the File Inventory totals and the JS-file/line claims all drift.
+3. The owner's queue from §78 still stands: the push decision, his physical multi-monitor pass
+   (**§80** if it finds anything), the release-notes review, then the tag `v0.1.0-beta`.
+4. Cosmetic carry-overs unchanged: the client-abort `ConnectionResetError` log filter and bandit's
+   SHA1 `usedforsecurity=False`.
+
+**Resume prompt:** `OFAP: continue from docs/RESUME.md — §79 (the Help Centre) is built and verified
+in the tree but nothing is committed/pushed/tagged and dist/ is NOT rebuilt. Next: re-derive the
+README counts, rebuild dist + re-run the installer journey, then the owner's queue (push,
+multi-monitor pass, release notes, tag v0.1.0-beta).`
+
+---
+
+**§79 closed (2026-09-17).** The two owed items are done on disk — the counts pass and the payload rebuild — plus what verifying them turned up:
+
+1. **README/CONTRIBUTING counts re-derived from the tree** (the §79 additions: 6 counted files + 9 assets):
+   - Badges: tests **843 → 874**, code **~68k → ~73k**, API **133 → 138** (re-measured from the running app's OpenAPI: 45 atlas + **77** control + 16 legacy — control grew by §76's backfill/trades (+3) and §79's help (+2), which the §74-era 133 never carried).
+   - `(NNNL)` tree/diagram claims: two had drifted — `dashboard/app.py` 1371 → **1381** (§78's log warning) and `config/settings.py` 821 → **822** (§78's comment fix), each in both blocks; every other claim re-verified equal.
+   - JS claim: **79 vanilla-JS modules / 34,270 lines** (was 75 / 30,113 at §77); the selftest note 22 → **23**.
+   - File Inventory: **191 files / 30,955 py / 41,629 UI / 72,584 total** (Config 2/822 · Data 16/6,058 · Analytics 17/3,077 · Atlas 26/7,558 · Desktop app 26/10,067 · Desktop UI 89/36,962 · Legacy 14/2,516+4,667 · main.py 857); suite **77 files / 15,593 lines**; CONTRIBUTING baseline 874 + 23 selftests. The row definitions were calibrated against §76's measured totals before trusting the new sums (a raw recount had swept `__pycache__` in and inflated every row).
+2. **The `dist/` chain rebuilt from the current tree** — exe **13,583,295 B `7a9f53ed…`** → zip **29,265,214 B `e6ef3992…`** (**526 entries** = 512 + the 14 Help Centre files) → Setup **30,257,125 B `ab1854aebe…`** (0 errors / 4 warnings) → SBOM unchanged `97184c0b…`. Loose payload **120/120 byte-identical** (ui + dashboard/static + the add-on — static included for the first time, the §78 lesson); no source newer than the build; served `/desktop` == packaged == tree (`eceebf07…`). `installer/README.md`'s Latest-build line updated; the `.ism` regenerated (codes re-minted).
+3. **Verified, one battery each.** Gates: pytest **874/2 on 3.12 (25.1 s) and 3.11 (25.4 s)**; AUDIT CLEAN (78 modules, 123 routes, 0 dead ids); ruff 0.16.7 clean; goldens OK; **23/23 selftests**; `pip-audit` clean over the 59-package freeze; `uv lock --check` ok. Frozen exe **smoke 27/27**: guards 403/403/403/200, WS native + cross-origin, unknown `[]` ×2, sources 3 venues, **help assets byte-identical (4 files + 9/9 PNGs)**, `/api/control/help` facts+check (frozen true), **asset parity 50/50**, log 0/0/0. The packaged shell was also driven in a real browser: OFAPHELP boots, the dock renders, 68 topics, mode/dock adopted from the API, 16 search suggestions, 0 page errors. **Installer journey re-run**: silent install → **526 files**, installed exe sha256 == dist exe, shortcut → installed exe; installed smoke on 8098 (healthz 200, candles 200, unknown `[]`, hostile Host refused, 0 client errors); silent uninstall → dir + shortcut + ARP gone (this run registered the ARP entry under **HKLM WOW6432Node** — the setup self-elevated; the §75 script's HKCU-only scan missed it, so the uninstall ran against the product code `{B2B7FE32-…}` directly); `%APPDATA%` untouched; the dev desktop shortcut backed up + restored.
+4. **A real defect the close-out's own gate caught:** §79 had never run ruff on its new module — `desktop/help.py` carried an unused `import json` (**F401**). Removed before the rebuild (-1 line, folded into the counts above); ruff clean now.
+5. **One finding, queued (not fixed):** the frozen build cannot `import MetaTrader5` — its native core wants numpy, which the §63 diet excludes — so `bootstrap`/`help` read MT5 as "not installed" in the packaged app, and the pyd prints a bare `ModuleNotFoundError: No module named 'numpy'` to stdout on each attempt (invisible in a windowed run; the app log stays clean). Measured **identical on the §65-era frozen zip** → pre-existing since §63, not a §79 regression. Owner decision: bundle numpy (≈ +27 MB), exclude MetaTrader5 from the build and reword the card, or leave as-is.
+6. **Cosmetic carry-overs stay queued** (client-abort `ConnectionResetError` filter; bandit SHA1 note) — each would force a second full rebuild + journey cycle on the owner's machine for a logging filter and a kwarg; the owner's call whether to fold them into the next source-changing pass.
+
+**Gates at close:** 874/2 on both interpreters · AUDIT CLEAN · ruff clean · goldens OK · 23/23 selftests · pip-audit clean · frozen exe 27/27 · asset parity 50/50 · installer journey clean. **Nothing committed; nothing pushed; no tag.** `docs/RELEASE_EVIDENCE_v0.1.0-beta.md` refreshed with the new hashes.
+
+**The owner's queue stands:** the push decision, his **physical multi-monitor pass** (**§80** if it finds anything), the release-notes review, then **tag `v0.1.0-beta`** with the zip + Setup + SBOM.
+
+**Resume prompt:** `OFAP: continue from docs/RESUME.md — §79 is closed (counts re-derived, dist/ rebuilt, frozen exe 27/27, installer journey clean, gates 874/2 on both interpreters; nothing committed/pushed/tagged). Next: the owner's queue — push, the physical multi-monitor pass, the release-notes review, then tag v0.1.0-beta with the zip + Setup + SBOM.`
+
+---
+
+---
+
+**§79 close-out addendum — the MT5 finding attended (2026-09-17; nothing committed).**
+
+The close-out block's item 5 (the frozen build cannot load MetaTrader5 — numpy excluded by §63) was attended on the owner's go. Resolved by **excluding the bridge from the build and saying so honestly** — not by re-bundling numpy: that is +27 MB (undoing the §63 diet) for a feed whose terminal path cannot be exercised on this build host, while the exclusion is verifiable today.
+
+1. `scripts/build_exe.py` — `--exclude-module MetaTrader5` (reason in a comment). Verified after the rebuild: `_internal` holds **no MetaTrader5 files** (was a 112 KB `_core.pyd` + hooks).
+2. `engine.mt5_status()` / `engine.mt5_probe()` — a `sys.frozen` branch: the card and the wizard's test step say "Not available in the portable build: the MT5 bridge needs numpy, which this build leaves out. Run the app from source to use the MT5 feed — the exchange feeds work here."; no `pip install` command in that branch.
+3. `data/mt5_feed.py` — the same honest message in its frozen ImportError log line.
+4. UI copy — the guide's MT5 topic and the Help Centre's `connect.mt5` topic now mark the install step **"source installs only"**; the wizard's own "not detected here (reason)" line already flows from `capabilities.mt5.reason` (no edit needed).
+5. Pins (3 new, 874 → **877**): `test_atlas_v2.py::test_mt5_status_names_the_portable_build` + `::test_mt5_probe_names_the_portable_build` (frozen + blocked import → the portable message, empty command), `test_platforms.py::test_the_frozen_build_excludes_the_mt5_bridge` (build script must carry the exclusion).
+
+**Re-verified from the current tree.** pytest **877/2 on 3.12 (25.2 s) and 3.11 (25.1 s)**; AUDIT CLEAN; ruff clean; goldens OK; 23/23 selftests; payload **120/120**; **frozen smoke 29/29** — the two new checks: `bootstrap.mt5.reason` names the portable build and the exe's captured **stdout is empty** (no `ModuleNotFoundError`; was 3+ bare numpy lines per capability probe). **Artefacts rebuilt:** exe 13,580,019 B `a1e31865…` · zip 29,220,818 B `145a708b…` (**525 entries**) · Setup 30,213,471 B `8526f59d…` (0 errors / 4 warnings) · SBOM unchanged. **Installer journey re-run:** silent install → **525 files**, installed exe sha256 == dist exe, shortcut → installed exe; installed smoke on 8098 (healthz 200, candles 200/173,477 B, unknown `[]`, hostile Host refused, 0 client errors); silent uninstall clean via the HKLM WOW6432Node product code `{722FDD16-…}` (the setup self-elevates; the HKCU-only scan misses that view — same as the close-out run); `%APPDATA%` untouched; dev shortcut backed up + restored. Counts re-derived again: File Inventory **191 / 30,980 py / 41,631 UI / 72,611 total**; suite **77 files / 15,627 lines**; JS 79 modules / 34,272 lines; tests badge **877** (CONTRIBUTING updated). `installer/README.md`'s Latest-build line updated; `docs/RELEASE_EVIDENCE_v0.1.0-beta.md` refreshed with the new hashes + the MT5-fix record.
+
+**Nothing committed; nothing pushed; no tag.** The owner's queue stands: the push decision, his physical multi-monitor pass (§80 if it finds anything), the release-notes review, then **tag `v0.1.0-beta`** with the zip + Setup + SBOM.
+
+
+---
+
+### MT5-SHIPS PASS (2026-09-17, same day — **numpy + the bridge now SHIP in the portable build**; supersedes the MT5-fix addendum above)
+
+**Owner's directive (verbatim):** *"i want the packaged app to ship MT5, that's a scoped pass: bundle numpy (+27 MB) and verify against a real MT5 terminal."*
+
+**Source changes.** `scripts/build_exe.py` bundles numpy + MetaTrader5 again (numpy rides with the bridge; the analytics engines stay stdlib-only, pinned). The frozen "portable build" branches in `engine.mt5_status()` / `engine.mt5_probe()` / `data/mt5_feed.py` are deleted — frozen behaves like a source install. Guide + Help Centre MT5 topics reworded ("the portable Windows build already includes the bridge — nothing to install there"; the source-install line kept). Pins: the two portable-build tests + the exclusion test replaced by `test_atlas_v2.py::test_mt5_status_does_not_special_case_the_frozen_build` and `test_platforms.py::test_the_frozen_build_ships_the_mt5_bridge`.
+
+**A real defect, caught by the real terminal and fixed.** `mt5_feed._poll_book` read `entry.volume_real`; live `BookInfo` (package 5.0.6180, measured) is a structseq with `type, price, volume, volume_dbl` — `volume_real` exists on nothing real, so every DOM poll raised (1,558 ERROR+traces in minutes) and the book was dead. Fix: version-tolerant `_book_quantity()` (volume_dbl → volume_real → volume), an honest warning when `market_book_add` fails (it used to log a false "Market book enabled" even for a nonexistent symbol), and a **new `orderflow_system/test_mt5_feed.py` with 5 pins** (the feed had zero unit coverage — why this lived). Counts: pytest **874→877→881** across the day; suite grows to **78 files / 15,664 lines**; badge **881**.
+
+**The real-terminal verification (three levels).** Official MetaTrader 5 terminal installed silently (`mt5setup.exe /auto`) to `C:\Program Files\MetaTrader 5` (build 6199, x64). Root cause found on the way: a fresh official terminal refuses `mt5.initialize()` with `(-10005, 'IPC timeout')` until an account login has completed once (`config/accounts.dat` absent = never logged in; the mql5 forums' standing answer matches) — after a MetaQuotes-Demo demo registration (login **112751745**, virtual 100,000 USD) `initialize()` works from every process, path-optional. Then: **tree engine** `source=mt5` → NAS100USDT 20,953 / XAUUSDT 20,871 / EURUSD 19,933 ticks in 25 s (alternatives: `USTECm→USTEC`, `XAUUSDm→XAUUSD`, `EURUSDm→EURUSD`; BTCUSDT honestly unmatched — no BTC on that demo server). **Feed driver** (20 s): EURUSD 32,686 ticks / **192 DOM snapshots** / 10×10 book; XAUUSD 72,939 / 192 / 7×7. **Frozen exe** (the star receipt): 30,940 / 30,842 / 30,817 ticks in 32 s, **0 `Error polling`**.
+
+**Artefacts (same-day third rebuild).** exe **15,020,151 B `d6287ef2…`** · zip **39,884,552 B `2dc1817d…`** (**565 entries**) · Setup **40,826,742 B `1a1a9f49…`** (0 errors / 4 warnings) · **SBOM regenerated with `--extra mt5`** (**448,822 B `28811a2d…`**, 45 components: metatrader5 5.0.6180 + numpy 2.4.6/2.5.3) — it was a base-only lockfile export and never listed the extra; the **CI audit + SBOM steps carry `--extra mt5`** too (`.github/workflows/ci.yml`). Gate battery on the final tree: pytest **881/2 on 3.12 and 3.11**, AUDIT CLEAN, ruff clean, goldens OK, **23/23 selftests**, **payload 120/120**, **smoke 31/31** (mt5 available in the frozen build + numpy/MT5 asserted in `_internal`), pip-audit clean incl. the extra. Counts re-derived: File Inventory **191 / 30,981 py / 41,631 UI / 72,612 total**; suite **78 / 15,664**; tests badge **881**. **Installer journey:** silent install → **565 files**, installed exe sha == dist exe `d6287ef2…`; installed smoke (healthz 200, candles 200/173,389 B, unknown `[]`, hostile Host 403, 0 client errors); silent uninstall clean via `{820D9A42-F2D4-4CFA-B28D-AB629F5CFB5E}` — found in **both** HKCU and HKLM WOW6432Node (the journey script now scans all three hives, so no manual step this time); dev shortcut backed up + restored; `%APPDATA%` untouched.
+
+**Host note.** The nightly Storage Sense sweep emptied `%LOCALAPPDATA%\Temp` mid-pass (scratch helpers + the parity venv died; §78's raw soak JSON went with it — the evidence page notes it). Scratch now lives in `profiles/deepseek/runtime/ofap_work/`.
+
+**Nothing committed; nothing pushed; no tag.** Owner's queue unchanged: the push decision, his physical multi-monitor pass (§80 if it finds anything), the release-notes review, then **tag `v0.1.0-beta`** with the zip + Setup + SBOM.

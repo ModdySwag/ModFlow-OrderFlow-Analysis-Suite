@@ -335,3 +335,50 @@ def test_a_module_local_api_helper_must_name_the_shells_helper():
         f"{offenders} declares a local api() and then tests the bare name — which resolves to that "
         "same function. The guard must read `typeof window.api` (the shell's helper in ui.js).")
 
+
+# ──────────────────────────────────────────────────────────────
+# v0.1.0-beta shake-down: the frozen build must ship every asset root the shell loads
+# ──────────────────────────────────────────────────────────────
+
+def test_the_frozen_build_ships_every_asset_root_the_shell_loads():
+    """index.html loads assets from /desktop/ AND /static/ — the repo must have them and the
+    frozen build must ship both directories.
+
+    Measured on the first v0.1.0-beta exe (2026-09-17, during the final-security-audit pass):
+    build_exe.py shipped `desktop/ui` but not `dashboard/static`, so `/static/footprint.js`,
+    `/static/orderbook.js`, `/static/tape.js`, `/static/signals.js`, `/static/performance.js` and
+    `/static/microstructure.js` all answered 404 in the frozen app: `window.FootprintChart`,
+    `window.OrderbookLadder`, `window.TimeAndSales`, `window.SignalCards`,
+    `window.PerformanceDashboard` and `window.MicrostructurePanel` stayed undefined and those six
+    widgets silently never initialised (the Tape view rendered 0 rows live). The repo tree was
+    fine, and the script-tag guard above only looks at /desktop/ — which is exactly why nothing
+    caught it. This pins both halves: the referenced files exist on disk, and every root the page
+    loads from is inside the build's REQUIRED_DATA_RELS.
+    """
+    import importlib.util
+
+    html = _html()
+    refs = re.findall(r'(?:src|href)="([^"]+)"', html)
+    local = [r for r in refs
+             if not r.startswith(("http://", "https://", "data:", "#", "mailto:", "//")) and r != "/"]
+    roots = {"/desktop/": UI,
+             "/static/": ROOT / "orderflow_system" / "dashboard" / "static"}
+    unknown_roots = [r for r in local if not any(r.startswith(p) for p in roots)]
+    assert not unknown_roots, (
+        f"index.html loads from an asset root this guard does not know: {unknown_roots} — add it "
+        "here and make sure the frozen build ships it")
+    missing = [r for r in local
+               for prefix, base in roots.items()
+               if r.startswith(prefix) and not (base / r[len(prefix):].split("?")[0]).is_file()]
+    assert not missing, f"index.html loads files that are not on disk: {missing}"
+
+    spec = importlib.util.spec_from_file_location("ofap_build_exe", ROOT / "scripts" / "build_exe.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    shipped = set(getattr(mod, "REQUIRED_DATA_RELS", ()))
+    for prefix, base_rel in (("/desktop/", mod.UI_REL), ("/static/", mod.STATIC_REL)):
+        if any(r.startswith(prefix) for r in local):
+            assert base_rel in shipped, (
+                f"the shell loads assets from {prefix} ({base_rel}) but the frozen build does not "
+                "ship that directory (REQUIRED_DATA_RELS) — the packaged app 404s them silently")
+

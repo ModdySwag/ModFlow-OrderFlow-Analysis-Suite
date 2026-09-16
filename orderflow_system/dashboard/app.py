@@ -150,6 +150,16 @@ app.add_middleware(LocalRequestGuard)
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+else:
+    # Fail loud: the desktop shell's own index.html loads six widget modules from /static/
+    # (footprint, orderbook, tape, signals, performance, microstructure) and instantiates their
+    # classes. A build that omits this directory answers 404 for all six and those widgets
+    # silently never initialise — measured on the first v0.1.0-beta exe, where every test and
+    # smoke still passed. The log line is the only signal a user would ever get.
+    logger.warning(
+        "dashboard/static is missing (%s) — the shell's /static/*.js widget modules will answer "
+        "404 and Footprint/Depth/Tape/Signals/Performance/Microstructure will not initialise",
+        _static_dir)
 
 
 @app.get("/", include_in_schema=False)

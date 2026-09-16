@@ -2190,3 +2190,49 @@ async def windows_post(payload: dict = Body(default={})) -> dict[str, Any]:
     return {"ok": False, "action": action,
             "error": "unknown action %r (open, close, focus, ontop, close_all)" % action,
             **_windows_state()}
+
+
+# ──────────────────────────────────────────────────────────────
+# Help Centre (§79)
+# ──────────────────────────────────────────────────────────────
+
+@router.get("/help")
+async def help_report() -> dict[str, Any]:
+    """Everything the in-app help system cannot invent: the facts, the credits and the system check.
+
+    The topic corpus and the search engine are front-end (desktop/ui/help-data.js, help-search.js);
+    what lives here is the program's own truth — name, version, licence, folders — plus the
+    configuration errors and irregularities the Simple interface warns about. Read-only: it never
+    starts an engine, never touches the network and never writes.
+    """
+    from orderflow_system.desktop import help as help_mod
+
+    return help_mod.report()
+
+
+@router.post("/help")
+async def help_prefs(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Persist the Help Centre's preferences (patched, validated by the store).
+
+    Body: `{mode?: "advanced"|"simple", dock?: "taskbar"|"floating"|"off", recents?: [ids],
+    dismissed?: [check ids]}` — omitted keys keep their stored value, a value outside the allowed set
+    is ignored rather than resetting what is stored, and both lists are bounded by the store. The
+    answer is the stored block, so the UI adopts what was saved rather than what it sent.
+    """
+    patch: dict[str, Any] = {}
+    mode = str(payload.get("mode") or "").strip().lower()
+    if mode in ("advanced", "simple"):
+        patch["mode"] = mode
+    dock = str(payload.get("dock") or "").strip().lower()
+    if dock in ("taskbar", "floating", "off"):
+        patch["dock"] = dock
+    if isinstance(payload.get("recents"), list):
+        patch["recents"] = [str(t) for t in payload["recents"]]
+    if isinstance(payload.get("dismissed"), list):
+        patch["dismissed"] = [str(t) for t in payload["dismissed"]]
+    if not patch:
+        return {"ok": False, "error": "nothing to save (mode, dock, recents, dismissed)",
+                "help": config_store.load_config().get("help", {})}
+    saved = config_store.merge_config({"help": patch})
+    return {"ok": True, "help": saved.get("help", {}),
+            "config_path": str(config_store.config_path())}

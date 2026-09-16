@@ -879,6 +879,17 @@ def test_mt5_probe_offers_a_command_that_fits_the_environment():
         assert ("-m pip install" in cmd) if has_pip else ("uv pip install" in cmd), cmd
 
 
+def test_mt5_status_does_not_special_case_the_frozen_build(monkeypatch):
+    """The portable build ships numpy + the bridge (owner's call): frozen must not refuse MT5."""
+    pytest.importorskip("MetaTrader5")
+    from orderflow_system.desktop import engine as eng
+
+    monkeypatch.setattr(sys, "platform", "win32", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    info = eng.mt5_status()
+    assert info["available"] is True, "a frozen build with the bridge present must report it"
+
+
 # ═══════════════════════════════════════════════════════════════
 # VWAP suite, trade detector, scanner, delta bars (the reference platform pass)
 # ═══════════════════════════════════════════════════════════════

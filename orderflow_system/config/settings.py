@@ -178,9 +178,10 @@ class TelegramConfig:
 class DashboardConfig:
     """Web dashboard settings.
 
-    Loopback by default: this API is unauthenticated, so the standalone pipeline must not put
-    it on the LAN by accident. Expose it deliberately (`host="0.0.0.0"`) only if you mean to,
-    and remember the whole API is then readable by every device on the network.
+    Loopback by default: this API is unauthenticated, so the bind must not leave the machine
+    unless the owner says so — LAN exposure is a deliberate `host` change (e.g. "0.0.0.0"), and
+    the loopback request guard (dashboard/app.py::LocalRequestGuard) screens Host/Origin headers
+    on every request either way.
     """
     enabled: bool = True
     host: str = "127.0.0.1"

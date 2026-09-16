@@ -1509,10 +1509,11 @@ const HELP_TOPICS = {
             { t: 'Log in and leave it running', d: 'Open the terminal and sign in (File \u2192 Login to Trade '
                 + 'Account). The Python bridge talks to the <i>running</i> terminal, so a closed terminal means no '
                 + 'data. Demo and live accounts behave identically here.' },
-            { t: 'Install the Python bridge into this app\u2019s environment', d: 'Run this from the program '
-                + 'folder \u2014 pick the line that matches how this environment was built (the bridge '
-                + 'test below prints the right one for this machine). Nothing else in the program needs it.'
-                + 'installed on this machine.',
+            { t: 'Install the Python bridge (source installs)', d: 'The portable Windows build already '
+                + 'includes the bridge \u2014 nothing to install there; go to the test below. In a '
+                + 'source install, run this from the program folder \u2014 pick the line that matches '
+                + 'how this environment was built (the test below prints the right one for this '
+                + 'machine).',
               cmds: ['.venv\\Scripts\\python.exe -m pip install MetaTrader5',
                      'uv pip install --python .venv\\Scripts\\python.exe MetaTrader5'] },
             { t: 'Terminal path — only if it is not found automatically', d: 'Leave blank and the bridge looks '

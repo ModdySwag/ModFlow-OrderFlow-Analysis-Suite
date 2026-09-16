@@ -224,6 +224,10 @@ def default_config() -> dict[str, Any]:
         # Third-party platform bridge. the DTC platform is reachable over its DTC server, so its
         # connection details live here (like the Alpaca keys: per-user config, never in the
         # repo, never in logs). the reference platform has no external API — nothing to store for it.
+        # LAN exposure for the dashboard is opt-in through `dashboard.host` (loopback by default;
+        # set it to an interface address, e.g. "0.0.0.0", to serve the LAN deliberately). The
+        # control API redacts credentials on GET (see desktop/api.py and SECURITY.md for the
+        # threat model).
         "platforms": {
             "sierra": {"enabled": False, "host": "127.0.0.1", "port": 11099,
                        "username": "", "password": "", "use_tls": False, "symbol": "",
@@ -365,6 +369,17 @@ def default_config() -> dict[str, Any]:
             # and a launch restores exactly what was open. Geometry lives here so a multi-monitor
             # arrangement comes back as it was.
             "windows": [],
+        },
+        # §79: the Help Centre. `mode` picks which of the two interfaces the user gets — advanced
+        # (every topic, including the under-the-hood and danger-zone groups) or simple (the safe
+        # subset, with the system check at the top and a way up to the advanced topics); `dock` is
+        # where the launcher lives (the status bar's own strip = the app's taskbar, a floating
+        # button, or nowhere); `recents` is the short trail of topics opened, newest first.
+        "help": {
+            "mode": "advanced",        # advanced | simple
+            "dock": "taskbar",         # taskbar | floating | off
+            "recents": [],             # topic ids, newest first, capped below
+            "dismissed": [],           # system-check ids the user has silenced
         },
     }
 
@@ -947,6 +962,19 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     ui["window"] = clean_window(ui.get("window"))
     # §73: the auxiliary windows that are open — the desired set a launch restores.
     ui["windows"] = clean_windows(ui.get("windows"))
+
+    # §79: the Help Centre's own preferences. An unknown mode or dock paints the default rather
+    # than a broken panel (the UI clamps too, so the file and the page agree about what is legal),
+    # and the recents trail is a bounded list of ids — never an unbounded append from the page.
+    help_cfg = _block(cfg, "help")
+    help_cfg["mode"] = help_cfg.get("mode") if help_cfg.get("mode") in ("advanced", "simple") else "advanced"
+    help_cfg["dock"] = help_cfg.get("dock") if help_cfg.get("dock") in ("taskbar", "floating", "off") else "taskbar"
+    recents = help_cfg.get("recents")
+    help_cfg["recents"] = ([str(t).strip() for t in recents if isinstance(t, str) and t.strip()][:12]
+                           if isinstance(recents, list) else [])
+    dismissed = help_cfg.get("dismissed")
+    help_cfg["dismissed"] = ([str(t).strip() for t in dismissed if isinstance(t, str) and t.strip()][:24]
+                             if isinstance(dismissed, list) else [])
 
     alp = _block(cfg, "alpaca")
     feed = str(alp.get("feed", "iex") or "iex").lower()

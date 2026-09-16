@@ -517,7 +517,16 @@ def test_the_frozen_build_ships_the_addon_folder():
     text = (Path(__file__).resolve().parents[1] / "scripts" / "build_exe.py").read_text(
         encoding="utf-8", errors="replace")
     assert "orderflow_system/data/bookmap_addon" in text, "build_exe.py must ship the add-on folder"
-    assert "--add-data" in text and "addon_rel" in text, "it ships as data, like the web UI does"
+    assert "--add-data" in text and "ADDON_REL" in text, "it ships as data, like the web UI does"
+
+
+def test_the_frozen_build_ships_the_mt5_bridge():
+    """The portable build bundles numpy so the MetaTrader5 bridge loads (the owner's call) —
+    neither may be excluded, or the packaged MT5 feed silently dies again."""
+    text = (Path(__file__).resolve().parents[1] / "scripts" / "build_exe.py").read_text(
+        encoding="utf-8", errors="replace")
+    assert '"--exclude-module", "MetaTrader5"' not in text, "the bridge must ship in the build"
+    assert '"--exclude-module", "numpy"' not in text, "numpy must ship — the bridge needs it"
 
 
 def test_the_bridge_compat_is_compared_not_assumed(tmp_path):
