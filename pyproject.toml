@@ -1,28 +1,76 @@
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "orderflow-system"
 version = "0.1.0"
-description = "Semi-automated orderflow trading alert system based on Fabio's methodology"
-requires-python = ">=3.10"
+description = "Order-flow analysis desktop suite: footprint, depth heatmap, delta/CVD and volume-profile tooling with a pywebview UI"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+# Every entry is imported by the app (verified against the tree); nothing speculative.
+# The frozen build (scripts/build_exe.py) collects the same set.
 dependencies = [
+    "fastapi>=0.110",
+    "starlette>=0.40",
+    "uvicorn>=0.27",
+    "pywebview>=5.0",
+    "pythonnet>=3.0; sys_platform == 'win32'",
     "websockets>=12.0",
     "aiohttp>=3.9",
-    "pandas>=2.1",
-    "numpy>=1.26",
-    "scipy>=1.12",
-    "python-telegram-bot>=21.0",
-    "plotly>=5.18",
-    "kaleido>=0.2.1",
     "aiosqlite>=0.19",
-    "pytz>=2024.1",
-    "pyyaml>=6.0",
+    "python-telegram-bot>=21.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+# MetaTrader 5 is Windows-only and imported lazily — only the MT5 feed needs it.
+mt5 = ["MetaTrader5>=5.0; sys_platform == 'win32'"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pyinstaller>=6.0",
+]
 
 [project.scripts]
 orderflow = "orderflow_system.main:main"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+# The reviewer-facing baseline: pyflakes (F), syntax errors (E9) and bugbear (B).
+select = ["F", "E9", "B"]
+ignore = [
+    # FastAPI declares dependencies as calls in argument defaults (Depends(), Query(), Header()):
+    # that is the framework's idiom, not a bug.
+    "B008",
+    # zip(strict=...) is a behaviour change (it raises on uneven lengths), not a style one —
+    # changing it here could turn a tolerated data mismatch into a crash.
+    "B905",
+]
+
+
+[tool.setuptools.packages.find]
+include = ["orderflow_system*"]
+
+# The UI ships inside the package so a wheel / `pip install` carries it, the same way
+# scripts/build_exe.py bundles it for the frozen app.
+[tool.setuptools.package-data]
+orderflow_system = [
+    "desktop/ui/*",
+    "desktop/ui/indicators/*",
+    "testdata/*",
+    "testdata/fundamentals/*",
+    "data/bookmap_addon/*",
+]

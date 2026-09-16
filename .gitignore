@@ -20,3 +20,6 @@ venv/
 Thumbs.db
 .claude/
 .continue/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

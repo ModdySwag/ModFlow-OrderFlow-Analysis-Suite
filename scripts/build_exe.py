@@ -63,6 +63,19 @@ def main() -> int:
         "--collect-all", "starlette",
         "--hidden-import", "clr_loader",
         "--hidden-import", "pythonnet",
+        # The analytics engines are stdlib-only (see scripts/regen_analytics_golden.py and
+        # test_no_numpy.py): numpy + OpenBLAS was 27 MB of the 68 MB package for four sums, a
+        # std() and a five-term line fit. The rest of this list is hook collateral — nothing the
+        # app can import needs any of it (pytz/tzdata/watchfiles ride in on other packages' hooks).
+        "--exclude-module", "numpy",
+        "--exclude-module", "pandas",
+        "--exclude-module", "scipy",
+        "--exclude-module", "plotly",
+        "--exclude-module", "kaleido",
+        "--exclude-module", "matplotlib",
+        "--exclude-module", "pytz",
+        "--exclude-module", "tzdata",
+        "--exclude-module", "watchfiles",
         # source must be absolute: --specpath makes relative sources resolve inside build/
         "--add-data", f"{(ROOT / ui_rel).as_posix()};{ui_rel}",
         "--distpath", str(ROOT / "dist"),

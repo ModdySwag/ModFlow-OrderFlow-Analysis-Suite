@@ -6,12 +6,31 @@ Core component for detecting absorption, initiative, exhaustion, and divergence.
 
 from __future__ import annotations
 
-import numpy as np
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
-from orderflow_system.data.models import Tick, Candle, Side
+from orderflow_system.data.models import Tick, Candle
+
+
+def _slope(values: list[float]) -> float:
+    """Least-squares slope of `values` over their index.
+
+    This is what `np.polyfit(x, np.arange(n), 1)[0]` returned. Kept as five lines of
+    arithmetic on purpose: numpy was imported by this module for this fit alone, and
+    numpy + OpenBLAS is 27 MB of the frozen build. `scripts/regen_analytics_golden.py`
+    pins the numbers this returns against the ones the numpy version produced.
+    """
+    n = len(values)
+    if n < 2:
+        return 0.0
+    x_mean = (n - 1) / 2.0
+    y_mean = sum(float(v) for v in values) / n
+    sxx = sum((i - x_mean) ** 2 for i in range(n))
+    if sxx == 0.0:
+        return 0.0
+    sxy = sum((i - x_mean) * (float(v) - y_mean) for i, v in enumerate(values))
+    return sxy / sxx
 
 
 @dataclass
@@ -150,13 +169,7 @@ class DeltaEngine:
         recent = [d.vertical_delta for d in self._delta_history[-lookback:]]
         if len(recent) < 2:
             return 0.0
-        # Simple slope via linear regression
-        x = np.arange(len(recent), dtype=float)
-        y = np.array(recent, dtype=float)
-        if np.std(x) == 0:
-            return 0.0
-        slope = float(np.polyfit(x, y, 1)[0])
-        return slope
+        return _slope(recent)
 
     def get_volume_trend(self, lookback: int = 5) -> float:
         """Slope of total volume over last N bars. Declining = exhaustion clue."""
@@ -166,12 +179,9 @@ class DeltaEngine:
             d.buy_volume + d.sell_volume
             for d in self._delta_history[-lookback:]
         ]
-        x = np.arange(len(recent), dtype=float)
-        y = np.array(recent, dtype=float)
-        if np.std(x) == 0:
+        if len(recent) < 2:
             return 0.0
-        slope = float(np.polyfit(x, y, 1)[0])
-        return slope
+        return _slope(recent)
 
     def detect_delta_peaks(
         self, lookback: int = 20

@@ -10,12 +10,37 @@ Implements Fabio's methodology:
 
 from __future__ import annotations
 
-import numpy as np
+import math
 from collections import defaultdict
-from typing import Optional
 
 from orderflow_system.data.models import Tick, VolumeProfileResult, Candle
 from orderflow_system.config.settings import VolumeProfileConfig
+
+
+def _argmax(values: list[float]) -> int:
+    """Index of the *first* maximum — numpy.argmax's tie rule, in three lines.
+
+    numpy was imported by this module for argmax/mean/std alone; the frozen build pays
+    27 MB for it. `scripts/regen_analytics_golden.py` pins every profile this engine
+    produces against the numbers the numpy version produced, ties included.
+    """
+    best = 0
+    for i in range(1, len(values)):
+        if values[i] > values[best]:
+            best = i
+    return best
+
+
+def _mean(values: list[float]) -> float:
+    return math.fsum(values) / len(values) if values else 0.0
+
+
+def _pstd(values: list[float]) -> float:
+    """Population standard deviation — numpy's default (`ddof=0`), not the sample one."""
+    if not values:
+        return 0.0
+    m = _mean(values)
+    return math.sqrt(math.fsum((v - m) ** 2 for v in values) / len(values))
 
 
 class VolumeProfileEngine:
@@ -112,14 +137,14 @@ class VolumeProfileEngine:
             return VolumeProfileResult(session_date=session_date)
 
         prices = sorted(volume_at_price.keys())
-        volumes = np.array([volume_at_price[p] for p in prices])
-        total_volume = float(volumes.sum())
+        volumes = [float(volume_at_price[p]) for p in prices]
+        total_volume = math.fsum(volumes)
 
         if total_volume == 0:
             return VolumeProfileResult(session_date=session_date)
 
         # ── POC: price with maximum volume ──
-        poc_idx = int(np.argmax(volumes))
+        poc_idx = _argmax(volumes)
         poc = prices[poc_idx]
 
         # ── Value Area: expand from POC until 68% of volume ──
@@ -146,7 +171,7 @@ class VolumeProfileEngine:
     def _compute_value_area(
         self,
         prices: list[float],
-        volumes: np.ndarray,
+        volumes: list[float],
         poc_idx: int,
         total_volume: float,
     ) -> tuple[float, float]:
@@ -155,7 +180,7 @@ class VolumeProfileEngine:
         with higher volume, until 68% of total volume is enclosed.
         """
         target = total_volume * self.config.value_area_pct
-        accumulated = float(volumes[poc_idx])
+        accumulated = volumes[poc_idx]
         lo = poc_idx
         hi = poc_idx
 
@@ -166,8 +191,8 @@ class VolumeProfileEngine:
             if not can_go_up and not can_go_down:
                 break
 
-            vol_up = float(volumes[hi + 1]) if can_go_up else -1.0
-            vol_down = float(volumes[lo - 1]) if can_go_down else -1.0
+            vol_up = volumes[hi + 1] if can_go_up else -1.0
+            vol_down = volumes[lo - 1] if can_go_down else -1.0
 
             if vol_up >= vol_down:
                 hi += 1
@@ -181,7 +206,7 @@ class VolumeProfileEngine:
         return vah, val
 
     def _detect_lvn(
-        self, prices: list[float], volumes: np.ndarray
+        self, prices: list[float], volumes: list[float]
     ) -> list[float]:
         """
         Detect Low Volume Nodes — price levels with volume significantly
@@ -191,8 +216,8 @@ class VolumeProfileEngine:
         if len(volumes) < 5:
             return []
 
-        mean_vol = float(np.mean(volumes))
-        std_vol = float(np.std(volumes))
+        mean_vol = _mean(volumes)
+        std_vol = _pstd(volumes)
         threshold = mean_vol - self.config.lvn_stddev_factor * std_vol
         threshold = max(threshold, mean_vol * 0.2)  # Floor at 20% of mean
 
@@ -211,7 +236,7 @@ class VolumeProfileEngine:
     def _classify_shape(
         self,
         prices: list[float],
-        volumes: np.ndarray,
+        volumes: list[float],
         poc_idx: int,
     ) -> tuple[str, float]:
         """
@@ -230,11 +255,11 @@ class VolumeProfileEngine:
         # Check for double distribution (bimodal)
         if n >= 10:
             mid = n // 2
-            upper_max = int(np.argmax(volumes[mid:])) + mid
-            lower_max = int(np.argmax(volumes[:mid]))
-            upper_vol = float(volumes[upper_max])
-            lower_vol = float(volumes[lower_max])
-            mean_vol = float(np.mean(volumes))
+            upper_max = mid + _argmax(volumes[mid:])
+            lower_max = _argmax(volumes[:mid])
+            upper_vol = volumes[upper_max]
+            lower_vol = volumes[lower_max]
+            mean_vol = _mean(volumes)
 
             # Both peaks must be significant and there's a valley between them
             if (
@@ -245,7 +270,7 @@ class VolumeProfileEngine:
                 valley_start = min(lower_max, upper_max)
                 valley_end = max(lower_max, upper_max)
                 if valley_end - valley_start > 2:
-                    valley_min = float(np.min(volumes[valley_start + 1 : valley_end]))
+                    valley_min = min(volumes[valley_start + 1 : valley_end])
                     if valley_min < min(upper_vol, lower_vol) * 0.5:
                         return "double_dist", poc_pct
 
