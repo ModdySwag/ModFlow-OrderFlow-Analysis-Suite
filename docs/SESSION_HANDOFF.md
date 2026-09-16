@@ -3893,3 +3893,66 @@ shape.
 (`ui.windows` + clamps), `desktop/launcher.py` (`NativeWindowHost`, `restore_windows`, wired into
 `main()`), `desktop/ui/shell.js` (AUX mode, aux bar, guards), `desktop/ui/index.html` (script tag +
 `#topWins`), `desktop/ui/atlas.css` (§73 styles).
+
+---
+
+## §74 — the pre-tag pass: the corpus is committed, the counts refreshed, SS-8 closed
+
+**What this pass is.** With the owner's go, the fixed tree went into history and the release face
+was made exact: commits, docs/counts, CI, lockfile. No source semantics changed.
+
+**The series — 18 commits, `fa202d6..14b4759`** (`git log --oneline fa202d6..14b4759` is the register):
+
+```
+1aa2a17 atlas: the alerts card reads, edits and fires like the engine means it (P1-7)
+a5b0086 desktop: five bar expression modes, measured palettes, and the legend that names them (P1-8)
+457bc28 desktop: the one shortcut map, and the palette crash it uncovered (P1-9)
+b6e63ec desktop: the age of every panel's data, declared (P1-10)
+3b3ff83 desktop: the hover path is indexed, the heat pass change-gated, the frame yields (P2)
+26930fe data: the session has a boundary, the database has a window (P3-2)
+01f2204 atlas: the heat wire, the carry-overs, and the inline text editors (§56/§57)
+efb86a1 desktop: the ModFlow badge becomes the iconography (§60–§62)
+272f85c chore: the package diet — numpy out, stdlib in (§63)
+0b3507c fix: the source switch called a property; the Python 3.11 hang — the release passes (§64/§65)
+c35dd59 chore: the lint pass — unused imports and dead aliases dropped (§64)
+350d360 tests: the v0.1b audit return — seven fixes pinned, three probes rejected (§66–§68)
+f822052 installer: the Windows installer built, verified, documented (§69)
+ea83c48 security: the secure2 sweep — the loopback boundary, feed gates, release hygiene (§70)
+4110ea6 desktop: display hardening — the dpr canvas law, refit, window memory (§71/§72)
+c25f36d desktop: widget windows — one panel per native window, placed and restored (§73)
+fcd0a21 docs: the trail through §73, and the pre-release count pass (handoff, plan, resume, readme)
+14b4759 chore: the dependency lock, the CI audit, and the third-party notices (SS-8)
+```
+
+**How it was split.** One commit per wave, each file staged exactly once (verified: 166/166 dirty
+entries assigned, no file in two commits). A file touched by several waves carries its **final**
+content in the latest wave's commit — `index.html` rides in the §73 commit, `dashboard/app.py` in
+the §70 commit. The per-section change sets at the end of §§40–65, §70, §72, §73 remain the
+authoritative file→section map; the messages carry the §-refs.
+
+**The release face, made true (the audit's N-2/N-3).**
+- `SECURITY.md` — the vendored chart library is **Apache-2.0** (was mislabelled "MIT"); the version
+  string is `v0.1.0-beta`. New `THIRD_PARTY_NOTICES.md` at the root: the vendored copy (banner
+  retained) + the Python dependency licence story (the frozen build carries
+  `_internal/*.dist-info/licenses/`).
+- Counts re-derived (2026-09-16): suite **712/2 on both interpreters**; UI selftests **20** (shell
+  30, ofx 183, + windows-ui 10 — RESUME's list updated); README badges true (tests 644→712, code
+  ~62k→~64k, API 132→**133** routes — measured from the running app's OpenAPI: 45 atlas + 72
+  control + 16 legacy); File Inventory re-measured (**175 files / 27,237 py / 36,583 UI / 63,820
+  total**; suite 68 files / 12,371 lines); the tree diagram's `(NNNL)` claims re-checked — five
+  drifted since §66 and were corrected (app.py 1371, bybit_feed.py 329, absorption.py 266,
+  initiative.py 136, settings.py 815); CONTRIBUTING baseline updated.
+
+**SS-8 closed.** `uv.lock` committed (59 packages, `uv` 0.12.8); CI gains a pinned dependency-audit
+step: `uv export --frozen` (lockfile integrity) → `pip-audit` over the locked set — clean on
+2026-09-16. `.gitignore` covers the tool caches. An SBOM artifact remains optional.
+
+**Receipts.** pytest **712 passed / 2 skipped** on 3.12 (24.5 s) *and* 3.11 (24.5 s) — on the exact
+committed content; `audit_ui_refs.py` **AUDIT CLEAN** (71 modules); ruff clean; analytics golden
+**0.000e+00** (40 cases); config golden **49 instruments**; **20/20** selftests; API surface **133**
+operations. Frozen artefacts re-verified against the committed tree: **90/90 bundled loose files
+byte-identical**, no source file newer than the build — **no rebuild needed** (docs/CI-only pass);
+the zip/setup exe hashes in the RE-ATTENDANCE block remain the release candidates.
+
+**Next (owner).** Push (the remote decision), the physical multi-monitor pass, release-notes
+review, then the tag `v0.1.0-beta` + attach zip + Setup exe.

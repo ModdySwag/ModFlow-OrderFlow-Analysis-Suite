@@ -7,25 +7,24 @@
 > windows)** are all landed on disk. Gates: **712 passed / 2 skipped**, AUDIT CLEAN, ruff clean, both
 > goldens byte-identical, **20** UI selftests green. Frozen artifacts rebuilt and smoked after §73:
 > exe 12.7 MB, zip 27,207,924 B `b571c6551c7afe5b…`, setup.exe 28,165,836 B `d2435b6f95c81328…`.
-> Tree is **dirty (161 entries), HEAD `fa202d6`, nothing committed, nothing pushed.**
+> Tree is **clean**; the §40–§73 corpus is committed locally (18 commits + this §74 record),
+> **nothing pushed**. Frozen artefacts re-verified against the tree (§74) — no rebuild needed.
 >
 > **Next, in order (owner's call):**
-> 1. **Commit + push** — the whole hardening effort (§39–§73) exists only on this disk. Prep is
->    ready to do: a proposed commit split (security sweep / display hardening / widget windows /
->    docs) + message bodies; the remote decision is his (`origin` is still the original author's
->    repo, so this needs his own repo or a fork).
+> 1. **Push** — committed locally (§40–§73 corpus + §74 record); the remote decision is his
+>    (`origin` is still the original author's repo, so this needs his own repo or a fork).
 > 2. **Physical multi-monitor pass by the owner** — the only claim this host cannot verify (one
 >    display). Open the app → board → pull the Engine out to monitor 2 → pin → drag → quit → relaunch
->    and confirm it returns. Anything real-hardware-specific becomes a small §74 pass.
+>    and confirm it returns. Anything real-hardware-specific becomes a small follow-up pass (§75).
 > 3. **Release notes + tag message draft** (`v0.1.0-beta`) for review — his convention: reviewed
 >    before publish, so drafts, never commits.
-> 4. **Optional SS-8** — `uv.lock` + a `pip-audit`/SBOM CI step; the last open item from the secure2
->    directive, held back so he reviews that diff himself.
+> 4. **SS-8 closed (§74)** — `uv.lock` committed + a pinned `pip-audit` CI step over the locked set;
+>    the third-party notices landed too. An SBOM artifact remains optional.
 > 5. Then the tag: `v0.1.0-beta` + attach `dist/ModFlowOrderFlowAnalysisSuite-win64.zip` and the
 >    Setup exe.
 >
-> **Resume prompt:** `OFAP: continue from docs/RESUME.md §73 — next is the commit plan + release-notes
-> draft, then the tag.`
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — the corpus is committed; next is the push
+> (the remote decision), the owner's multi-monitor pass, and the release-notes/tag drafts.`
 
 One page for picking this up cold. The full trail lives in `docs/SESSION_HANDOFF.md`
 (§24–§38 cover the terminal-mode build, the bus, the panels, the commit series, the P0 trust pass, the
@@ -70,10 +69,9 @@ sequence (commit → push → tag `v0.1.0-beta`), not these trigger-gated items.
 
 ## Where it stands
 
-- **Branch `master`, HEAD = `fa202d6`** (`docs: P1-7 recon — where the alerts stand, and the cold-start
-  refresh (handoff 39)`). **The tree is dirty: P1-7 through §73 are on disk, uncommitted** — 161 entries in
-  `git status --porcelain`, and that command is the authority (per-section file lists live at the end of
-  §§40–65, §70, §72, §73). `git log -1` names HEAD; nothing is pushed. New in §56/§57:
+- **Branch `master`; the tree is clean.** The P1-7 → §73 corpus is **committed** — 18 per-wave
+  commits from `fa202d6`, each file staged exactly once; §74 records the pre-tag pass around it.
+  **Nothing is pushed.** New in §56/§57:
   §63/§64 added `test_analytics_golden.py`, `test_no_numpy.py`, `test_source_switch.py`,
   `scripts/regen_analytics_golden.py` and `testdata/analytics_golden.json`; §66–§68 added ten audit-pin
   test files and `docs/AUDIT_RETURN_v0.1b.md`; §70 added `SECURITY.md`, `docs/SECURITY_SWEEP_v0.1b.md`,
