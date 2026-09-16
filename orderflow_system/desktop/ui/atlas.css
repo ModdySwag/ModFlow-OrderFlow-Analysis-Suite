@@ -454,6 +454,39 @@ body.term-mode main.views > section.view { display: none; }
 }
 .term-btn:hover { border-color: var(--border-active); color: var(--text-primary); }
 
+/* §73: widget windows — the bar's window control and the menu behind it. A browser session draws
+   none of this (the API answers native: false and windows-ui.js stays empty), so these rules only
+   ever style a real desktop session. */
+.term-wins { display: inline-flex; align-items: center; gap: 6px; }
+.top-wins { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
+.win-btn {
+    padding: 3px 10px; font-size: 11.5px; border-radius: 6px; cursor: pointer;
+    background: rgba(var(--of-accent-rgb),.12); border: 1px solid var(--border); color: var(--text-secondary);
+}
+.win-btn:hover { border-color: var(--border-active); color: var(--text-primary); }
+.win-btn:disabled { opacity: .45; cursor: default; }
+.win-menu {
+    position: fixed; z-index: 82; min-width: 250px; padding: 4px 0;
+    background: rgba(var(--of-deep-2-rgb),.99); border: 1px solid rgba(var(--of-steel-rgb),.38);
+    border-radius: 7px; box-shadow: 0 12px 30px rgba(var(--of-black-rgb),.55);
+    font: 500 11.5px/1.3 system-ui, sans-serif; color: var(--of-ink-hi);
+}
+.win-head { padding: 5px 10px 3px; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--text-muted); }
+.win-line { display: flex; align-items: center; gap: 2px; padding-right: 4px; }
+.win-row { display: block; width: 100%; text-align: left; background: transparent; border: 0;
+    color: var(--of-ink-hi); font: inherit; padding: 5px 10px; cursor: pointer; }
+.win-row:hover { background: rgba(var(--of-link-rgb),.30); }
+.win-row:disabled { opacity: .45; cursor: default; }
+.win-line .win-row { flex: 1 1 auto; width: auto; }
+.win-pin, .win-x { background: transparent; border: 0; color: var(--of-ink-hi); cursor: pointer;
+    font: inherit; padding: 3px 6px; border-radius: 5px; }
+.win-pin:hover, .win-x:hover { background: rgba(var(--of-link-rgb),.30); }
+.win-sep { height: 1px; margin: 4px 0; background: rgba(var(--of-steel-rgb),.30); }
+.win-note, .win-err { padding: 5px 10px; color: var(--text-muted); font-size: 11px; }
+.win-err { color: var(--red); }
+.term-wins .win-err { padding: 0 4px; }
+
 /* The grid is the same 12×8 the layout store clamps against: a widget's cell coordinates ARE its
    grid placement, so what the store kept is what the screen shows. Rows are a share of the frame's
    height (min 56px) so a full board fits the window instead of always scrolling. */
@@ -552,6 +585,20 @@ body.wf-gesture .wf-body { pointer-events: none; }
 .ofap-cursor-row, tr.ofap-cursor-row > td { background: rgba(var(--of-trace-rgb),.10) !important;
     outline: 1px solid rgba(var(--of-trace-rgb),.35); outline-offset: -1px; }
 
+/* ── P1-10: the freshness chip — the age of what a panel displays ──────────────────────────────
+   Same geometry as the cursor badge beside it; the STATE is the colour. Stale dims the data
+   area (never hides it) and the chip says how long it has been. */
+.ofap-fresh-chip { display: inline-flex; align-items: center; margin-left: 8px; padding: 1px 7px;
+    border-radius: var(--of-radius); font: 600 10.5px ui-monospace, monospace; letter-spacing: .02em;
+    color: var(--of-ink-2); background: rgba(var(--of-steel-rgb),.10);
+    border: 1px solid rgba(var(--of-steel-rgb),.30); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ofap-fresh-chip.is-fresh { color: rgb(var(--of-ok-ink-rgb)); border-color: rgba(var(--of-ok-rgb),.35); }
+.ofap-fresh-chip.is-aging { color: var(--of-warn); border-color: rgba(var(--of-warn-rgb),.45); }
+.ofap-fresh-chip.is-stale { color: var(--of-warn-ink); background: var(--of-warn-bg);
+    border-color: rgba(var(--of-warn-rgb),.55); }
+.ofap-fresh-chip.is-held, .ofap-fresh-chip.is-demo, .ofap-fresh-chip.is-unknown { color: var(--of-ink-dim); }
+.view.ofap-stale canvas, .view.ofap-stale table { opacity: .6; }
+
 /* ── P1-5: the hidden-block count beside the min-block floor ─────────────────────────────────────
    Small, quiet at zero, warning-coloured when the filter is actually hiding executions. */
 .ofx-hidden { margin-left: 6px; font: 600 10px var(--of-font-mono), monospace; letter-spacing: .02em;
@@ -584,3 +631,15 @@ body.wf-gesture .wf-body { pointer-events: none; }
 .ofx-sel-why { margin-top: 4px; max-width: 520px; font: 400 10.5px var(--of-font-mono), monospace;
     color: var(--of-warn); }
 .ofx-sel-note:empty { display: none; }
+
+/* ── the alert rule editor (P1-7) ─────────────────────────────────────────
+   A rule's editor IS its row: named fields built from OFAPALERTS.paramSpec(kind) laid out in a grid,
+   with the sentence those fields will save printed underneath — the form and the words side by side.
+   Tokens only, so the light and contrast shells theme it with everything else. */
+.al-edit { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 14px;
+    padding: 10px 12px; background: rgba(var(--of-steel-rgb), .07); }
+.al-edit .field { margin-bottom: 0; }
+.al-edit .wide { grid-column: 1 / -1; }
+.al-edit input[type="number"], .al-edit input[type="text"], .al-edit select { width: 100%; }
+.al-edit-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.al-edit-actions .dim { flex: 1 1 360px; min-width: 0; font: 400 11px var(--of-font-mono), monospace; }

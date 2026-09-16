@@ -44,6 +44,9 @@ _STUDY_NAME_RE = __import__("re").compile(r"^[A-Za-z][A-Za-z0-9_-]{1,40}$")
 
 LAYOUT_ID_RE = __import__("re").compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")
 LAYOUT_VIEW_RE = __import__("re").compile(r"^[a-z][a-z0-9_-]{0,23}$")
+#: §73: how many auxiliary (one-widget) windows a session may hold. Each is a real native window
+#: and a live data subscriber, so the cap is about the feed and the desktop, not about storage.
+WINDOWS_MAX = 8
 #: A widget's link is "<symbol group>/<timeframe group>", either side optional (A-D). It is stored as
 #: written so the shell can show it back verbatim; anything that is not that shape is dropped.
 LAYOUT_LINK_RE = __import__("re").compile(r"^[A-D]?(/[A-D]?)?$")
@@ -55,6 +58,20 @@ LAYOUT_GRID_ROWS = 8
 LAYOUT_MAX_ITEMS = 24
 LAYOUT_MAX_TABS = 12
 LAYOUT_MAX_WIDGETS = 24
+
+
+# ──────────────────────────────────────────────────────────────
+# Bar/candle expression (P1-8) — the catalogues the UI and the store share
+# ──────────────────────────────────────────────────────────────
+#: The five expression modes, and the palettes, spelled exactly as `desktop/ui/expression.js`
+#: declares them. `test_expression.py` holds the JS catalogue and these tuples equal, so a mode added
+#: in one place and missing in the other fails the suite instead of silently clamping to the default.
+EXPRESSION_MODES = ("default", "delta", "split", "heat", "wick")
+EXPRESSION_PALETTES = ("theme", "deutan", "protan", "tritan")
+#: The depth-heat ramps the engine can draw (`ofx.js` publishes the same list as `OFX.RAMPS`). The
+#: control, the engine and this clamp list are held equal by the same test — a third ramp added to
+#: the engine used to be unreachable from the control (§41 defect 1).
+RAMP_KEYS = ("classic", "thermal")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -212,7 +229,17 @@ def default_config() -> dict[str, Any]:
         "drawings": {},
         "markers": {},
         "ofx": {"symbol": "", "R": 4.0, "stack": 3, "lambda_ms": 500, "text_px": 45, "sweep_c": 1.15,
-                "min_block": 0.0, "va_pct": 0.7},
+                "min_block": 0.0, "va_pct": 0.7,
+                # the depth heat recipe: a hue ramp carries magnitude only while it stays monotone in
+                # luminance, which is a property `ofx.selftest` measures (P1-8)
+                "ramp": "classic"},
+        # How a bar is expressed (P1-8): one mode and one palette per chart surface, so the Engine
+        # view and the Chart view can differ about their own drawing. The words for whatever is
+        # chosen come from `desktop/ui/expression.js` — the same module the renderers paint from.
+        "expression": {
+            "engine": {"mode": "default", "palette": "theme"},
+            "chart": {"mode": "default", "palette": "theme"},
+        },
         "risk": {"signal_cooldown_seconds": 30.0, "min_composite_score": 40.0},
         "atlas": {
             "extras_enabled": True,          # extra Bybit streams: 200-level book,
@@ -282,6 +309,13 @@ def default_config() -> dict[str, Any]:
         },
         "watchlist": [],                   # symbols kept for the multi-symbol views
         "logging": {"level": "INFO"},
+        # R4/R5: the session boundary and storage retention, applied at boot by
+        # engine.apply_settings (which clamps; junk falls back to these numbers).
+        "data": {
+            "session_start_hour": 0,       # UTC hour the trading session starts at
+            "retention_days": 7,           # tick rows older than this are pruned; 0 keeps all
+            "prune_interval_hours": 6,     # how often the retention job runs
+        },
         # GUI-only flags. The engine never reads these; they exist so the front end
         # can remember what the user already saw without a second storage file.
         "ui": {
@@ -295,6 +329,15 @@ def default_config() -> dict[str, Any]:
             "theme": "dark",            # dark | light | contrast
             "accent": "cobalt",         # the eight Windows accents
             "density": "comfortable",   # comfortable | compact | dense
+            # §72: the desktop window's own geometry, so a multi-monitor user reopens where they
+            # left off — on the monitor they left it on. x/y are None until the window has been
+            # closed once; the launcher then clears/pins them against the screens that exist.
+            "window": {"width": 1500, "height": 940, "x": None, "y": None, "maximised": False},
+            # §73: the auxiliary windows that are OPEN — one widget each, placed on a monitor.
+            # This is the desired set, not a history: opening adds, closing (either way) removes,
+            # and a launch restores exactly what was open. Geometry lives here so a multi-monitor
+            # arrangement comes back as it was.
+            "windows": [],
         },
     }
 
@@ -376,6 +419,89 @@ def _clamp(value: Any, lo: float, hi: float, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return max(lo, min(hi, out))
+
+
+#: §72: the remembered window geometry. Bounds are generous — a 5120-wide desktop exists — but
+#: finite: a bad value may never produce a window nobody can reach, and None keeps "no stored
+#: position" distinct from "at 0,0". The launcher clears the position against the live screens.
+WINDOW_MIN_W, WINDOW_MIN_H = 640, 420
+WINDOW_MAX_W, WINDOW_MAX_H = 10000, 6000
+WINDOW_MAX_XY = 20000                     # a monitor left of / above the primary is negative
+
+
+def clean_window(raw: Any) -> dict[str, Any]:
+    """One window geometry record: finite sizes, an optional finite position, a bool flag."""
+    node = raw if isinstance(raw, dict) else {}
+    out: dict[str, Any] = {
+        "width": int(_clamp(node.get("width", 1500), WINDOW_MIN_W, WINDOW_MAX_W, 1500)),
+        "height": int(_clamp(node.get("height", 940), WINDOW_MIN_H, WINDOW_MAX_H, 940)),
+        "maximised": bool(node.get("maximised", False)),
+    }
+    for axis in ("x", "y"):
+        try:
+            value = float(node[axis])
+        except (KeyError, TypeError, ValueError):
+            out[axis] = None                     # never stored / unreadable → the launcher chooses
+            continue
+        out[axis] = int(value) if -WINDOW_MAX_XY <= value <= WINDOW_MAX_XY else None
+    return out
+
+
+#: §73: an auxiliary window is smaller than the main one by design — one widget, and the widget is
+#: enough of a reason to keep it on screen even on a small display.
+AUX_MIN_W, AUX_MIN_H = 360, 300
+AUX_MAX_W, AUX_MAX_H = 6000, 4000
+
+
+def clean_window_record(raw: Any) -> dict[str, Any] | None:
+    """One auxiliary-window record, or None when it cannot be identified at all.
+
+    The shape is the one the API serves and the shell reads back, so this is the single
+    clamp for both the store and a request body: a view the build does not have is *kept*
+    (the shell answers with a notice — dropping it would silently lose a window), but an
+    unidentifiable id or a view that is not a view slug is not stored.
+    """
+    if not isinstance(raw, dict):
+        return None
+    wid = str(raw.get("id") or "").strip().lower()
+    if not LAYOUT_ID_RE.match(wid):
+        return None
+    view = str(raw.get("view") or "").strip().lower()
+    if not LAYOUT_VIEW_RE.match(view):
+        return None
+    record: dict[str, Any] = {
+        "id": wid,
+        "view": view,
+        "screen_key": str(raw.get("screen_key") or "").strip()[:24],
+        "width": int(_clamp(raw.get("width", 1100), AUX_MIN_W, AUX_MAX_W, 1100)),
+        "height": int(_clamp(raw.get("height", 760), AUX_MIN_H, AUX_MAX_H, 760)),
+        "on_top": bool(raw.get("on_top", False)),
+    }
+    for axis in ("x", "y"):
+        try:
+            value = float(raw[axis])
+        except (KeyError, TypeError, ValueError):
+            record[axis] = None
+            continue
+        record[axis] = int(value) if -WINDOW_MAX_XY <= value <= WINDOW_MAX_XY else None
+    return record
+
+
+def clean_windows(raw: Any) -> list[dict[str, Any]]:
+    """The open auxiliary windows: identified ids only, unique, capped, geometry clamped."""
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in raw[: WINDOWS_MAX * 2]:
+        record = clean_window_record(entry)
+        if record is None or record["id"] in seen:
+            continue
+        seen.add(record["id"])
+        out.append(record)
+        if len(out) >= WINDOWS_MAX:
+            break
+    return out
 
 
 # ── terminal layouts ──────────────────────────────────────────────────────────────────────────
@@ -683,6 +809,15 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     cfg["markers"] = clean_markers
     ofx["min_block"] = round(_clamp(ofx.get("min_block", 0.0), 0.0, 1_000_000.0, 0.0), 2)
     ofx["va_pct"] = round(_clamp(ofx.get("va_pct", 0.7), 0.5, 0.95, 0.7), 2)
+    ofx["ramp"] = ofx.get("ramp") if ofx.get("ramp") in RAMP_KEYS else "classic"
+
+    # Expression (P1-8): an unknown mode or palette draws the default rather than a blank stage —
+    # the same rule the appearance keys follow, and the JS clamps to the identical lists.
+    expr = _block(cfg, "expression")
+    for surface in ("engine", "chart"):
+        node = _block(expr, surface)
+        node["mode"] = node.get("mode") if node.get("mode") in EXPRESSION_MODES else "default"
+        node["palette"] = node.get("palette") if node.get("palette") in EXPRESSION_PALETTES else "theme"
     if cfg["data_source"] not in ("mt5", "bybit", "both", "alpaca", "all"):
         cfg["data_source"] = "bybit"
 
@@ -765,6 +900,11 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
         ui["wizard_resume_step"] = max(0, int(ui.get("wizard_resume_step", 0)))
     except (TypeError, ValueError):
         ui["wizard_resume_step"] = 0
+    # §72: the remembered window geometry — clamped to something a window manager can honour
+    # (the launcher clears it against the screens that actually exist at the next start).
+    ui["window"] = clean_window(ui.get("window"))
+    # §73: the auxiliary windows that are open — the desired set a launch restores.
+    ui["windows"] = clean_windows(ui.get("windows"))
 
     alp = _block(cfg, "alpaca")
     feed = str(alp.get("feed", "iex") or "iex").lower()

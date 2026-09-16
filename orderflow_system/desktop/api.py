@@ -25,6 +25,7 @@ from pathlib import Path
 from fastapi import APIRouter, Body, HTTPException, Query
 
 from orderflow_system.desktop import config_store, engine as engine_mod, logs
+from orderflow_system.desktop import windows as windows_mod
 from orderflow_system.desktop import deribit as deribit_mod
 
 logger = logging.getLogger(__name__)
@@ -381,7 +382,7 @@ async def set_source(payload: dict = Body(default={})) -> dict[str, Any]:
     # restart path is the same one the toolbar's Restart button uses, so there is one code path.
     applied = None
     try:
-        if engine_mod.engine.state() in ("running", "starting"):
+        if engine_mod.engine.state in ("running", "starting"):   # state is a property, not a method
             applied = await engine_mod.engine.restart(config_store.load_config())
     except Exception as exc:                                    # pragma: no cover - engine errors
         logger.warning("engine restart after source switch failed: %s", exc)
@@ -391,12 +392,15 @@ async def set_source(payload: dict = Body(default={})) -> dict[str, Any]:
         live = engine_mod.engine.live_status()
     except Exception:
         live = {}
+    # Hoisted so the message builds on Python < 3.12 too: a nested same-quote f-string
+    # (f"…{applied.get("error")}…") is PEP 701 syntax and would not even parse on 3.11.
+    restart_error = applied.get("error", "unknown") if applied else "unknown"
     return {"ok": True, "data_source": saved.get("data_source"),
             "engine": applied or {"restarted": False, "reason": "engine was not running"},
             "live": live,
             "note": ("engine restarted on the new source" if (applied and applied.get("ok") is not False)
                      else ("source saved; press Start engine to stream it" if not applied
-                           else f"source saved; the restart failed ({applied.get("error", "unknown")})"))}
+                           else f"source saved; the restart failed ({restart_error})"))}
 
 
 # ──────────────────────────────────────────────────────────────
@@ -565,12 +569,54 @@ async def ofx_save(payload: dict = Body(default={})) -> dict[str, Any]:
     the renderer unusable."""
     cfg = config_store.load_config()
     ofx = cfg.setdefault("ofx", {})
-    for key in ("symbol", "R", "stack", "lambda_ms", "text_px", "sweep_c", "min_block", "va_pct"):
+    for key in ("symbol", "R", "stack", "lambda_ms", "text_px", "sweep_c", "min_block", "va_pct", "ramp"):
         if key in payload:
             ofx[key] = payload[key]
     saved = config_store.save_config(cfg)
     return {"ok": True, "ofx": saved.get("ofx") or {},
             "note": "Stored in your config file; rendering happens in your browser session."}
+
+
+# ──────────────────────────────────────────────────────────────
+# Bar/candle expression (P1-8)
+# ──────────────────────────────────────────────────────────────
+
+
+@router.get("/expression")
+async def expression_get() -> dict[str, Any]:
+    """How bars are expressed, per chart surface.
+
+    The engine view and the chart view each keep their own mode + palette; the words for whatever is
+    chosen are `desktop/ui/expression.js`'s, which the renderers paint from as well. The store clamps
+    both keys (config_store.EXPRESSION_MODES / EXPRESSION_PALETTES).
+    """
+    cfg = config_store.load_config()
+    return {"ok": True, "expression": cfg.get("expression") or {},
+            "modes": list(config_store.EXPRESSION_MODES),
+            "palettes": list(config_store.EXPRESSION_PALETTES)}
+
+
+@router.post("/expression")
+async def expression_save(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Persist one chart surface's expression choice.
+
+    Partial by design: the body names the surface (`engine` or `chart`) and only the keys it changes,
+    so one surface's control can never blank the other's. Returns the value the STORE accepted (a
+    junk mode comes back as `default`, not echoed), which is what the control then displays.
+    """
+    surface = str(payload.get("chart") or "").strip().lower()
+    if surface not in ("engine", "chart"):
+        return {"ok": False, "error": "chart must be 'engine' or 'chart'"}
+    cfg = config_store.load_config()
+    node = cfg.setdefault("expression", {}).setdefault(surface, {})
+    for key in ("mode", "palette"):
+        if key in payload:
+            node[key] = payload[key]
+    saved = config_store.save_config(cfg)
+    accepted = ((saved.get("expression") or {}).get(surface) or {})
+    return {"ok": True, "chart": surface, "value": accepted,
+            "expression": saved.get("expression") or {},
+            "note": "stored in your config file; the drawing happens in your browser session"}
 
 
 # ──────────────────────────────────────────────────────────────
@@ -1317,7 +1363,7 @@ async def alpaca_compare(symbol: str = Query(default="AAPL")) -> dict[str, Any]:
         pair = {"BTCUSDT": "BTC/USD", "ETHUSDT": "ETH/USD", "SOLUSDT": "SOL/USD"}.get(symbol, symbol)
         data = _search_data()
         status, body = await asyncio.to_thread(data.call,
-                                               f"https://data.alpaca.markets/v1beta3/crypto/us/latest/trades",
+                                               "https://data.alpaca.markets/v1beta3/crypto/us/latest/trades",
                                                {"symbols": pair}, False)
         alpaca_last = None
         if status == 200 and isinstance(body, dict):
@@ -1448,7 +1494,6 @@ async def rebuild_profiles() -> dict[str, Any]:
     if system is None:
         return {"ok": False, "error": "Engine is not running — start it first."}
 
-    import time as _time
     from datetime import datetime, timezone
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -1498,6 +1543,81 @@ async def profiles_status() -> dict[str, Any]:
 @router.get("/logs")
 async def get_logs(lines: int = Query(default=200, le=1000), level: str = Query(default="")) -> dict[str, Any]:
     return {"lines": logs.tail(lines=lines, min_level=level)}
+
+
+# ──────────────────────────────────────────────────────────────
+# Storage (R5: retention has numbers, and the numbers have a window)
+# ──────────────────────────────────────────────────────────────
+
+_storage_cache: dict[str, Any] = {"at": 0.0, "data": None}
+
+
+@router.get("/storage")
+async def get_storage(refresh: int = Query(default=0)) -> dict[str, Any]:
+    """DB size, row counts, retention settings and the last prune — cached 30 s.
+
+    `COUNT(*)` over a 800 MB ticks table is not a free read, so this answers from a short
+    cache (`?refresh=1` forces a fresh read). With the engine stopped the file sizes are
+    still real; row counts say so instead of guessing.
+    """
+    import time as _time
+
+    now = _time.time()
+    if not refresh and _storage_cache["data"] is not None and now - _storage_cache["at"] < 30:
+        return _storage_cache["data"]
+
+    from orderflow_system.config import settings as rt_settings
+    from orderflow_system.desktop import engine as engine_mod
+
+    system = getattr(engine_mod.engine, "_system", None)
+    if system is not None and getattr(system, "db", None) is not None:
+        snap = await system.db.storage_snapshot()
+        last_prune = getattr(system, "_last_prune", None)
+    else:
+        snap = {"db_path": str(config_store.db_path()), "bytes": 0, "wal_bytes": 0,
+                "tables": {}, "ticks": {"oldest_ms": 0, "newest_ms": 0}}
+        try:
+            from pathlib import Path as _Path
+            p = _Path(snap["db_path"])
+            snap["bytes"] = p.stat().st_size if p.exists() else 0
+            w = _Path(snap["db_path"] + "-wal")
+            snap["wal_bytes"] = w.stat().st_size if w.exists() else 0
+        except OSError:
+            pass
+        last_prune = None
+
+    out = dict(snap)
+    out["engine_running"] = system is not None
+    if system is not None:
+        rt = (int(getattr(rt_settings, "RETENTION_DAYS", 30) or 0),
+              int(getattr(rt_settings, "PRUNE_INTERVAL_HOURS", 6) or 6),
+              int(getattr(rt_settings, "SESSION_START_HOUR", 0) or 0))
+    else:
+        # The engine applies the config at start; until then, read the file so the panel
+        # shows the configured window instead of the Python defaults (a display lie is a lie).
+        from orderflow_system.desktop.engine import clamp_data_settings
+        _sh, _rd, _ph = clamp_data_settings(config_store.load_config())
+        rt = (_rd, _ph, _sh)
+    out["retention"] = {"days": rt[0], "prune_interval_hours": rt[1], "session_start_hour": rt[2]}
+    out["last_prune"] = last_prune
+    _storage_cache["at"] = now
+    _storage_cache["data"] = out
+    return out
+
+
+@router.post("/storage/prune")
+async def prune_storage_now() -> dict[str, Any]:
+    """Run one retention pass now (the periodic job's own path). 409 without an engine: the
+    prune needs the live DB handle, not a second writer."""
+    from orderflow_system.desktop import engine as engine_mod
+
+    system = getattr(engine_mod.engine, "_system", None)
+    if system is None:
+        raise HTTPException(status_code=409, detail="engine is not running — start it to prune storage")
+    summary = await system._prune_storage()
+    _storage_cache["at"] = 0.0
+    _storage_cache["data"] = None
+    return {"ok": True, "summary": summary}
 
 
 @router.post("/logs/clear")
@@ -1558,6 +1678,13 @@ async def client_error(payload: dict = Body(default={})) -> dict[str, Any]:
     source = str(data.get("source") or "")[:200]
     line = data.get("line")
     col = data.get("col")
+    # CR/LF are folded out of EVERY field, not just the stack: one client error must stay one
+    # log line, or a crafted message forges whole entries (with fake levels/timestamps) in the
+    # very file debugging reads.
+    message = message.replace(chr(10), ' ').replace(chr(13), ' ')
+    source = source.replace(chr(10), ' ').replace(chr(13), ' ')
+    line = str(line or "")[:20].replace(chr(10), ' ').replace(chr(13), ' ')
+    col = str(col or "")[:20].replace(chr(10), ' ').replace(chr(13), ' ')
     flat = stack.replace(chr(10), ' -> ').replace(chr(13), '')
     logger.error("client error: %s | %s:%s:%s | %s", message, source, line, col, flat)
     return {"ok": True}
@@ -1717,3 +1844,164 @@ async def layouts_post(payload: dict = Body(default={})) -> dict[str, Any]:
     return {"ok": True, "action": actions[-1] if actions else "read", "actions": actions,
             "error": refused, **_layouts_state(block_out),
             "note": "layouts live in your config file; the browser keeps no copy"}
+
+
+# ──────────────────────────────────────────────────────────────
+# Auxiliary windows (§73) — one widget per native window, per monitor
+# ──────────────────────────────────────────────────────────────
+#
+# The window itself belongs to the launcher (only it owns pywebview); this is the page's side of
+# the conversation. `native: false` is a first-class answer, not an error: in a browser or a
+# headless session there is no host, and the shell then offers no window controls at all.
+
+def _windows_state() -> dict[str, Any]:
+    """The host, the screens it can place a window on, and what is open right now."""
+    host = windows_mod.get_host()
+    screens: list[dict] = []
+    if host is not None:
+        try:
+            screens = windows_mod.valid_screens(host.screens())
+        except Exception:                        # a backend that cannot enumerate must not 500
+            logger.debug("screen enumeration failed", exc_info=True)
+    labelled = []
+    for index, rect in enumerate(screens):
+        row = dict(rect)
+        row["index"] = index
+        row["label"] = windows_mod.screen_label(rect, index, rect.get("scale"))
+        labelled.append(row)
+    open_ids: list[str] = []
+    if host is not None:
+        try:
+            open_ids = list(host.open_ids())
+        except Exception:
+            logger.debug("window enumeration failed", exc_info=True)
+    return {
+        "native": host is not None,
+        "host": getattr(host, "kind", "") if host is not None else "",
+        "screens": labelled,
+        "open": open_ids,
+        "windows": windows_mod.records(),
+        "max": config_store.WINDOWS_MAX,
+    }
+
+
+@router.get("/windows")
+async def windows_get() -> dict[str, Any]:
+    """The auxiliary-window state: screens, what is open, and the set a launch restores."""
+    return _windows_state()
+
+
+@router.post("/windows")
+async def windows_post(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Open / close / focus / pin one auxiliary window.
+
+    Every path answers with the *resulting* state, so the shell adopts what happened rather than
+    what it asked for: a refusal with a reason when the cap is reached, the resolved placement
+    (screen, x/y, size) for a window that opened, and `native: false` where windows cannot exist.
+    """
+    action = str(payload.get("action") or "").strip().lower()
+    host = windows_mod.get_host()
+    if host is None:
+        return {"ok": False, "action": action,
+                "error": "no native window host in this session — windows need the desktop app",
+                **_windows_state()}
+
+    if action == "open":
+        record = config_store.clean_window_record({
+            "id": str(payload.get("id") or ("w" + uuid.uuid4().hex[:7])),
+            "view": str(payload.get("view") or "").strip().lower(),
+            "screen_key": payload.get("screen_key"),
+            "width": payload.get("width"),
+            "height": payload.get("height"),
+            "on_top": payload.get("on_top"),
+        })
+        if record is None:
+            return {"ok": False, "action": action,
+                    "error": "a window needs a view (a lowercase slug this build has)",
+                    **_windows_state()}
+        try:
+            open_ids = host.open_ids()
+        except Exception:
+            open_ids = []
+        if record["id"] in open_ids:
+            # Already open: focus it. Asking a host to create the same window twice would either
+            # duplicate it or throw, and neither is what "open this window" means.
+            host.focus(record["id"])
+            return {"ok": True, "action": "focus", "opened": record, "focused": record["id"],
+                    "note": "that window is already open — brought it to the front",
+                    **_windows_state()}
+        rows = windows_mod.records()
+        if len(rows) >= config_store.WINDOWS_MAX and record["id"] not in {r["id"] for r in rows}:
+            return {"ok": False, "action": action,
+                    "error": "window limit reached (%d) — close one first" % config_store.WINDOWS_MAX,
+                    **_windows_state()}
+        try:
+            screens = host.screens()
+        except Exception:
+            screens = []
+        screen_index = payload.get("screen")
+        placement = windows_mod.place_aux(record, screens, count=len(open_ids),
+                                          screen_index=screen_index if isinstance(screen_index, int) else None)
+        try:
+            host.open(placement)                 # the host owns everything native
+        except Exception as exc:
+            logger.warning("window open failed", exc_info=True)
+            return {"ok": False, "action": action,
+                    "error": "the window host refused: %s" % exc, **_windows_state()}
+        stored = windows_mod.add_record(placement)   # the sanitiser drops screen/screen_label
+        placed = next((r for r in stored if r["id"] == placement["id"]), placement)
+        return {"ok": True, "action": action, "opened": placed,
+                "screen_label": placement.get("screen_label", ""), "windows_set": stored,
+                **_windows_state()}
+
+    if action in ("close", "focus", "ontop"):
+        wid = str(payload.get("id") or "").strip().lower()
+        if not wid:
+            return {"ok": False, "action": action, "error": "which window?", **_windows_state()}
+        if action == "close":
+            try:
+                was_open = bool(host.close(wid))
+            except Exception:
+                logger.debug("window close failed", exc_info=True)
+                was_open = False
+            existed = any(r["id"] == wid for r in windows_mod.records())
+            windows_mod.drop_record(wid)         # closed from either side, it leaves the set
+            if not was_open and not existed:
+                return {"ok": False, "action": action, "error": "no window with id %r" % wid,
+                        **_windows_state()}
+            return {"ok": True, "action": action, "closed": wid, **_windows_state()}
+
+        if action == "focus":
+            try:
+                ok = bool(host.focus(wid))
+            except Exception:
+                ok = False
+            return {"ok": ok, "action": action,
+                    "error": "" if ok else "the window host could not focus %r" % wid,
+                    **_windows_state()}
+
+        on_top = bool(payload.get("on_top"))
+        try:
+            ok = bool(host.set_on_top(wid, on_top))
+        except Exception:
+            ok = False
+        if ok:
+            windows_mod.set_on_top(wid, on_top)
+        return {"ok": ok, "action": action,
+                "error": "" if ok else "the window host could not pin %r" % wid,
+                **_windows_state()}
+
+    if action == "close_all":
+        closed = []
+        for wid in list(_windows_state()["open"]):
+            try:
+                if host.close(wid):
+                    closed.append(wid)
+            except Exception:
+                logger.debug("window close failed for %s", wid, exc_info=True)
+            windows_mod.drop_record(wid)
+        return {"ok": True, "action": action, "closed": closed, **_windows_state()}
+
+    return {"ok": False, "action": action,
+            "error": "unknown action %r (open, close, focus, ontop, close_all)" % action,
+            **_windows_state()}
