@@ -18,7 +18,7 @@ Rules that keep it honest:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Iterable
 
 # Roots of the config that hold display variables. A leaf under these roots that is not registered
@@ -98,6 +98,29 @@ PARAMS: tuple[Param, ...] = (
       meaning="Radius curve for execution bubbles; higher spreads the same size wider."),
     P("ofx.lambda_ms", "Liquidity decay", "Depth heat", "ofx", minimum=50, maximum=5000, step=50,
       unit="ms", meaning="Half-life used to fade resting liquidity that was pulled."),
+    # Bar expression (P1-8). Two surfaces draw bars and each keeps its own mode + palette; the words
+    # for whatever is chosen come from `desktop/ui/expression.js`, which the renderers also paint
+    # from. Registered as enums so a Chart menu can never offer a value the store would clamp.
+    P("expression.engine.mode", "Engine bar mode", "Expression", "ofx", kind="enum",
+      choices=("default", "delta", "split", "heat", "wick"),
+      meaning="How the Engine view expresses each bar: the footprint default, a delta-tinted body, "
+              "a split candle, a heat-gradient body, or wick + footprint only."),
+    P("expression.engine.palette", "Engine palette", "Expression", "ofx", kind="enum",
+      choices=("theme", "deutan", "protan", "tritan"),
+      meaning="Colour vocabulary of the Engine view. The colour-blind palettes are two-hue sets "
+              "measured for separation under each dichromacy (expression.selftest)."),
+    P("ofx.ramp", "Depth heat ramp", "Depth heat", "ofx", kind="enum",
+      choices=("classic", "thermal"),
+      meaning="Ramp behind the matrix. Magnitude reads from luminance, so both ramps stay readable "
+              "without colour vision — a property the engine's selftest measures."),
+    P("expression.chart.mode", "Chart bar mode", "Expression", "chart", kind="enum",
+      choices=("default", "delta", "split", "heat", "wick"),
+      meaning="How the Chart view expresses each bar. Split candles have no vendor equivalent and "
+              "the Chart view says so in its legend rather than drawing something else."),
+    P("expression.chart.palette", "Chart palette", "Expression", "chart", kind="enum",
+      choices=("theme", "deutan", "protan", "tritan"),
+      meaning="Colour vocabulary of the Chart view (candles, delta lane), independent of the shell "
+              "theme."),
     # Depth heat behind the matrix
     P("atlas.heatmap.bucket_ms", "Bucket width", "Depth heat", "heatmap", minimum=100, maximum=10000,
       step=100, unit="ms", meaning="How much book time each depth column represents."),
