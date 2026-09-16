@@ -139,6 +139,26 @@ def attach_wall_ages(snapshot: dict[str, Any], heatmap: Any) -> dict[str, Any]:
     return snapshot
 
 
+@router.get("/heatmap/{symbol}/bin")
+async def heatmap_bin(symbol: str, columns: int = Query(default=300, le=900),
+                      rows: int = Query(default=220, le=400)):
+    """The same snapshot as /heatmap/{symbol}, packed as typed sections (§56) — the engine view's
+    client reads floats without parsing 48 k JSON objects."""
+    from fastapi import Response
+
+    from orderflow_system.atlas.wire import pack_heatmap_bin
+
+    h = get_hub()
+    if symbol not in h.symbols:
+        snap = {"symbol": symbol, "buckets": [], "prices": [], "values": [], "traded": [],
+                "events": [], "note": "no data yet — start the engine or a replay"}
+    else:
+        snap = attach_wall_ages(h.snapshot_heatmap(symbol, columns=columns, max_rows=rows),
+                                h.ensure(symbol).heatmap)
+    return Response(content=pack_heatmap_bin(snap), media_type="application/octet-stream",
+                    headers={"Cache-Control": "no-store"})
+
+
 @router.get("/heatmap/{symbol}")
 async def heatmap(symbol: str, columns: int = Query(default=300, le=900),
                   rows: int = Query(default=220, le=400)) -> dict[str, Any]:
@@ -515,7 +535,6 @@ async def replay_play(payload: dict = Body(default={})) -> dict[str, Any]:
         h = get_hub()
         h.on_tick(rp.status()["symbol"], tick)
         try:
-            from orderflow_system.dashboard.websocket_manager import _serialize
             from orderflow_system.dashboard.app import ws_manager
             await ws_manager.broadcast_tick(rp.status()["symbol"], tick.price, tick.size,
                                             as_value(tick.side))

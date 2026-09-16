@@ -263,6 +263,16 @@
             const promise = original(input, init).then((response) => {
                 const contentType = (response.headers && response.headers.get
                     ? response.headers.get('content-type') : '') || 'application/json';
+                /* §56: a binary payload (the /bin heat wire) must pass through with its body
+                   UNREAD, and every caller — initiated or coalesced — gets its own clone. The old
+                   path fed an octet-stream to response.json(), which consumed the body, and the
+                   failure branch then handed the consumed original to the caller: every bin fetch
+                   died with "body stream already read" and the engine view silently fell back to
+                   the JSON route. */
+                if (contentType.indexOf('json') === -1) {
+                    inFlight.delete(key);
+                    return { payload: null, toResponse: function () { return response.clone(); } };
+                }
                 const meta = { status: (response && response.status) || 200,
                                statusText: (response && response.statusText) || 'OK' };
                 const rebuild = (payload) => () => new Response(JSON.stringify(payload), {
@@ -281,9 +291,12 @@
                        promise, so releasing the key cannot cut anyone off. */
                     inFlight.delete(key);
                     return { payload: payload, toResponse: rebuild(payload) };
-                }, function () {                    // a body that is not JSON: the real thing, unshared
+                }, function () {
+                    /* Headers said JSON but the body would not parse — the original stream is
+                       already consumed, so keep only the status and hand back an empty body. */
                     inFlight.delete(key);
-                    return { payload: null, toResponse: function () { return response; } };
+                    return { payload: null, toResponse: function () { return new Response('', {
+                        status: meta.status, statusText: meta.statusText }); } };
                 });
             }, function (err) {
                 inFlight.delete(key);

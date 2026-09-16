@@ -321,3 +321,15 @@ textarea.mb-input { min-width: 300px; resize: vertical; }
 .draw-menu-item { display: block; width: 100%; text-align: left; background: transparent; border: 0;
   color: var(--of-ink-hi); font: 500 11.5px/1.3 system-ui, sans-serif; padding: 5px 10px; cursor: pointer; }
 .draw-menu-item:hover { background: rgba(var(--of-link-rgb),.30); }
+/* §56: the in-place text field (draw menu + floating at the click point) */
+.draw-inline-text { display: flex; gap: 4px; align-items: center; padding: 4px 6px; }
+.draw-inline-text.is-float { position: absolute; z-index: 65; padding: 5px 6px;
+  background: rgba(var(--of-deep-2-rgb),.97); border: 1px solid rgba(var(--of-steel-rgb),.38);
+  border-radius: 7px; box-shadow: 0 10px 26px rgba(var(--of-black-rgb),.5); }
+.draw-inline-input { width: 150px; background: rgba(var(--of-black-rgb),.35); color: var(--of-ink-hi);
+  border: 1px solid rgba(var(--of-steel-rgb),.45); border-radius: 5px;
+  font: 500 11.5px/1.3 system-ui, sans-serif; padding: 3px 6px; }
+.draw-inline-apply, .draw-inline-cancel { background: transparent; color: var(--of-ink-hi);
+  border: 1px solid rgba(var(--of-steel-rgb),.45); border-radius: 5px;
+  font: 600 11px/1 system-ui, sans-serif; padding: 4px 7px; cursor: pointer; }
+.draw-inline-apply:hover, .draw-inline-cancel:hover { background: rgba(var(--of-link-rgb),.30); }

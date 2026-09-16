@@ -14,8 +14,7 @@
 
 const A = {
     heat: { auto: true, last: null },
-    replay: { loaded: false, dragging: false },
-    alerts: [],
+    replay: { loaded: false, dragging: false, playing: false },
     liveTicks: 0,
 };
 
@@ -246,6 +245,10 @@ async function loadHeatmap() {
     try {
         const d = await api('/api/atlas/heatmap/' + encodeURIComponent(S.symbol) + '?columns=' + cols + '&rows=' + rows);
         A.heat.last = d;
+        if (window.OFAPFRESH) {
+            const hb = (d && d.buckets) || [];
+            OFAPFRESH.stamp('heatmap', { lastMs: hb.length ? Number(hb[hb.length - 1]) : 0, kind: 'depth' });
+        }
         drawHeatmap(d);
         const walls = (d.walls || []).slice(0, 12);
         const heldLabel = (ms) => (ms >= 60000 ? (ms / 60000).toFixed(1) + ' min' : Math.max(0, Math.round(ms / 1000)) + ' s');
@@ -329,7 +332,10 @@ async function loadTrackers(options) {
     if (!S.symbol) return false;
     if (!(options && options.force) && atlasShareLive('tape')) return true;
     try {
-        paintTrackers(await api('/api/atlas/tape/' + encodeURIComponent(S.symbol)));
+        const d = await api('/api/atlas/tape/' + encodeURIComponent(S.symbol));
+        paintTrackers(d);
+        /* P1-10: the tape-stat payload has no comparable clock; the fetch time is the honest one. */
+        if (window.OFAPFRESH) OFAPFRESH.stamp('trackers', { ageMs: 0, windowMs: 10000 });
         return true;
     } catch (e) { console.error(e); return false; }
 }
@@ -337,6 +343,10 @@ async function loadTrackers(options) {
 /* The CVD snapshot's own drawing, separated from how it was fetched: the shared channel, a
    hand-made read and the re-anchor button all land here, so the three paths cannot drift. */
 function paintCvd(d) {
+    if (window.OFAPFRESH && d) {
+        const series = d.series || [];
+        OFAPFRESH.stamp('cvd', { lastMs: series.length ? Number(series[series.length - 1].t) : 0, kind: 'trades' });
+    }
     document.getElementById('cvdValue').querySelector('.kpi-value').textContent = compact(d.cvd);
     document.getElementById('cvdValue').querySelector('.kpi-sub').textContent =
         d.session_start_ms ? 'from ' + new Date(d.session_start_ms).toLocaleTimeString() : '';
@@ -397,6 +407,9 @@ async function loadMarketProfile() {
     if (!S.symbol) return;
     try {
         const d = await api('/api/atlas/profile/' + encodeURIComponent(S.symbol) + '?levels=200');
+        /* P1-10: the profile payload carries no comparable sample clock, so the fetch time is the
+           honest one — this chip measures the panel's own update flow (10 s = two slow beats). */
+        if (window.OFAPFRESH) OFAPFRESH.stamp('profile', { ageMs: 0, windowMs: 10000 });
         document.getElementById('mpPoc').querySelector('.kpi-value').textContent = d.poc ? d.poc.toFixed(2) : '--';
         document.getElementById('mpVa').querySelector('.kpi-value').textContent = d.vah ? d.vah.toFixed(2) : '--';
         document.getElementById('mpVa').querySelector('.kpi-sub').textContent = d.val ? 'VAL ' + d.val.toFixed(2) : '';
@@ -445,6 +458,9 @@ async function loadFrames() {
     const frame = document.getElementById('frameSelect').value;
     try {
         const d = await api('/api/atlas/frames/' + encodeURIComponent(S.symbol) + '/' + frame + '?count=300');
+        /* P1-10: frame bars close on VOLUME, not the clock — a quiet tape leaves them legitimately
+           old, so this chip measures the panel's own update flow (10 s = two slow beats). */
+        if (window.OFAPFRESH) OFAPFRESH.stamp('frames', { ageMs: 0, windowMs: 10000 });
         const bars = (d.bars || []).slice(-120);
         document.getElementById('frameStatus').textContent = (d.bars || []).length + ' ' + frame + ' bars closed';
         drawSeries(document.getElementById('frameCanvas'), [
@@ -483,6 +499,7 @@ async function rpStatus() {
             : (st.error || 'nothing loaded');
         if (!A.replay.dragging) document.getElementById('rpSeek').value = Math.round((st.progress_pct || 0) * 10);
         A.replay.loaded = !!st.total;
+        A.replay.playing = st.state === 'playing';
         return st;
     } catch (e) {
         document.getElementById('rpProgress').textContent = String(e);
@@ -530,59 +547,361 @@ document.getElementById('rpSeek').onchange = async (e) => {
     rpStatus();
 };
 
+/* P1-9: the replay's keys, registered into the app's one shortcut map. They DRIVE the same
+   controls (a click on #rpPlay / #rpPause, a value + change on #rpSeek), so a key can never
+   take a different path than the button; Space is left to the browser when a button is
+   focused. */
+if (window.OFAPKEYS) {
+    OFAPKEYS.bind({ id: 'replay-play', keys: ['space'], scope: 'Replay',
+        label: 'play / pause the replay',
+        when: () => OFAPKEYS.inView('replay'),
+        run: () => {
+            const btn = document.getElementById(A.replay.playing ? 'rpPause' : 'rpPlay');
+            if (btn) btn.click();
+        } });
+    const replaySeek = (delta) => {
+        const seek = document.getElementById('rpSeek');
+        if (!seek) return;
+        seek.value = String(Math.max(0, Math.min(1000, Number(seek.value) + delta)));
+        seek.dispatchEvent(new Event('change'));
+    };
+    OFAPKEYS.bind({ id: 'replay-seek-back', keys: [','], scope: 'Replay', label: 'seek back 2%',
+        when: () => OFAPKEYS.inView('replay'), run: () => replaySeek(-20) });
+    OFAPKEYS.bind({ id: 'replay-seek-fwd', keys: ['.'], scope: 'Replay', label: 'seek forward 2%',
+        when: () => OFAPKEYS.inView('replay'), run: () => replaySeek(20) });
+}
+
 /* ── alerts ─────────────────────────────────────────────────────── */
 
-async function loadAlerts(includeRules) {
+/* The Rules card renders every rule through OFAPALERTS.sentence() and its inline editor builds its
+   fields from OFAPALERTS.paramSpec(kind) — one contract behind the words and the form
+   (alert-format.js), so a field the engine ignores cannot exist here and a threshold it honours
+   cannot be unreachable.
+
+   The editor replaces the rule's own ROW, and the 5 s poll leaves the rules alone while one is open
+   (or while the arbiter holds this surface — this view's markup carries data-surface="alerts"): a
+   repaint under a hand mid-edit would wipe what it was typing. User-initiated actions (save, delete,
+   clear, toggle) read back immediately; the engine's own answer is what the card then says. */
+
+const AL = { rules: [], editing: null };
+
+function alFormat() { return window.OFAPALERTS; }
+
+function alHeld() {
+    const intent = window.OFAPINTENT;
+    return !!(intent && typeof intent.held === 'function' && intent.held('alerts'));
+}
+
+function alBanner(text, kind) { toast(document.getElementById('alBanner'), text, kind || 'ok'); }
+
+/* One log row's Level and Size cells: `data.price` / `data.size` are on every fired alert's payload
+   and the table used to show neither, so a level-bound rule read as its own sentence and nothing
+   else. A kind with no level (speed_spike, cvd_divergence) shows a dash rather than a borrowed
+   number. */
+function alCell(value, format) {
+    if (value === null || value === undefined || value === '' || Number.isNaN(Number(value))) {
+        return '<span class="dim">—</span>';
+    }
+    return esc(format ? format(value) : String(value));
+}
+
+async function loadAlerts(includeRules, force) {
+    if (!force && alHeld()) return;                 // held by a gesture: repaint nothing yet
+    const F = alFormat();
     try {
         if (includeRules !== false) {
             const d = await api('/api/atlas/alerts?limit=200');
             const rows = (d.alerts || []).slice().reverse();
+            /* P1-10: a log panel's freshness is its own update flow, not the newest event's age. */
+            if (window.OFAPFRESH) OFAPFRESH.stamp('alerts', { ageMs: 0, windowMs: 10000 });
             document.getElementById('alertTable').querySelector('tbody').innerHTML =
-                rows.slice(0, 60).map((a) =>
-                    '<tr><td>' + new Date(a.ts_ms).toLocaleTimeString() + '</td>' +
-                    '<td><span class="tag ' + (a.severity === 'critical' ? 'no' : a.severity === 'warning' ? 'warn' : '') + '">' + esc(a.severity) + '</span></td>' +
-                    '<td>' + esc(a.kind) + '</td><td class="name">' + esc(a.symbol) + '</td><td class="name">' + esc(a.message) + '</td></tr>').join('')
-                || '<tr><td colspan="5" class="dim">no alerts yet</td></tr>';
+                rows.slice(0, 60).map((a) => {
+                    const data = a.data || {};
+                    return '<tr><td>' + new Date(a.ts_ms).toLocaleTimeString() + '</td>' +
+                        '<td><span class="tag ' + (a.severity === 'critical' ? 'no' : a.severity === 'warning' ? 'warn' : '') + '">' + esc(a.severity) + '</span></td>' +
+                        '<td title="' + esc(a.kind) + '">' + esc(F ? F.kindLabel(a.kind) : a.kind) + '</td>' +
+                        '<td class="name">' + esc(a.symbol) + '</td>' +
+                        '<td>' + alCell(data.price, F && F.fmtPrice) + '</td>' +
+                        '<td>' + alCell(data.size, F && F.fmtSize) + '</td>' +
+                        '<td class="name">' + esc(F ? F.why(a) : a.message) + '</td></tr>';
+                }).join('')
+                || '<tr><td colspan="7" class="dim">no alerts yet</td></tr>';
             const st = d.stats || {};
             document.getElementById('alStats').textContent = (st.history || 0) + ' fired · ' + (st.enabled || 0) + '/' + (st.rules || 0) + ' rules enabled';
             document.getElementById('navAlertCount').textContent = String(st.history || 0);
         }
         const r = await api('/api/atlas/alert-rules');
-        A.alerts = r.rules || [];
-        document.getElementById('ruleTable').querySelector('tbody').innerHTML = A.alerts.map((rule, i) =>
-            '<tr data-idx="' + i + '">' +
-            '<td><label class="switch"><input type="checkbox" data-role="enabled" ' + (rule.enabled ? 'checked' : '') + '></label></td>' +
-            '<td class="name">' + esc(rule.name) + '</td><td>' + esc(rule.kind) + '</td>' +
-            '<td><input type="text" data-role="params" style="width:100%;min-width:180px" value="' + esc(JSON.stringify(rule.params || {})) + '"></td>' +
-            '<td><input type="number" data-role="cooldown" style="width:80px" value="' + rule.cooldown_s + '"></td>' +
-            '<td>' + (rule.fired || 0) + '</td></tr>').join('');
+        /* §56: drafts survive every poll here too — this is the auto-refresh's adopt site, and it
+           was the one that actually clobbered (alAdopt's guard alone could not stop a draft being
+           dropped out from under the open editor, after which saveRule found no stored rule and
+           no-opped in silence). */
+        const drafts = (AL.rules || []).filter((x) => x && x.draft
+            && !(r.rules || []).some((y) => y && y.id === x.id));
+        AL.rules = (r.rules || []).concat(drafts);
+        if (!AL.editing) renderRuleRows();
+        else updateRuleCount();
     } catch (e) { console.error(e); }
 }
 
-document.getElementById('alSave').onclick = async () => {
-    const rows = Array.prototype.slice.call(document.querySelectorAll('#ruleTable tbody tr'));
-    let saved = 0;
-    for (const tr of rows) {
-        const base = A.alerts[parseInt(tr.dataset.idx, 10)];
-        if (!base) continue;
-        let params = base.params;
-        try { params = JSON.parse(tr.querySelector('[data-role="params"]').value || '{}'); } catch (err) { continue; }
-        await api('/api/atlas/alert-rules', {
-            method: 'POST',
-            body: {
-                id: base.id, name: base.name, kind: base.kind, params: params,
-                enabled: tr.querySelector('[data-role="enabled"]').checked,
-                cooldown_s: parseFloat(tr.querySelector('[data-role="cooldown"]').value) || 0,
-                channels: base.channels,
-            },
-        });
-        saved++;
+function ruleFilter() {
+    const F = alFormat();
+    return {
+        onlyHm: document.getElementById('alOnlyHm').checked,
+        onlyOn: document.getElementById('alOnlyOn').checked,
+        match(rule) {
+            return (!this.onlyHm || (F && F.isHeatmapRule(rule))) && (!this.onlyOn || !!rule.enabled);
+        },
+    };
+}
+
+function updateRuleCount(shown) {
+    const F = alFormat();
+    const total = AL.rules.length;
+    const fromMap = AL.rules.filter((r) => F && F.isHeatmapRule(r)).length;
+    const on = AL.rules.filter((r) => r.enabled).length;
+    document.getElementById('alRuleCount').textContent =
+        (shown === undefined ? total : shown) + ' of ' + total + ' rules · ' + fromMap + ' from the heatmap · ' + on + ' enabled';
+}
+
+function renderRuleRows() {
+    const F = alFormat();
+    const filter = ruleFilter();
+    const shown = AL.rules.filter((r) => filter.match(r));
+    document.getElementById('ruleTable').querySelector('tbody').innerHTML = shown.map((rule) =>
+        '<tr data-rule="' + esc(rule.id) + '">' +
+        '<td><label class="switch"><input type="checkbox" data-role="enabled" ' + (rule.enabled ? 'checked' : '') + '></label></td>' +
+        '<td class="name" data-rule-name="' + esc(rule.name || '') + '">' + esc(F ? F.sentence(rule) : rule.name) + '</td>' +
+        '<td>' + (rule.fired || 0) + '</td>' +
+        '<td><button class="btn small" data-role="edit">edit</button></td></tr>').join('')
+        || '<tr><td colspan="4" class="dim">no rules match this filter</td></tr>';
+    updateRuleCount(shown.length);
+}
+
+/* The rule the fields currently describe — the one thing Save posts and the preview renders.
+   An empty field is "not mentioned", never a zero: `Number('')` is 0, which once created a rule
+   that could only fire at the exact cent. */
+function collectRule(tr, base) {
+    const F = alFormat();
+    const params = {};
+    F.paramSpec(base.kind).forEach((f) => {
+        if (f.kind === 'set') {
+            const chosen = Array.prototype.slice.call(tr.querySelectorAll('input[data-param="' + f.key + '"]'))
+                .filter((b) => b.checked).map((b) => b.value);
+            if (chosen.length) params[f.key] = chosen;
+            return;
+        }
+        const el = tr.querySelector('input[data-param="' + f.key + '"]');
+        const raw = el ? String(el.value).trim() : '';
+        if (raw === '') return;
+        const n = Number(raw);
+        if (Number.isFinite(n)) params[f.key] = n;
+    });
+    const boxes = Array.prototype.slice.call(tr.querySelectorAll('input[data-channel]'));
+    const channels = boxes.filter((b) => b.checked).map((b) => b.getAttribute('data-channel'));
+    const read = (role) => tr.querySelector('[data-role="' + role + '"]');
+    const name = read('name');
+    const cooldown = read('cooldown');
+    const enabled = read('enabled');
+    return {
+        id: base.id,
+        name: (name && name.value.trim()) || base.name,
+        kind: base.kind,
+        params: params,
+        enabled: !!(enabled && enabled.checked),
+        cooldown_s: cooldown && Number.isFinite(Number(cooldown.value)) ? Number(cooldown.value) : 0,
+        channels: channels.length ? channels : ['ui'],
+    };
+}
+
+function updatePreview(tr) {
+    const F = alFormat();
+    const out = tr.querySelector('[data-role="preview"]');
+    const stored = AL.rules.find((r) => r.id === tr.dataset.rule);
+    const kindSel = tr.querySelector('[data-role="kind"]');
+    if (!F || !out || !stored) return;
+    out.textContent = 'saves as: ' + F.sentence(collectRule(tr, Object.assign({}, stored, { kind: kindSel ? kindSel.value : stored.kind })));
+}
+
+/* The editor is the rule's own row, replaced: the sentence above it disappears while it is open
+   because the fields ARE that sentence, still readable in the preview line. `swap` carries what a
+   kind change has to keep (the shared thresholds, name, channels, cooldown). */
+function openEditor(id, swap) {
+    const F = alFormat();
+    const stored = AL.rules.find((r) => r.id === id);
+    const tr = document.querySelector('#ruleTable tr[data-rule="' + CSS.escape(id) + '"]');
+    if (!F || !stored || !tr) return;
+    AL.editing = id;
+    const rule = Object.assign({}, stored, swap || {});
+    const field = (label, unit, body) => '<div class="field"><label>' + esc(label) +
+        (unit ? ' <span class="dim">' + esc(unit) + '</span>' : '') + '</label>' + body + '</div>';
+    const inputs = F.paramSpec(rule.kind).map((f) => {
+        const value = (rule.params || {})[f.key];
+        if (f.kind === 'set') {
+            const chosen = F.setValue(value);
+            return field(f.label, '', '<div>' + f.options.map((o) =>
+                '<label class="switch"><input type="checkbox" data-param="' + esc(f.key) + '" value="' + esc(o) + '"' +
+                (chosen.indexOf(o) >= 0 ? ' checked' : '') + '> ' + esc(o) + '</label>').join(' ') + '</div>');
+        }
+        return field(f.label, f.unit === 'share' ? '' : f.unit,
+            '<input type="number" data-param="' + esc(f.key) + '"' +
+            (f.step !== undefined ? ' step="' + esc(String(f.step)) + '"' : '') +
+            (f.min !== undefined ? ' min="' + esc(String(f.min)) + '"' : '') +
+            (f.max !== undefined ? ' max="' + esc(String(f.max)) + '"' : '') +
+            ' value="' + (value === null || value === undefined ? '' : esc(String(value))) + '"' +
+            ' title="' + esc(f.hint || 'leave empty to leave this out of the rule — the kind\u2019s own detection is then the only gate') + '">');
+    }).join('');
+    tr.outerHTML = '<tr data-rule="' + esc(rule.id) + '" data-editing="1"><td colspan="4">' +
+        '<div class="al-edit">' +
+        field('Name', '', '<input type="text" data-role="name" value="' + esc(rule.name || '') + '">') +
+        field('Kind', '', '<select data-role="kind">' + F.kinds().map((k) =>
+            '<option value="' + esc(k.kind) + '"' + (k.kind === rule.kind ? ' selected' : '') +
+            (k.note ? ' title="' + esc(k.note) + '"' : '') + '>' + esc(k.label) + '</option>').join('') + '</select>') +
+        inputs +
+        field('Cooldown', 's', '<input type="number" data-role="cooldown" min="0" step="1" value="' +
+            esc(String(rule.cooldown_s === null || rule.cooldown_s === undefined ? 0 : rule.cooldown_s)) +
+            '" title="seconds before this rule may fire again">') +
+        field('State', '', '<label class="switch"><input type="checkbox" data-role="enabled"' +
+            (rule.enabled ? ' checked' : '') + '> enabled</label>') +
+        '<div class="field wide"><label>Channels</label><div>' + F.CHANNELS.map(([key, label]) =>
+            '<label class="switch" title="' + esc(key === 'ui' ? 'the alert log on this screen' : 'send this rule\u2019s alerts to ' + label) + '">' +
+            '<input type="checkbox" data-channel="' + esc(key) + '"' +
+            (((rule.channels || []).indexOf(key) >= 0) ? ' checked' : '') + '> ' + esc(label) + '</label>').join(' ') + '</div></div>' +
+        '<div class="wide al-edit-actions"><button class="btn small" data-role="save">save</button>' +
+        '<button class="btn small" data-role="cancel">cancel</button>' +
+        '<button class="btn small" data-role="delete">delete</button>' +
+        '<span class="dim" data-role="preview"></span></div>' +
+        '</div></td></tr>';
+    updatePreview(document.querySelector('#ruleTable tr[data-rule="' + CSS.escape(id) + '"]'));
+}
+
+/* Every write answers with the whole rule list: the card renders what the engine KEPT, never what
+   the form hoped it sent (the config store clamps, and a junk price comes back dropped).
+   §56: draft rules (client-only, awaiting their first save) are exempt — the auto-refresh poll
+   adopts the server list every few seconds, and adopting it wholesale dropped a draft out from
+   under the open editor, so saveRule found no stored rule and no-opped in SILENCE. */
+function alAdopt(data) {
+    if (data && Array.isArray(data.rules)) {
+        const drafts = (AL.rules || []).filter((r) => r && r.draft
+            && !data.rules.some((x) => x && x.id === r.id));
+        AL.rules = data.rules.concat(drafts);
     }
-    toastsaved(saved);
-};
-function toastsaved(n) { toast(document.getElementById('rpBanner'), n + ' alert rules saved', 'ok'); }
-document.getElementById('alClear').onclick = () => {
-    document.getElementById('alertTable').querySelector('tbody').innerHTML = '<tr><td colspan="5" class="dim">cleared locally</td></tr>';
+}
+
+async function saveRule(tr, id) {
+    const stored = AL.rules.find((r) => r.id === id);
+    if (!stored) return;
+    const draft = collectRule(tr, stored);
+    try {
+        const d = await api('/api/atlas/alert-rules', { method: 'POST', body: draft });
+        alAdopt(d);
+        AL.editing = null;
+        renderRuleRows();
+        const kept = AL.rules.find((r) => r.id === id);
+        alBanner('saved · ' + alFormat().sentence(kept || draft), kept && kept.enabled ? 'ok' : 'warn');
+    } catch (e) {
+        alBanner('could not save: ' + String(e), 'err');
+    }
+}
+
+async function setRuleEnabled(id, on) {
+    try {
+        const d = await api('/api/atlas/alert-rules', { method: 'POST', body: { id: id, enabled: on } });
+        alAdopt(d);
+        renderRuleRows();
+    } catch (e) {
+        alBanner('could not switch that rule: ' + String(e), 'err');
+        renderRuleRows();
+    }
+}
+
+async function deleteRule(id) {
+    try {
+        const d = await api('/api/atlas/alert-rules/' + encodeURIComponent(id), { method: 'DELETE' });
+        alAdopt(d);
+        AL.editing = null;
+        renderRuleRows();
+        alBanner('rule deleted: ' + id, 'ok');
+    } catch (e) {
+        alBanner('could not delete: ' + String(e), 'err');
+    }
+}
+
+document.getElementById('ruleTable').addEventListener('click', (ev) => {
+    const tr = ev.target.closest('tr[data-rule]');
+    const role = ev.target.getAttribute && ev.target.getAttribute('data-role');
+    if (!tr || !role) return;
+    if (role === 'edit') openEditor(tr.dataset.rule);
+    else if (role === 'cancel') {
+        /* a cancelled draft (never saved server-side) leaves the list with the editor */
+        const stored = AL.rules.find((r) => r.id === AL.editing);
+        if (stored && stored.draft) AL.rules = AL.rules.filter((r) => r.id !== stored.id);
+        AL.editing = null;
+        renderRuleRows();
+    }
+    else if (role === 'save') void saveRule(tr, tr.dataset.rule);
+    else if (role === 'delete') void deleteRule(tr.dataset.rule);
+});
+
+document.getElementById('ruleTable').addEventListener('change', (ev) => {
+    const tr = ev.target.closest('tr[data-rule]');
+    if (!tr) return;
+    const role = ev.target.getAttribute && ev.target.getAttribute('data-role');
+    if (role === 'enabled' && tr.dataset.editing !== '1') { void setRuleEnabled(tr.dataset.rule, ev.target.checked); return; }
+    if (tr.dataset.editing !== '1') return;
+    if (role === 'kind') {
+        /* A different kind is a different rule: the thresholds that still apply (min_size and
+           friends) travel with the swap, the rest are gone — which is what the preview says. */
+        const stored = AL.rules.find((r) => r.id === tr.dataset.rule);
+        if (stored) openEditor(tr.dataset.rule, Object.assign(collectRule(tr, stored), { kind: ev.target.value }));
+        return;
+    }
+    updatePreview(tr);
+});
+
+document.getElementById('ruleTable').addEventListener('input', (ev) => {
+    const tr = ev.target.closest('tr[data-rule]');
+    if (tr && tr.dataset.editing === '1') updatePreview(tr);
+});
+
+document.getElementById('alOnlyHm').onchange = renderRuleRows;
+/* §56 carry-over: the card could edit rules but never create one (rules only arrived from the
+   heatmap's alert buttons and the API). A draft opens the SAME row editor; cancelling drops it —
+   a draft must never silently become a saved rule. */
+{
+    const newBtn = document.getElementById('alNewRule');
+    if (newBtn) {
+        newBtn.addEventListener('click', () => {
+            const F = alFormat();
+            const kinds = F ? F.kinds() : [];
+            const preferred = kinds.find((k) => k && k.kind === 'big_trade') || kinds[0] || {};
+            const draft = {
+                id: 'ui-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e4).toString(36),
+                name: 'New rule', kind: preferred.kind || 'big_trade', params: {},
+                enabled: false, cooldown_s: 0, channels: ['ui'], symbol: S.symbol || '', draft: true,
+            };
+            const onlyHm = document.getElementById('alOnlyHm');
+            if (onlyHm) onlyHm.checked = false;   // the draft is not heatmap-made — never hide it
+            AL.rules.push(draft);
+            renderRuleRows();
+            openEditor(draft.id);
+        });
+    }
+}
+document.getElementById('alOnlyOn').onchange = renderRuleRows;
+
+document.getElementById('alClear').onclick = async () => {
+    const btn = document.getElementById('alClear');
+    btn.disabled = true;
+    try {
+        const d = await api('/api/atlas/alerts/clear', { method: 'POST' });
+        const left = (d.stats || {}).history || 0;
+        alBanner('log cleared — the engine now holds ' + left + ' row' + (left === 1 ? '' : 's'), 'ok');
+        await loadAlerts(true, true);
+    } catch (e) {
+        alBanner('could not clear the log: ' + String(e), 'err');
+    } finally {
+        btn.disabled = false;
+    }
 };
 
 /* ── the two series this panel shares with the add-on cards ────────────────────────────────────

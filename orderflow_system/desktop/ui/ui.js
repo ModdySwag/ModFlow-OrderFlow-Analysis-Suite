@@ -23,6 +23,11 @@ const S = {
     lastPrice: null,
     tickCount: 0,
     candleCount: 0,
+    /* P1-8: how this chart expresses its bars, and the colours the theme pair stands for here.
+       The mode and palette come from the config block (`expression.chart`). */
+    expr: { mode: 'default', palette: 'theme', loaded: false },
+    lastDelta: [],        // the delta series in hand, so a display change recolours without a fetch
+    exprTheme: { pos: '53,208,127', neg: '255,93,108' },
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -50,6 +55,19 @@ async function api(path, opts = {}) {
 
 function toast(el, text, kind = 'info') {
     if (!el) return;
+    /* A notice aimed at <body> gets its OWN fixed strip, never the page: assigning innerHTML to the
+       body REPLACES every view with the banner -- measured live, where one client error (a colour
+       the chart vendor refused) left a dead window behind a red banner. Call sites that address the
+       body all mean "say this", so the routing lives here, once, for every future caller too. */
+    if (el === document.body) {
+        let strip = document.getElementById('noticeStrip');
+        if (!strip) {
+            strip = document.createElement('div');
+            strip.id = 'noticeStrip';
+            document.body.appendChild(strip);
+        }
+        el = strip;
+    }
     el.innerHTML = `<div class="banner ${kind}">${esc(text)}</div>`;
 }
 function clearToast(el) { if (el) el.innerHTML = ''; }
@@ -82,17 +100,8 @@ document.addEventListener('click', (e) => {
     if (jump) showView(jump.dataset.viewJump);
 });
 
-/* Alt+A jumps to the broker-account view. Ignored while typing, and while a
-   modifier other than Alt is held, so it never fights Ctrl+A (select all). */
-document.addEventListener('keydown', (e) => {
-    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-    if ((e.key || '').toLowerCase() !== 'a') return;
-    const act = document.activeElement || {};
-    const tag = (act.tagName || '').toUpperCase();
-    if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || act.isContentEditable) return;
-    e.preventDefault();
-    showView('alpaca');
-});
+/* Alt+A (the broker account) lives in keys.js's shortcut map now — the app-core 'alpaca'
+   binding — so it is listed in the hotkey sheet and the typing guard is the dispatcher's. */
 
 /* ══════════════════════════════════════════════════════════════
    Boot
@@ -232,13 +241,26 @@ async function refreshLiveChip() {
     const map = (S.live && S.live.endpoints) || {};
     const overall = (S.live && S.live.overall) || 'demo';
     el.className = 'pill ' + (overall === 'live' ? 'running' : overall === 'warming' ? '' : 'stopped');
-    el.textContent = 'data: ' + overall;
-    el.title = Object.entries(map).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'live/demo state per endpoint';
+    /* P1-10: the pill says BOTH what the data is and how old it is — the newest tape sample's age
+       from the server's own age block, re-read with every status poll. */
+    const tapeAge = (S.live && S.live.age && S.live.age.tape) || null;
+    const ageText = (tapeAge && tapeAge.age_known && window.OFAPFRESH) ? ' · ' + OFAPFRESH.fmtAge(tapeAge.age_ms)
+        : (tapeAge && tapeAge.stale) ? ' · stale' : '';
+    el.textContent = 'data: ' + overall + ageText;
+    const ages = (S.live && S.live.age) ? Object.entries(S.live.age)
+        .map(([k, v]) => `${k}: ${v.age_known ? Math.round(v.age_ms / 1000) + 's' : 'age unknown'}`).join(' · ') : '';
+    el.title = (ages ? ages + ' — ' : '') + (Object.entries(map).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'live/demo state per endpoint');
 }
 
 /** True when the given endpoint is demonstrably serving engine data right now. */
 function panelIsLive(key) {
     return !!(S.live && S.live.endpoints && S.live.endpoints[key] === 'live');
+}
+
+/** The endpoint's server-declared state — 'live' | 'warming' | 'demo' | 'stale' | ''. Panels
+ *  that label provenance (a demo fill is never dressed up as a feed) read it from here. */
+function liveState(key) {
+    return (S.live && S.live.endpoints && S.live.endpoints[key]) || '';
 }
 
 /* The shell's own read of the engine status: 2 s, and the same (endpoint, params) the Watchlist
@@ -371,12 +393,30 @@ function handleChannel(msg) {
     switch (channel) {
         case 'tick':
             S.lastPrice = data.price; S.tickCount++;
+            /* P1-10: a tape tick just landed — the tape panel's sample time, for its chip. */
+            if (window.OFAPFRESH) OFAPFRESH.stamp('tape', { ageMs: 0, kind: 'trades' });
             updatePriceKpis(data.price, data.side);
             if (S.inst.tape && truthyView('tape')) S.inst.tape.addTrade({ time: Date.now(), price: data.price, size: data.size, side: data.side });
             break;
         case 'candle':
             S.candleCount++;
-            if (S.candleSeries) S.candleSeries.update({ time: data.time, open: data.open, high: data.high, low: data.low, close: data.close });
+            if (S.candleSeries) {
+                /* §56 carry-over: this used to repaint the newest bar with plain OHLC, so an
+                   expression mode's colours dropped off the bar until the next full fetch. The
+                   same chartBars pass the full repaint uses colours the single bar too. */
+                const EM = exprModule();
+                const bar = { time: data.time, open: data.open, high: data.high, low: data.low,
+                              close: data.close, volume: data.volume, delta: data.delta };
+                let point = bar;
+                if (EM && S.expr) {
+                    try {
+                        const coloured = EM.chartBars([bar], { mode: S.expr.mode, palette: S.expr.palette,
+                                                               theme: S.exprTheme })[0];
+                        if (coloured) point = coloured;
+                    } catch (e) { /* the plain bar is always paintable */ }
+                }
+                S.candleSeries.update(point);
+            }
             break;
         case 'delta':
             if (S.deltaSeries) S.deltaSeries.update({ time: data.time, value: data.value });
@@ -523,6 +563,95 @@ function renderOverviewSignals() {
    Chart
    ══════════════════════════════════════════════════════════════ */
 
+/* ── P1-8: the chart's bar expression ──────────────────────────────────────────────────────────
+   One call site for the paint: `expression.js` decides what each candle's body, outline and wick
+   are, and this hands the result to the vendor series. The mode the catalogue resolves is what the
+   legend line prints, so the words and the drawing cannot disagree. */
+function exprModule() { return window.OFAPEXPR || null; }
+
+function exprPair(palette) {
+    const E = exprModule();
+    if (!E) return S.exprTheme;
+    return E.pair(palette, S.exprTheme);
+}
+
+function applyChartExpression(next) {
+    const E = exprModule();
+    if (next && (next.mode || next.palette)) {
+        if (next.mode) S.expr.mode = String(next.mode);
+        if (next.palette) S.expr.palette = String(next.palette);
+    }
+    const mode = (E && E.MODE_KEYS.indexOf(String(S.expr.mode)) >= 0) ? String(S.expr.mode) : 'default';
+    const palette = (E && E.PALETTE_KEYS.indexOf(String(S.expr.palette)) >= 0) ? String(S.expr.palette) : 'theme';
+    S.expr.mode = mode;
+    S.expr.palette = palette;
+    if ($('#chartMode')) $('#chartMode').value = mode;
+    if ($('#chartPalette')) $('#chartPalette').value = palette;
+    paintChartExprLegend();
+    return { mode, palette };
+}
+
+/* The line under the card title: the encoding in use, its sign pairing, the palette and — when the
+   chart cannot draw the mode — the reason, in the panel, in the words of the actual condition. */
+function paintChartExprLegend() {
+    const el = $('#chartExpr');
+    if (!el) return;
+    const E = exprModule();
+    if (!E) { el.textContent = 'expression module not loaded — plain candles'; return; }
+    const mode = S.expr.mode;
+    const lines = E.legendLines(mode, S.expr.palette, {
+        chartGap: E.CHART_SUPPORT[mode] ? '' : 'the chart view cannot draw this mode — candles stay plain here',
+    });
+    el.textContent = lines.filter((l) => l && l.indexOf('depth ramp:') !== 0).join(' \u00b7 ');
+}
+
+/* The stored block, read once per page. A failed read leaves the defaults in place (the chart is
+   still usable) and the legend already says which mode is drawing. */
+async function loadChartExpression(force) {
+    if (S.expr.loaded && !force) return;
+    try {
+        const res = await api('/api/control/expression');
+        const chart = (res && res.expression && res.expression.chart) || {};
+        S.expr.loaded = true;
+        applyChartExpression({ mode: chart.mode, palette: chart.palette });
+    } catch (err) {
+        applyChartExpression({});                     // the defaults stand, and the legend says what drew
+    }
+    if (force) repaintChart();                        // repaint the candles already on screen
+}
+
+async function saveChartExpression(patch) {
+    const applied = applyChartExpression(patch);
+    /* Repaint what is already on screen: the candles carry the mode's paints, so an encoding change
+       that only updated the controls would leave yesterday's picture under today's legend. */
+    repaintChart();
+    try {
+        const res = await api('/api/control/expression', { method: 'POST', body: Object.assign({ chart: 'chart' }, patch) });
+        const value = (res && res.value) || {};
+        applyChartExpression({ mode: value.mode, palette: value.palette });   // what the store accepted
+    } catch (err) {
+        $('#chartStatus').textContent = `expression save failed: ${err}`;
+    }
+    return applied;
+}
+
+/* A display change repaints from the data already in hand. The fetch path stays the only fetcher:
+   `steady.js` skips a panel's loaders for 30 s after any input inside it, so a mode change that
+   waited for the fetch would leave the previous encoding on screen until the hold expired. */
+function repaintChart() {
+    const E = exprModule();
+    if (!E || !S.candleSeries || !(S.lastBars || []).length) return false;
+    S.candleSeries.setData(E.chartBars(S.lastBars, { mode: S.expr.mode, palette: S.expr.palette, theme: S.exprTheme }));
+    if (S.deltaSeries && (S.lastDelta || []).length) {
+        const pair = exprPair(S.expr.palette);
+        S.deltaSeries.setData(S.lastDelta.map((x) => ({
+            time: x.time, value: x.bar_delta ?? x.value,
+            color: (x.bar_delta ?? x.value) >= 0 ? `rgba(${pair.pos},.55)` : `rgba(${pair.neg},.55)`,
+        })));
+    }
+    return true;
+}
+
 function ensureChart() {
     if (S.chart) return;
     const el = $("#chart");
@@ -568,7 +697,20 @@ async function loadChart() {
         ]);
         const bars = Array.isArray(candles) ? candles : [];
         S.lastBars = bars;                       // the studies layer runs on the same bars
-        S.candleSeries.setData(bars.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+        /* P1-10: the chart's sample clock is its newest bar's CLOSE (open + the series' own
+           interval — a closed 1m bar is 60-120 s old by its open while perfectly healthy). */
+        if (window.OFAPFRESH) {
+            const lastT = bars.length ? Number(bars[bars.length - 1].time) : 0;
+            const step = bars.length > 1 ? Math.max(1, lastT - Number(bars[bars.length - 2].time)) : 60;
+            OFAPFRESH.stamp('chart', { lastMs: lastT ? (lastT + step) * 1000 : 0, kind: 'candles' });
+        }
+        /* Per-bar paints from the catalogue: the default mode hands back the same OHLC with the
+           theme pair's colours (identical to the series' own options), so "default" moves no pixel. */
+        const E = exprModule();
+        const rows = E
+            ? E.chartBars(bars, { mode: S.expr.mode, palette: S.expr.palette, theme: S.exprTheme })
+            : bars.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
+        S.candleSeries.setData(rows);
         const d = Array.isArray(delta) ? delta : [];
         // The studies layer runs on the same bars, and the chart already fetched the
         // per-bar delta series: attaching it here is what lets a study read d.delta()
@@ -577,7 +719,9 @@ async function loadChart() {
         bars.forEach((bar) => {
             if (deltaByTime.has(bar.time)) bar.bar_delta = deltaByTime.get(bar.time);
         });
-        S.deltaSeries.setData(d.map((x) => ({ time: x.time, value: x.bar_delta ?? x.value, color: (x.bar_delta ?? x.value) >= 0 ? 'rgba(53,208,127,.55)' : 'rgba(255,93,108,.55)' })));
+        const pair = exprPair(S.expr.palette);
+        S.lastDelta = d;                         // held so a display change can recolour without a fetch
+        S.deltaSeries.setData(d.map((x) => ({ time: x.time, value: x.bar_delta ?? x.value, color: (x.bar_delta ?? x.value) >= 0 ? `rgba(${pair.pos},.55)` : `rgba(${pair.neg},.55)` })));
 
         // Markers are optional: the endpoint 500s in the stock repo
         // (NameError: Side — dashboard/app.py:256), so never let it kill the chart.
@@ -604,6 +748,14 @@ async function loadChart() {
         // colours them). Guarded: the module is injected asynchronously.
         if (typeof studiesApply === 'function') studiesApply();
         else if (S.candleSeries) S.candleSeries.setMarkers((S.baseMarkers || []).slice(-300));
+        /* A study that recolours the candles would otherwise quietly undo the expression mode (both
+           write the same series), so the expression is re-asserted last. `default` + the theme
+           palette is the one combination where the studies pass keeps the floor: it paints today's
+           pixels (the catalogue hands back the very pair the series options carry). Every other
+           combination re-asserts — including `default` under a colour-blind palette, which the
+           studies pass would otherwise strip back to the theme's green/red while the legend goes on
+           claiming sky blue / orange (measured live, before this line read the palette too). */
+        if (S.expr.mode !== 'default' || S.expr.palette !== 'theme') repaintChart();
         $("#chartStatus").textContent = `${bars.length} bars · ${d.length} delta points${notes.length ? ' · ' + notes.join(' · ') : ''}`;
     } catch (e) {
         $("#chartStatus").textContent = String(e);
@@ -641,6 +793,16 @@ function renderChartKpis(vp, bias, bars) {
 }
 
 $("#tfSelect").onchange = (e) => { S.tf = +e.target.value; loadChart(); };
+$("#chartMode").onchange = () => { void saveChartExpression({ mode: $("#chartMode").value }); };
+$("#chartPalette").onchange = () => { void saveChartExpression({ palette: $("#chartPalette").value }); };
+/* ui.js is the FIRST module tag in the shell and the catalogue's is later in the document, so the
+   boot read waits for the DOM: painting the legend before `expression.js` has been parsed states a
+   condition ("module not loaded") that would stop being true a millisecond later. */
+function bootChartExpression() { void loadChartExpression(); }
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootChartExpression);
+else bootChartExpression();
+/* The menu bar writes the same registry paths; arrive there through the store, like every panel. */
+document.addEventListener('ofap:expression', () => { void loadChartExpression(true); });
 $("#rangeSelect").onchange = (e) => { S.range = +e.target.value; loadChart(); };
 $("#ovMarkers").onchange = loadChart;
 $("#ovVP").onchange = () => loadChart();
@@ -1075,7 +1237,36 @@ $("#btnTgTest").onclick = async () => {
    Logs
    ══════════════════════════════════════════════════════════════ */
 
+/* R5: the storage line — the DB has numbers now, and the Logs panel is where people look
+   when something feels slow. Fetched with the logs; the route caches its own 30 s. */
+async function loadStorage() {
+    try {
+        const d = await api('/api/control/storage');
+        const el = $("#logStorage");
+        if (!el) return;
+        const human = (n) => {
+            const v = Number(n) || 0;
+            return v >= 1e9 ? (v / 1e9).toFixed(2) + ' GB' : (v / 1e6).toFixed(1) + ' MB';
+        };
+        const rows = d.tables && typeof d.tables.ticks === 'number' && d.tables.ticks >= 0 ? d.tables.ticks : null;
+        const keep = d.retention && d.retention.days > 0 ? `${d.retention.days} d` : 'forever';
+        const prune = d.last_prune && d.last_prune.deleted != null
+            ? ` · last prune −${Number(d.last_prune.deleted).toLocaleString()} rows` : '';
+        el.textContent = `storage: ${human(d.bytes + (d.wal_bytes || 0))}`
+            + (rows != null ? ` · ${(rows / 1e6).toFixed(1)} M ticks` : '')
+            + ` · keep ${keep}` + prune;
+        el.title = [
+            `db: ${d.db_path}`,
+            `file ${human(d.bytes)} · wal ${human(d.wal_bytes || 0)}`,
+            rows != null ? `ticks ${rows.toLocaleString()}` : (d.engine_running ? '' : 'row counts need the engine running'),
+            `retention ${keep} · prune every ${d.retention ? d.retention.prune_interval_hours : '?'} h`,
+            d.retention ? `session starts ${String(d.retention.session_start_hour).padStart(2, '0')}:00 UTC` : '',
+        ].filter(Boolean).join('\n');
+    } catch (e) { /* the line is a bonus; the logs matter more */ }
+}
+
 async function loadLogs() {
+    loadStorage();
     try {
         const lvl = $("#logLevel").value;
         const d = await api(`/api/control/logs?lines=300${lvl ? '&level=' + lvl : ''}`);
