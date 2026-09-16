@@ -22,7 +22,7 @@ Every change must leave these green — CI runs exactly the same commands on Pyt
 3.12, plus the lint baseline and a dependency audit (`.github/workflows/ci.yml`):
 
 ```bash
-python -m pytest orderflow_system -q                     # full suite (baseline: 881 passed / 2 skipped)
+python -m pytest orderflow_system -q                     # full suite (baseline: 891 passed / 2 skipped)
 python scripts/audit_ui_refs.py                          # JS → FastAPI routes / DOM ids (baseline: AUDIT CLEAN)
 for f in orderflow_system/desktop/ui/*.selftest.js; do node "$f"; done   # 23 selftests (needs Node)
 ```

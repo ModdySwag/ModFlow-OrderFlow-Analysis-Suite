@@ -98,10 +98,15 @@ def build_app(port: int):
 
 
 def free_port(preferred: int) -> int:
-    """Use the configured port when free, otherwise the next free one."""
+    """Use the configured port when free, otherwise the next free one.
+
+    The probe binds WITHOUT SO_REUSEADDR on purpose (measured on Windows): a probe that sets
+    it can bind a port another reuse-enabled socket already holds and report it free, and the
+    real bind that follows (uvicorn's own is exclusive) then dies with Errno 10048. An
+    exclusive probe asks the exact question the server's own bind will ask.
+    """
     for candidate in [preferred] + list(range(preferred + 1, preferred + 20)):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind(("127.0.0.1", candidate))
                 return candidate

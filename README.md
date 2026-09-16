@@ -7,7 +7,7 @@
 [![Instruments](https://img.shields.io/badge/instruments-49-blue?style=for-the-badge)](.)
 [![Code](https://img.shields.io/badge/code-~73k%20lines-brightgreen?style=for-the-badge)](.)
 [![API](https://img.shields.io/badge/API-138%20routes-orange?style=for-the-badge)](.)
-[![Tests](https://img.shields.io/badge/tests-881%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+[![Tests](https://img.shields.io/badge/tests-891%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
 
 ---
 
@@ -704,8 +704,8 @@ Automated notifications for every trade lifecycle event:
 ### Setup (from source)
 
 ```bash
-git clone https://github.com/ModdySwag/OrderFlow-Analysis-Pro.git
-cd OrderFlow-Analysis-Pro
+git clone https://github.com/ModdySwag/ModFlow-OrderFlow-Analysis-Suite.git
+cd ModFlow-OrderFlow-Analysis-Suite
 
 python -m venv .venv
 .venv\Scripts\activate              # Windows;  source .venv/bin/activate on Linux/macOS
@@ -733,8 +733,14 @@ python -m orderflow_system.main       # the original CLI orchestrator, config-dr
 ### Demo mode (no feed required)
 
 ```bash
-python -m orderflow_system.dashboard  # deterministic demo data — the render test bed
+python -m orderflow_system.dashboard               # deterministic demo data — the render test bed
+python -m orderflow_system.dashboard --port 8099   # …or pin the port
 ```
+
+The port rule matches the desktop app's: `--port` first, else `dashboard.port` from the per-user
+config (Windows: `%APPDATA%\OrderFlowAnalysisPro\config.json`), else 8080 — and when that port is
+already held by another process the next free one is used and printed, so a busy 8080 never blocks
+the demo server.
 
 ### Standalone executable
 
@@ -893,7 +899,7 @@ orderflow_system/
     ├── app.py                       # FastAPI REST + WebSocket (1381L)
     ├── websocket_manager.py         # 10-channel broadcast manager (293L)
     ├── demo_data.py                 # Deterministic demo data generator (806L)
-    ├── __main__.py                  # Standalone launcher (35L)
+    ├── __main__.py                  # Standalone launcher (90L)
     └── static/
         ├── index.html               # Main HTML shell (121L)
         ├── app.js                   # the chart library charts + WebSocket (939L)
@@ -916,13 +922,13 @@ orderflow_system/
 | Data feeds + storage | 16 | 6,081 | — | 6,081 |
 | Analytics (delta, footprint, volume profile, patterns, signals, alerts) | 17 | 3,077 | — | 3,077 |
 | Atlas (live analytics + `/api/atlas/*`) | 26 | 7,558 | — | 7,558 |
-| Desktop app (desktop package + packaging scripts) | 26 | 10,070 | — | 10,070 |
+| Desktop app (desktop package + packaging scripts) | 26 | 10,075 | — | 10,075 |
 | Desktop UI (vanilla JS + CSS + HTML, no build step) | 89 | — | 36,964 | 36,964 |
-| Legacy dashboard (host + legacy page assets) | 14 | 2,516 | 4,667 | 7,183 |
+| Legacy dashboard (host + legacy page assets) | 14 | 2,571 | 4,667 | 7,238 |
 | Orchestrator (`main.py`) | 1 | 857 | — | 857 |
-| **Total (excluding tests)** | **191** | **30,981** | **41,631** | **72,612** |
+| **Total (excluding tests)** | **191** | **31,041** | **41,631** | **72,672** |
 
-Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 78 files / 15,664 lines. The desktop UI also ships its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the nine Help Centre screenshots (`orderflow_system/desktop/ui/help/`), which the columns above do not count.
+Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 79 files / 15,790 lines. The desktop UI also ships its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the nine Help Centre screenshots (`orderflow_system/desktop/ui/help/`), which the columns above do not count.
 
 ---
 
@@ -992,8 +998,12 @@ legacy dashboard set, kept for compatibility:
 The system includes a **deterministic demo data generator** that produces realistic data for every shipped instrument (plus the Alpaca example symbols) — no data feed required. Runs via:
 
 ```bash
-python -m orderflow_system.dashboard
+python -m orderflow_system.dashboard             # uses the configured port
+python -m orderflow_system.dashboard --port 8099 # …or override it
 ```
+
+The server takes `--port N`; without it the port is the per-user config's `dashboard.port` (default
+8080), and a port another process already holds shifts to the next free one instead of failing to bind.
 
 Generates:
 - OHLCV candles via random walk (seeded per symbol/timeframe)

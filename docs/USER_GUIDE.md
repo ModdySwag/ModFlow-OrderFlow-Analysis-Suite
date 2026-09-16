@@ -178,8 +178,8 @@ of them costs nothing except phone notifications.
 From a terminal (PowerShell, Terminal.app, or bash):
 
 ```bash
-git clone https://github.com/mahmoud20138/OrderFlow-Analysis-Pro
-cd OrderFlow-Analysis-Pro
+git clone https://github.com/ModdySwag/ModFlow-OrderFlow-Analysis-Suite
+cd ModFlow-OrderFlow-Analysis-Suite
 
 # create an isolated environment (uv is a single binary: https://docs.astral.sh/uv/)
 uv venv --python 3.12 .venv
