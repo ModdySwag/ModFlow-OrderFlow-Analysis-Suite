@@ -41,12 +41,12 @@ def test_the_shell_files_exist():
 
 
 def test_the_shell_parses_as_javascript():
-    proc = subprocess.run([_node(), "--check", str(SHELL)], capture_output=True, text=True, timeout=60)
+    proc = subprocess.run([_node(), "--check", str(SHELL)], capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert proc.returncode == 0, proc.stderr
 
 
 def test_the_shell_selftest_passes():
-    proc = subprocess.run([_node(), str(SELFTEST)], capture_output=True, text=True, timeout=120,
+    proc = subprocess.run([_node(), str(SELFTEST)], capture_output=True, text=True, encoding="utf-8", timeout=120,
                           cwd=str(ROOT))
     out = proc.stdout.strip()
     match = re.search(r"shell selftest: (\d+) ok, (\d+) failed", out)

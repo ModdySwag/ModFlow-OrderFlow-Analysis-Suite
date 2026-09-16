@@ -67,7 +67,7 @@ def test_the_map_parses():
     node = shutil.which("node")
     if not node:
         pytest.skip("node not available")
-    proc = subprocess.run([node, "--check", str(KEYS)], capture_output=True, text=True)
+    proc = subprocess.run([node, "--check", str(KEYS)], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 0, proc.stderr
 
 
@@ -75,7 +75,7 @@ def test_the_selftest_passes():
     node = shutil.which("node")
     if not node:
         pytest.skip("node not available")
-    proc = subprocess.run([node, str(SELFTEST)], capture_output=True, text=True, timeout=60)
+    proc = subprocess.run([node, str(SELFTEST)], capture_output=True, text=True, encoding="utf-8", timeout=60)
     out = (proc.stdout or "") + (proc.stderr or "")
     assert proc.returncode == 0, out
     found = re.search(r"keys selftest: (\d+) ok, (\d+) failed", out)

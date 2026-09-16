@@ -30,12 +30,12 @@ def test_the_module_and_its_selftest_are_present():
 
 
 def test_it_parses():
-    out = subprocess.run([*_node(), "--check", str(STRIPS)], capture_output=True, text=True)
+    out = subprocess.run([*_node(), "--check", str(STRIPS)], capture_output=True, text=True, encoding="utf-8")
     assert out.returncode == 0, out.stderr
 
 
 def test_its_selftest_passes():
-    out = subprocess.run([*_node(), str(UI / "strips.selftest.js")], capture_output=True, text=True)
+    out = subprocess.run([*_node(), str(UI / "strips.selftest.js")], capture_output=True, text=True, encoding="utf-8")
     assert out.returncode == 0, out.stdout + out.stderr
     assert re.search(r"strips selftest: \d+ ok, 0 failed", out.stdout), out.stdout
 

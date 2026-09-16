@@ -61,7 +61,7 @@ def test_no_module_in_the_runtime_tree_imports_numpy():
 def test_the_pipeline_imports_and_computes_with_numpy_blocked():
     proc = subprocess.run(
         [sys.executable, "-c", BLOCKED_IMPORT],
-        cwd=str(ROOT), capture_output=True, text=True, timeout=120,
+        cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", timeout=120,
     )
     assert proc.returncode == 0, (
         "the analytics pipeline still needs numpy:\n"

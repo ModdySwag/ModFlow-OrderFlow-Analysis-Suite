@@ -44,12 +44,12 @@ def test_the_links_files_exist():
 
 
 def test_the_links_module_parses_as_javascript():
-    proc = subprocess.run([_node(), "--check", str(LINKS)], capture_output=True, text=True, timeout=60)
+    proc = subprocess.run([_node(), "--check", str(LINKS)], capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert proc.returncode == 0, proc.stderr
 
 
 def test_the_links_selftest_passes():
-    proc = subprocess.run([_node(), str(SELFTEST)], capture_output=True, text=True, timeout=120,
+    proc = subprocess.run([_node(), str(SELFTEST)], capture_output=True, text=True, encoding="utf-8", timeout=120,
                           cwd=str(ROOT))
     out = proc.stdout.strip()
     match = re.search(r"links selftest: (\d+) ok, (\d+) failed", out)

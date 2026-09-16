@@ -88,12 +88,12 @@ def test_the_module_and_its_selftest_are_present():
 
 
 def test_it_parses():
-    out = subprocess.run(["node", "--check", str(MODULE)], capture_output=True, text=True)
+    out = subprocess.run(["node", "--check", str(MODULE)], capture_output=True, text=True, encoding="utf-8")
     assert out.returncode == 0, out.stderr
 
 
 def test_its_selftest_passes():
-    out = subprocess.run(["node", str(SELFTEST)], capture_output=True, text=True)
+    out = subprocess.run(["node", str(SELFTEST)], capture_output=True, text=True, encoding="utf-8")
     assert out.returncode == 0, out.stdout + out.stderr
     assert re.search(r"alert-format selftest: \d+ ok, 0 failed", out.stdout), out.stdout
 

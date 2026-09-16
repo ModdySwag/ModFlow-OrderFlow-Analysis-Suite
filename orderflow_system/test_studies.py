@@ -117,7 +117,7 @@ def test_saving_the_active_list_round_trips(monkeypatch, tmp_path):
 
 # ── the runtime itself ─────────────────────────────────────────────────────────────
 def _node(script: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(["node", str(script)], cwd=str(UI), capture_output=True, text=True, timeout=120)
+    return subprocess.run(["node", str(script)], cwd=str(UI), capture_output=True, text=True, encoding="utf-8", timeout=120)
 
 
 def test_runtime_self_test_passes():
@@ -195,7 +195,7 @@ console.log('compat ok: ' + run.plots.value.length + ' values, ' + StudyAPI.regi
 ''', encoding="utf-8")
     import os
     env = dict(os.environ, OFAP_UI=str(UI))
-    result = subprocess.run(["node", str(script)], capture_output=True, text=True, timeout=120, env=env)
+    result = subprocess.run(["node", str(script)], capture_output=True, text=True, encoding="utf-8", timeout=120, env=env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "compat ok:" in result.stdout
 
@@ -221,7 +221,7 @@ console.log(JSON.stringify({ files: files.length, registered: StudyAPI.registry.
 ''', encoding="utf-8")
     import os
     env = dict(os.environ, OFAP_UI=str(UI))
-    result = subprocess.run(["node", str(script)], capture_output=True, text=True, timeout=120, env=env)
+    result = subprocess.run(["node", str(script)], capture_output=True, text=True, encoding="utf-8", timeout=120, env=env)
     assert result.returncode == 0, result.stdout + result.stderr
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     assert payload["bad"] == [], payload["bad"]

@@ -60,7 +60,7 @@ def html() -> str:
 
 
 def _run(script: str) -> str:
-    out = subprocess.run([_node(), "-e", script], capture_output=True, text=True, cwd=str(UI))
+    out = subprocess.run([_node(), "-e", script], capture_output=True, text=True, encoding="utf-8", cwd=str(UI))
     assert out.returncode == 0, out.stderr
     return out.stdout.strip()
 
@@ -74,12 +74,12 @@ def test_files_exist():
 
 @pytest.mark.parametrize("path", [MODULE, SELFTEST, ENGINE, VIEW, CHART])
 def test_parses_as_javascript(path):
-    out = subprocess.run([_node(), "--check", str(path)], capture_output=True, text=True)
+    out = subprocess.run([_node(), "--check", str(path)], capture_output=True, text=True, encoding="utf-8")
     assert out.returncode == 0, out.stderr
 
 
 def test_its_selftest_passes_with_the_measured_claims():
-    out = subprocess.run([_node(), str(SELFTEST)], capture_output=True, text=True)
+    out = subprocess.run([_node(), str(SELFTEST)], capture_output=True, text=True, encoding="utf-8")
     assert out.returncode == 0, out.stdout + out.stderr
     match = re.search(r"expression selftest: (\d+) ok, 0 failed", out.stdout)
     assert match, out.stdout

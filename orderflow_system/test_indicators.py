@@ -40,7 +40,7 @@ def test_each_addon_declares_its_identity():
 
 
 def test_indicator_selftest_passes():
-    proc = subprocess.run([_node(), str(SELFTEST)], cwd=str(UI), capture_output=True, text=True, timeout=120)
+    proc = subprocess.run([_node(), str(SELFTEST)], cwd=str(UI), capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "0 failed" in proc.stdout, proc.stdout
     assert " ok" in proc.stdout, proc.stdout

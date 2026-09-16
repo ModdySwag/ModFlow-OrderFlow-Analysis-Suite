@@ -42,12 +42,12 @@ def test_the_bus_files_exist():
 
 
 def test_the_bus_parses_as_javascript():
-    proc = subprocess.run([_node(), "--check", str(BUS)], capture_output=True, text=True, timeout=60)
+    proc = subprocess.run([_node(), "--check", str(BUS)], capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert proc.returncode == 0, proc.stderr
 
 
 def test_the_bus_selftest_passes():
-    proc = subprocess.run([_node(), str(SELFTEST)], capture_output=True, text=True, timeout=180,
+    proc = subprocess.run([_node(), str(SELFTEST)], capture_output=True, text=True, encoding="utf-8", timeout=180,
                           cwd=str(ROOT))
     out = proc.stdout.strip()
     match = re.search(r"bus selftest: (\d+) ok, (\d+) failed", out)

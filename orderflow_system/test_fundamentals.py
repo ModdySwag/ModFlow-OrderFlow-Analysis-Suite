@@ -170,12 +170,12 @@ def test_the_captured_fixtures_are_the_real_thing():
 
 
 def test_the_panel_parses_as_javascript():
-    proc = subprocess.run([_node(), "--check", str(PANEL)], capture_output=True, text=True, timeout=60)
+    proc = subprocess.run([_node(), "--check", str(PANEL)], capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert proc.returncode == 0, proc.stderr
 
 
 def test_the_panel_selftest_passes():
-    proc = subprocess.run([_node(), str(SELFTEST)], capture_output=True, text=True, timeout=180,
+    proc = subprocess.run([_node(), str(SELFTEST)], capture_output=True, text=True, encoding="utf-8", timeout=180,
                           cwd=str(ROOT))
     out = proc.stdout.strip()
     match = re.search(r"fundamentals selftest: (\d+) ok, (\d+) failed", out)
@@ -558,7 +558,7 @@ def test_the_javascript_reduction_matches_the_python_reduction_row_for_row():
               "const win={};new Function('window','document','fetch',src)(win,undefined,undefined);"
               f"const doc=JSON.parse(fs.readFileSync({json.dumps(str(FACTS_FIX))},'utf8'));"
               "process.stdout.write(JSON.stringify(win.OFAPFUNDAMENTALS.reduceFacts(doc)));")
-    proc = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=120,
+    proc = subprocess.run([_node(), "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=120,
                           cwd=str(ROOT))
     assert proc.returncode == 0, proc.stderr
     from_js = json.loads(proc.stdout)
@@ -578,7 +578,7 @@ def _js_constants() -> dict:
               "ids: F.CRYPTO_IDS, refresh_ms: F.REFRESH_MS, tick_ms: F.TICK_MS, dash: F.DASH,"
               "headlines: F.HEADLINES.map((h)=>({key:h.key,label:h.label,unit:h.unit,kind:h.kind,"
               "tags:h.tags}))}));")
-    proc = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=120,
+    proc = subprocess.run([_node(), "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=120,
                           cwd=str(ROOT))
     assert proc.returncode == 0, proc.stderr
     return json.loads(proc.stdout)

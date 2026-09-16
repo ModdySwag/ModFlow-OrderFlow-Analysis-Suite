@@ -63,12 +63,12 @@ def test_the_panel_and_its_selftest_exist():
 
 
 def test_the_panel_parses_as_javascript():
-    proc = subprocess.run([_node(), "--check", str(PRESSURE)], capture_output=True, text=True, timeout=60)
+    proc = subprocess.run([_node(), "--check", str(PRESSURE)], capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert proc.returncode == 0, proc.stderr
 
 
 def test_the_selftest_passes():
-    proc = subprocess.run([_node(), str(SELFTEST)], capture_output=True, text=True, timeout=180, cwd=str(ROOT))
+    proc = subprocess.run([_node(), str(SELFTEST)], capture_output=True, text=True, encoding="utf-8", timeout=180, cwd=str(ROOT))
     out = proc.stdout.strip()
     match = re.search(r"market-pressure selftest: (\d+) ok, (\d+) failed", out)
     assert match, f"unexpected selftest output: {out!r}\n{proc.stderr}"

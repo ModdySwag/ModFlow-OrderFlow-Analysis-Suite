@@ -31,7 +31,7 @@ def _node() -> str:
 
 def _run_selftest() -> subprocess.CompletedProcess:
     return subprocess.run(
-        [_node(), str(SELFTEST)], capture_output=True, text=True, timeout=120,
+        [_node(), str(SELFTEST)], capture_output=True, text=True, encoding="utf-8", timeout=120,
         cwd=str(UI.parent.parent),
     )
 
@@ -43,7 +43,7 @@ def test_engine_files_exist():
 
 def test_engine_parses_as_javascript():
     """`node --check` catches the syntax break that would otherwise surface as a blank canvas."""
-    proc = subprocess.run([_node(), "--check", str(ENGINE)], capture_output=True, text=True, timeout=60)
+    proc = subprocess.run([_node(), "--check", str(ENGINE)], capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert proc.returncode == 0, proc.stderr
 
 
@@ -64,7 +64,7 @@ def test_decay_constant_matches_the_spec():
     out = subprocess.run(
         [_node(), "-e", "const m=require('./ofx.js').math;"
                        "console.log(m.decayAlpha(1,500,500).toFixed(6), m.decayAlpha(1,0,500).toFixed(6));"],
-        capture_output=True, text=True, timeout=60, cwd=str(UI),
+        capture_output=True, text=True, encoding="utf-8", timeout=60, cwd=str(UI),
     )
     at_lambda, at_zero = out.stdout.split()
     assert abs(float(at_lambda) - 0.367879) < 1e-4, out.stdout
