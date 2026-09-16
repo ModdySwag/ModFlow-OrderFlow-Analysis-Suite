@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<SetupPrereq>
+	<conditions>
+		<condition Type="1" Comparison="2" Path="HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" FileName="" ReturnValue="" Bits="4"/>
+	</conditions>
+	<operatingsystemconditions>
+		<operatingsystemcondition MajorVersion="10" MinorVersion="0" PlatformId="2" CSDVersion="" Bits="4"/>
+	</operatingsystemconditions>
+	<files>
+		<file LocalFile="&lt;ISProductFolder&gt;\SetupPrerequisites\WebView2\MicrosoftEdgeWebview2Setup.exe" URL="https://go.microsoft.com/fwlink/p/?LinkId=2124703" FileSize="0,0"/>
+	</files>
+	<execute file="MicrosoftEdgeWebview2Setup.exe" cmdline="/silent /install" cmdlinesilent="/silent /install" requiresmsiengine="0"/>
+	<properties Id="Microsoft Edge WebView2 Runtime" Description="Installs the Microsoft Edge WebView2 Runtime (Evergreen Bootstrapper). Required for the application's UI." AltPrqURL="https://go.microsoft.com/fwlink/p/?LinkId=2124703"/>
+</SetupPrereq>
