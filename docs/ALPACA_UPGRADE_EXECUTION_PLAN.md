@@ -12,7 +12,7 @@ verified against the tree on 2026-09-15, not recalled).
 |---|----------|------|
 | S1 | `C:\Users\Moddy\Desktop\code.txt` | The Alpaca enhancement report: setup flow, search redesign, feed rules, error codes, perf |
 | S2 | `C:\Users\Moddy\Desktop\report.txt` | First line-level codebase audit (P1–P8) |
-| S3 | `AUDIT_REPORT_2026-09-15.md` (repo root) | Merged audit = S1 + S2 + a fresh pass; contains the implementation order |
+| S3 | `docs/AUDIT_REPORT_2026-09-15.md` | Merged audit = S1 + S2 + a fresh pass; contains the implementation order |
 | S4 | `docs/ALPACA_INTEGRATION_PLAN.md` | Alpaca product plan: what Alpaca adds/cannot add, phases 0–5, safety §5, risk register §6 |
 
 **Gate note (execplan §"Important constraints"):** there is no `04-spec-review.md` — this project does

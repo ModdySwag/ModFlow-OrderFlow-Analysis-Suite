@@ -2,11 +2,12 @@
 
 > **Real-time orderflow trading system** — tick-level microstructure analysis, 5 pattern detectors, volume profile framing, state machine trade lifecycle, dual data feeds (MT5 + Bybit), FastAPI dashboard with WebSocket, Telegram alerts. Built on Fabio Testa's methodology.
 
-[![Python](https://img.shields.io/badge/python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](.)
+[![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](.)
 [![License](https://img.shields.io/badge/license-MIT-informational?style=for-the-badge)](LICENSE)
-[![Instruments](https://img.shields.io/badge/instruments-29-blue?style=for-the-badge)](.)
-[![Lines](https://img.shields.io/badge/code-~12,000-brightgreen?style=for-the-badge)](.)
-[![API](https://img.shields.io/badge/API-16%20endpoints-orange?style=for-the-badge)](.)
+[![Instruments](https://img.shields.io/badge/instruments-49-blue?style=for-the-badge)](.)
+[![Code](https://img.shields.io/badge/code-~64k%20lines-brightgreen?style=for-the-badge)](.)
+[![API](https://img.shields.io/badge/API-133%20routes-orange?style=for-the-badge)](.)
+[![Tests](https://img.shields.io/badge/tests-712%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
 
 ---
 
@@ -18,7 +19,7 @@
 - [The 5 Core Patterns](#the-5-core-patterns)
 - [Volume Profile Framing](#volume-profile-framing-daily-bias)
 - [State Machine Trade Lifecycle](#state-machine-trade-lifecycle)
-- [Supported Instruments (29)](#supported-instruments-29)
+- [Supported Instruments (49)](#supported-instruments-49)
 - [Data Sources](#data-sources)
 - [Dashboard](#dashboard)
 - [Telegram Alerts](#telegram-alerts)
@@ -95,7 +96,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 │               │                                  │                          │
 │  ┌────────────▼──────────┐  ┌───────────────────▼────────────────────┐     │
 │  │   Telegram Alerts     │  │   FastAPI Dashboard                    │     │
-│  │   Entry/BE/Trail/Exit │  │   16 REST endpoints + WebSocket        │     │
+│  │   Entry/BE/Trail/Exit │  │   132 REST/WS routes + streams         │     │
 │  │   Daily Bias updates  │  │   Charts, VP, Footprint, Orderbook     │     │
 │  └───────────────────────┘  │   Scanner, Strategy Status, Tape       │     │
 │                              └───────────────────────────────────────┘     │
@@ -116,28 +117,28 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 ```
                      ┌─────────────┐
                      │  MT5 Feed   │──── Tick polling (100ms)
-                     │  (495L)     │──── Market Book (DOM)
+                     │  (493L)     │──── Market Book (DOM)
                      │             │──── Historical download
                      └──────┬──────┘
                             │
      ┌──────────────┐       │       ┌──────────────┐
      │  Bybit Feed  │───────┤       │   Database   │
-     │  (209L)      │       ├──────▶│  (278L)      │
+     │  (329L)      │       ├──────▶│  (430L)      │
      │  WebSocket   │       │       │  SQLite WAL  │
      │  Free, no key│       │       └──────────────┘
      └──────────────┘       │
                             ▼
                    ┌─────────────────┐
                    │ Candle Builder  │ ← Tick → 1m aggregation
-                   │ (133L)          │ ← Footprint per level
+                   │ (132L)          │ ← Footprint per level
                    └────────┬────────┘
                             │
               ┌─────────────┼──────────────┐
               ▼             ▼              ▼
      ┌──────────────┐ ┌──────────┐ ┌──────────────┐
      │ Volume Prof. │ │  Delta   │ │  Footprint   │
-     │ Engine (258L)│ │Engine    │ │  Engine      │
-     │              │ │ (197L)   │ │ (181L)       │
+     │ Engine (283L)│ │Engine    │ │  Engine      │
+     │              │ │ (207L)   │ │ (349L)       │
      │ POC/VAH/VAL  │ │ Vert/Hor│ │ Bid/Ask/Lvl  │
      │ LVN/Shape    │ │ Cumul.   │ │ Imbalance    │
      └──────┬───────┘ └────┬─────┘ └──────┬───────┘
@@ -154,7 +155,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
    ┌────────┐┌────────┐┌──────┐┌────────┐┌────────┐
    │Absorp- ││Initia- ││Sweep ││Exhaus- ││Diverg- │
    │tion    ││tive    ││      ││tion    ││ence    │
-   │(257L)  ││(133L)  ││(142L)││(228L)  ││(159L)  │
+   │(266L)  ││(136L)  ││(142L)││(237L)  ││(159L)  │
    └───┬────┘└───┬────┘└──┬───┘└───┬────┘└───┬────┘
        │         │        │        │         │
        └─────────┴────┬───┴────────┴─────────┘
@@ -175,35 +176,35 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
  ┌──────────┐ ┌──────────┐  ┌───────────────┐
  │ Telegram │ │Dashboard │  │  Database     │
  │ Bot      │ │ FastAPI  │  │  Journal      │
- │ (202L)   │ │ (1015L)  │  │  Logging      │
+ │ (201L)   │ │ (1371L)  │  │  Logging      │
  └──────────┘ └──────────┘  └───────────────┘
 ```
 
 ### Module Dependency Graph
 
 ```
-main.py (666L) ─── System orchestrator
+main.py (820L) ─── System orchestrator
     │
-    ├── config/settings.py (946L) ─── 29 instrument configs, 10 config dataclasses
+    ├── config/settings.py (815L) ─── 31 instrument configs, 14 config dataclasses
     │
     ├── data/
-    │   ├── models.py (290L) ─── 7 dataclasses: Tick, Candle, Signal, TradeState...
-    │   ├── candle_builder.py (133L) ─── Tick → 1m aggregation + footprint
-    │   ├── mt5_feed.py (495L) ─── MT5 terminal: ticks, book, history
-    │   ├── bybit_feed.py (209L) ─── Bybit WebSocket: trades + orderbook
-    │   └── database.py (278L) ─── SQLite: 5 tables, WAL mode
+    │   ├── models.py (330L) ─── 9 dataclasses: Tick, Candle, Signal, FootprintLevel, TradeState...
+    │   ├── candle_builder.py (132L) ─── Tick → 1m aggregation + footprint
+    │   ├── mt5_feed.py (493L) ─── MT5 terminal: ticks, book, history
+    │   ├── bybit_feed.py (329L) ─── Bybit WebSocket: trades + orderbook
+    │   └── database.py (430L) ─── SQLite: 5 tables, WAL mode
     │
     ├── analytics/
-    │   ├── volume_profile.py (258L) ─── POC/VAH/VAL/LVN/shape
-    │   ├── delta.py (197L) ─── Vertical + horizontal + cumulative delta
-    │   ├── footprint.py (181L) ─── Bid/ask per level, imbalance detection
+    │   ├── volume_profile.py (283L) ─── POC/VAH/VAL/LVN/shape
+    │   ├── delta.py (207L) ─── Vertical + horizontal + cumulative delta
+    │   ├── footprint.py (349L) ─── Bid/ask per level, imbalance detection
     │   └── orderbook.py (208L) ─── L2 depth, thin levels, consumption tracking
     │
     ├── patterns/
-    │   ├── absorption.py (257L) ─── Effort >> result detection
-    │   ├── initiative.py (133L) ─── Effort = result (momentum)
+    │   ├── absorption.py (266L) ─── Effort >> result detection
+    │   ├── initiative.py (136L) ─── Effort = result (momentum)
     │   ├── sweep.py (142L) ─── Thin book displacement
-    │   ├── exhaustion.py (228L) ─── Declining volume at extremes
+    │   ├── exhaustion.py (237L) ─── Declining volume at extremes
     │   └── divergence.py (159L) ─── Price vs delta disagreement
     │
     ├── signals/
@@ -211,14 +212,23 @@ main.py (666L) ─── System orchestrator
     │   └── aggregator.py (516L) ─── State machine + composite scoring
     │
     ├── alerts/
-    │   └── telegram_bot.py (202L) ─── Telegram notifications
+    │   └── telegram_bot.py (201L) ─── Telegram notifications
     │
     └── dashboard/
-        ├── app.py (1015L) ─── FastAPI REST + WebSocket server
-        ├── websocket_manager.py (186L) ─── 9-channel broadcast with throttling
-        ├── demo_data.py (782L) ─── Deterministic demo data generator
-        ├── __main__.py (35L) ─── Standalone launcher
-        └── static/ ─── HTML/JS/CSS frontend (8 files, 4,420L)
+        ├── app.py ─── FastAPI host: REST + WebSocket (the app mounts its routers here)
+        ├── websocket_manager.py ─── 10-channel broadcast with throttling
+        ├── demo_data.py ─── Deterministic demo data generator
+        ├── __main__.py ─── Standalone launcher
+        └── static/ ─── the legacy page's assets, served at /static/
+
+    ├── atlas/ ─── live analytics (CVD, heatmap, imbalance, tapeflow, profiles)
+    │   └── api.py ─── the /api/atlas/* surface (45 routes)
+    │
+    ├── desktop/ ─── the desktop application
+    │   ├── launcher.py ─── pywebview window / --headless server
+    │   ├── api.py ─── /api/control/* (config, feeds, alerts, exports, layouts)
+    │   ├── engine.py ─── the live pipeline host the UI reads from
+    │   └── ui/ ─── vanilla-JS modules (~30,400L across 70 files) + index.html
 ```
 
 ---
@@ -414,9 +424,11 @@ Every instrument runs an independent state machine. The system watches qualified
 
 ---
 
-## Supported Instruments (29)
+## Supported Instruments (49)
 
 Each instrument has **pre-tuned thresholds** for all 5 pattern detectors, optimized for its volatility and tick size.
+49 ship configured in total — the 31 base specs tabled below plus 18 crypto majors that carry the same pre-tuned
+thresholds (`GET /api/instruments` lists them all).
 
 ### Index Futures (9)
 
@@ -518,7 +530,12 @@ The system auto-discovers instruments across 200+ broker-specific naming variant
 
 ## Dashboard
 
-### Frontend Components (8 custom JS modules)
+### Frontend Components
+
+The current UI is the desktop suite: **70 vanilla-JS modules** in `orderflow_system/desktop/ui/`
+(shell and menus, chart, the order-flow engine, heatmap, tape, alerts, options, fundamentals, news,
+search, watchlist, studies — no build step, no framework). The 8 modules listed below are the legacy
+dashboard page's assets, still served at `/static/`:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -638,49 +655,51 @@ Automated notifications for every trade lifecycle event:
 
 ### Prerequisites
 
-- **Python 3.10+**
-- **MetaTrader 5 terminal** (for MT5 feed) OR **Bybit** (free, no account needed)
+- **Windows 10/11** for the packaged desktop build (source installs also run on Linux/macOS; the
+  frozen-build script targets Windows)
+- **Python 3.11 or newer** when running from source
+- **MetaTrader 5 terminal** (optional, Windows only — the MT5 feed) or the built-in **Bybit** feed,
+  which needs no account and no key
 
-### Setup
+### Setup (from source)
 
 ```bash
-# Clone the repository
-git clone https://github.com/mahmoud20138/OrderFlow-Analysis-Pro.git
+git clone https://github.com/ModdySwag/OrderFlow-Analysis-Pro.git
 cd OrderFlow-Analysis-Pro
 
-# Install dependencies
-pip install -e .
+python -m venv .venv
+.venv\Scripts\activate              # Windows;  source .venv/bin/activate on Linux/macOS
 
-# Or install manually
-pip install websockets aiohttp pandas numpy scipy \
-    python-telegram-bot plotly kaleido aiosqlite pytz pyyaml
+pip install -e ".[dev]"             # app + test tooling
+pip install -e ".[mt5]"             # optional: MetaTrader 5 feed support
 ```
 
-### Quick Start (Bybit — No Account Needed)
+### Run the desktop app
 
 ```bash
-# 1. Set data source to BYBIT in config
-# 2. Run the system
-python -m orderflow_system.main
-
-# 3. Open dashboard
-# http://localhost:8080
+python -m orderflow_system.desktop                          # native window (pywebview)
+python -m orderflow_system.desktop --headless --port 8099   # server only
 ```
 
-### Quick Start (MT5)
+The UI is served at `/desktop` on that port (the window opens it directly); the REST API and its
+OpenAPI schema (`/docs`) are on the same origin.
+
+### Headless pipeline (feeds → detectors → Telegram)
 
 ```bash
-# 1. Open MetaTrader 5 terminal
-# 2. Configure credentials in config/settings.py
-# 3. Run the system
-python -m orderflow_system.main
+python -m orderflow_system.main       # the original CLI orchestrator, config-driven
 ```
 
-### Dashboard Only (Demo Mode)
+### Demo mode (no feed required)
 
 ```bash
-# Run dashboard with deterministic demo data
-python -m orderflow_system.dashboard
+python -m orderflow_system.dashboard  # deterministic demo data — the render test bed
+```
+
+### Standalone executable
+
+```bash
+python scripts/build_exe.py           # -> dist/ModFlowOrderFlowAnalysisSuite/
 ```
 
 ---
@@ -713,7 +732,7 @@ TELEGRAM = TelegramConfig(
 # Dashboard
 DASHBOARD = DashboardConfig(
     enabled=True,
-    host="0.0.0.0",
+    host="127.0.0.1",          # loopback by default; "0.0.0.0" exposes the API to your LAN
     port=8080,
     log_level="warning",
 )
@@ -758,7 +777,7 @@ The system will:
 1. Connect to configured data source(s)
 2. Download historical bars (MT5) or connect to live feed (Bybit)
 3. Build initial volume profiles from historical data
-4. Start 5 pattern detectors for all 29 instruments
+4. Start 5 pattern detectors for all 49 configured instruments
 5. Compute daily bias and qualified levels
 6. Auto-watch strong levels (strength ≥ 50)
 7. Begin state machine monitoring
@@ -796,31 +815,31 @@ curl http://localhost:8080/api/trade/NAS100USDT
 
 ```
 orderflow_system/
-├── main.py                          # System orchestrator (666L)
+├── main.py                          # System orchestrator (820L)
 ├── __init__.py                      # Package init
-├── test_integration.py              # Integration tests (314L)
+├── test_integration.py              # Integration tests (309L)
 │
 ├── config/
-│   └── settings.py                  # 29 instrument configs, 10 config dataclasses (946L)
+│   └── settings.py                  # 31 instrument configs, 14 config dataclasses (815L)
 │
 ├── data/
-│   ├── models.py                    # 7 dataclasses: Tick, Candle, Signal, TradeState... (290L)
-│   ├── candle_builder.py            # Tick → 1m candle aggregation (133L)
-│   ├── bybit_feed.py                # Bybit WebSocket feed (209L)
-│   ├── mt5_feed.py                  # MT5 terminal feed with auto-discovery (495L)
-│   └── database.py                  # SQLite persistence, 5 tables (278L)
+│   ├── models.py                    # 9 dataclasses: Tick, Candle, Signal, FootprintLevel, TradeState... (330L)
+│   ├── candle_builder.py            # Tick → 1m candle aggregation (132L)
+│   ├── bybit_feed.py                # Bybit WebSocket feed (329L)
+│   ├── mt5_feed.py                  # MT5 terminal feed with auto-discovery (493L)
+│   └── database.py                  # SQLite persistence, 5 tables (430L)
 │
 ├── analytics/
-│   ├── volume_profile.py            # POC, VAH, VAL, LVN, shape classification (258L)
-│   ├── delta.py                     # Vertical, horizontal, cumulative delta (197L)
-│   ├── footprint.py                 # Bid/ask per level, imbalance detection (181L)
+│   ├── volume_profile.py            # POC, VAH, VAL, LVN, shape classification (283L)
+│   ├── delta.py                     # Vertical, horizontal, cumulative delta (207L)
+│   ├── footprint.py                 # Bid/ask per level, imbalance detection (349L)
 │   └── orderbook.py                 # L2 depth, thin levels, consumption tracking (208L)
 │
 ├── patterns/
-│   ├── absorption.py                # Effort >> result detection (257L)
-│   ├── initiative.py                # Effort = result (momentum) (133L)
+│   ├── absorption.py                # Effort >> result detection (266L)
+│   ├── initiative.py                # Effort = result (momentum) (136L)
 │   ├── sweep.py                     # Thin book displacement (142L)
-│   ├── exhaustion.py                # Declining volume at extremes (228L)
+│   ├── exhaustion.py                # Declining volume at extremes (237L)
 │   └── divergence.py                # Price vs delta disagreement (159L)
 │
 ├── signals/
@@ -828,12 +847,12 @@ orderflow_system/
 │   └── aggregator.py                # State machine + composite scoring (516L)
 │
 ├── alerts/
-│   └── telegram_bot.py              # Telegram notifications (202L)
+│   └── telegram_bot.py              # Telegram notifications (201L)
 │
 └── dashboard/
-    ├── app.py                       # FastAPI REST + WebSocket (1015L)
-    ├── websocket_manager.py         # 9-channel broadcast manager (186L)
-    ├── demo_data.py                 # Deterministic demo data generator (782L)
+    ├── app.py                       # FastAPI REST + WebSocket (1371L)
+    ├── websocket_manager.py         # 10-channel broadcast manager (293L)
+    ├── demo_data.py                 # Deterministic demo data generator (806L)
     ├── __main__.py                  # Standalone launcher (35L)
     └── static/
         ├── index.html               # Main HTML shell (121L)
@@ -842,32 +861,39 @@ orderflow_system/
         ├── footprint.js             # Canvas footprint chart (700L)
         ├── signals.js               # Signal recommendation cards (479L)
         ├── performance.js           # Performance analytics (599L)
-        ├── orderbook.js             # Orderbook depth ladder (318L)
+        ├── orderbook.js             # Orderbook depth ladder (398L)
         ├── microstructure.js        # Microstructure indicators (417L)
-        └── tape.js                  # Time & sales (281L)
+        └── tape.js                  # Time & sales (414L)
 ```
 
 ---
 
 ## File Inventory
 
-| Category | Files | Python Lines | JS/CSS/HTML Lines | Total Lines |
-|----------|-------|-------------|-------------------|-------------|
-| Config | 1 | 946 | — | 946 |
-| Data | 5 | 1,405 | — | 1,405 |
-| Analytics | 4 | 844 | — | 844 |
-| Patterns | 5 | 919 | — | 919 |
-| Signals | 2 | 859 | — | 859 |
-| Alerts | 1 | 202 | — | 202 |
-| Dashboard | 4 + 8 static | 1,818 | 4,420 | 6,238 |
-| Main + Tests | 2 | 980 | — | 980 |
-| **Total** | **~32** | **~7,973** | **~4,420** | **~12,393** |
+| Area | Files | Python Lines | UI Lines (JS/CSS/HTML) | Total Lines |
+|------|-------|-------------|------------------------|-------------|
+| Config | 2 | 815 | — | 815 |
+| Data feeds + storage | 11 | 3,566 | — | 3,566 |
+| Analytics (delta, footprint, volume profile, patterns, signals, alerts) | 17 | 3,077 | — | 3,077 |
+| Atlas (live analytics + `/api/atlas/*`) | 26 | 7,558 | — | 7,558 |
+| Desktop app (desktop package + packaging scripts) | 23 | 8,895 | — | 8,895 |
+| Desktop UI (vanilla JS + CSS + HTML, no build step) | 81 | — | 31,950 | 31,950 |
+| Legacy dashboard (host + legacy page assets) | 14 | 2,506 | 4,633 | 7,139 |
+| Orchestrator (`main.py`) | 1 | 820 | — | 820 |
+| **Total (excluding tests)** | **175** | **27,237** | **36,583** | **63,820** |
+
+Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 68 files / 12,371 lines.
 
 ---
 
 ## API Reference
 
-### REST Endpoints (16)
+### REST Endpoints (legacy dashboard API)
+
+The app additionally serves `/api/atlas/*` (45 routes — heatmap, tape, CVD, profiles, imbalance,
+trades, scanner, alerts, replay) and `/api/control/*` (72 routes — config, feeds, exports, layouts).
+The always-current list is the running app's OpenAPI schema at `/docs`. The endpoints below are the
+legacy dashboard set, kept for compatibility:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -923,7 +949,7 @@ orderflow_system/
 
 ## Demo Mode
 
-The system includes a **deterministic demo data generator** that produces realistic data for all 29 instruments — no data feed required. Runs via:
+The system includes a **deterministic demo data generator** that produces realistic data for every shipped instrument (plus the Alpaca example symbols) — no data feed required. Runs via:
 
 ```bash
 python -m orderflow_system.dashboard
@@ -1071,9 +1097,16 @@ The `SignalAggregator` computes a composite score (0-100) that determines whethe
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. PRs welcome — bug fixes, new pattern detectors, additional instruments, dashboard improvements.
 
+Security reports: see [SECURITY.md](SECURITY.md) — please use the private channel there rather than a public issue.
+
 ## License
 
 [MIT](LICENSE) — use freely in personal and commercial projects.
+
+This distribution is a modified fork of
+[mahmoud20138/OrderFlow-Analysis-Pro](https://github.com/mahmoud20138/OrderFlow-Analysis-Pro)
+(forked from upstream commit `b2ff4ee`). The original MIT copyright notice is retained in
+[LICENSE](LICENSE), alongside the notice for the changes made here.
 
 ## Disclaimer
 

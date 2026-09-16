@@ -39,7 +39,7 @@ node .../ui/shell.selftest.js      -> 22 ok, 0 failed        news 17 · options 
 |---|---|---|
 | **P0: "no DOM floating tooltip panel consuming `state.hover`"** | **Built.** Two consumers exist: a cursor tooltip and a full metric readout panel | `ofx-view.js` `paintTip()` :401 → `#ofxTip` (`index.html:247`, `.ofx-tip` `atlas.css:99`); `paintReadout()` :320 → `#ofxReadout` (`index.html:250`, `.ofx-readout` `atlas.css:79`); wired at `ofx-view.js:492` (`OFX.state.onHover = (h) => { paintTip(h); paintReadout(h); }`) |
 | **P0: "no floating 'Snap to Live Market' sparkline widget"** | **Built.** A bottom-right badge with a live sparkline, shown only when the viewport is historical, click = snap to live | `#ofxSnapFloat` + `#ofxSpark2` (`index.html:248`); `paintSpark()` `ofx-view.js:277` (last 60 closes, up/down colour); `paintChip()` :265 toggles `.on` from `OFX.state.mode`; styling + reduced-motion guard `atlas.css:103-111`; click handler `ofx-view.js:520` → `OFX.snapToLive()` |
-| **P0/P3: WebGL absent** | **True, and its own conclusion is right: defer.** Canvas 2D is measured sub-frame (sweep §B3/B4: repaint 29.93→1.34 ms; heat 0.278→0.074 µs/cell; brief §6 revisits above ~2 k simultaneous cells) | P3-1 below keeps it behind a measured trigger |
+| **P0/P3: WebGL absent** | **True, and its own conclusion is right: defer.** Canvas 2D is measured sub-frame (sweep §B3/B4: repaint 29.93→1.34 ms; heat 0.278→0.074 µs/cell; brief §6 revisits above ~2 k simultaneous cells) | P3-1 below keeps it behind a measured trigger — **and §59 measured that trigger on the owner's hardware: not met (heat 0.6–1.7 ms vs a 6.94 ms 144 Hz budget)** |
 
 The readout is not a stub — it carries the whole metric set report1 asked for and more: O/H/L/C, volume,
 buy/sell, delta, CVD, POC (price + share %), max bid/ask with size, level count + imbalance count, cursor
@@ -150,8 +150,11 @@ click-to-locate (P1-4); and the cosmetics rebuilt as feedback — density-tracke
 glow with the POC keeping the strong one, a labelled zone projection, `carry_forward` on the panel and
 the hidden-block count beside its control (P1-5); and the map answering duration — `held_ms` on the
 walls the map draws, a Held column, a cursor line and an optional age tint, with the 74/22 px insets
-shared between the map and its overlay (P1-6). **P1-7 (alerts: manage, scope, read like sentences) is
-next — recon and build spec at §39 / the P1-7 item below.**
+shared between the map and its overlay (P1-6); and the alerts card reading, editing and firing like the
+the engine means it, with the depth map's own events reaching the alert engine at last (P1-7, §40); and
+the five bar expression modes with measured colour-blind palettes on both surfaces, per-chart
+persistence and a legend that names the encoding in use (P1-8, §42).
+**P2-2 (engine sweep R6) closed in §49/§50, measured — heat pass change-gated (0.36 → 0.02 ms steady), adapt 36.5 → 25.5 ms; the Float32Array wire deferred behind its measured number.** *(§57 concluded it: the wire is built, parity-pinned and measured — json parse+adapt 0.8 ms vs bin 0.7 ms @29 k cells, and the bin is bigger on sparse books, so the JSON route stays the view's path; the wire waits behind its own trigger, ~2 MB JSON / ~8 ms adapt. The same pass found and fixed the depth payload's axis transposition in `adaptHeat` — see §57.)* **P2-3 next, conditional on its own measurement.**
 
 **P1-1 · Theme and token layer first (brief A). — do this before any visual polish below.** L
 Unstarted: `atlas.css` contains **zero** `--of-` tokens (`grep -c -- '--of-'` → 0) and there is no
@@ -292,7 +295,24 @@ rendered sentence; keep On + Fired; an inline Edit row instead of the JSON cell;
 checkboxes (the route already carries them, and only opted-in rules reach the webhook); a filter with an
 honest count line; Level/Size columns from `data.price`/`data.size` with `—` where a kind has none.
 Gates: `alert-format.selftest.js` + `test_alert_format.py` (the `test_strips.py` pattern) and
+
 `alert-format.js` registered in `scripts/audit_ui_refs.py`.
+
+
+**Done 2026-09-16 (§40).** `alert-format.js` (`OFAPALERTS`) is the one place a rule becomes words —
+`kindLabel` / `paramSpec` / `sentence` / `scopeWords` / `why` — and the editor builds its fields from the
+same `paramSpec`, so the form and the words cannot disagree (`test_alert_format.py` holds the params each
+kind offers against the params `_passes()` reads, from the engine's own source). The Rules card renders
+sentences with an inline editor (thresholds, level scope, hold, channels, cooldown) and an honest filter
+count; the log carries Level / Size / Why; `alClear` calls the route and reports the server's count. The
+phase's gate could not have been met without an engine fix found on the way: the depth map's
+`pull` / `stack` / `wall_age` events were never dispatched to the alert engine (the `heat_pull` /
+`heat_stack` mapping in `hub._dispatch` had no caller), so heatmap-created rules and the two default heat
+rules could never fire — they do now, and `min_age_s` is enforced generically. A second defect surfaced in
+the log itself: refill latency mixed the venue's update id with the print clock ("refilled
+-1789344734.5s after being eaten"); the venue clock is one module now (`atlas/clock.py`). Live: an `hm-`
+rule edited in the new editor fired at 76840.0, was read in the log naming its level, then deleted; the
+sandbox was left as found. Gates: pytest **526 passed / 2 skipped**, AUDIT CLEAN, sixteen selftests green.
 
 **P1-8 · Bar/candle expression modes and accessible palettes (brief D).** M
 The five modes (delta-tinted candles, split candle, heat-gradient body, wick-only + footprint, plus the
@@ -300,46 +320,78 @@ current default), per-chart persistence, colour-blind-safe ramps independent of 
 that names the encoding actually in use. Norm: colour must never be the sole carrier of a sign (canon #5,
 §3.3). Gate: each mode on live data + one colour-blind palette; legend text matches the drawing.
 
+**Done 2026-09-16 (§42).** `expression.js` (`OFAPEXPR`) decides and both surfaces execute: the engine
+paints `barPaint` per bar (delta-tinted body, split candle with side volumes and their source named,
+heat body, wick + footprint, plus the unchanged default whose chrome a test holds equal to the engine's
+own), the chart projects `chartBars` per candle, and each legend prints the same object's sentence —
+the mode's `says` and `pairing`, the palette's words and its measured separation numbers. Palettes are
+applied INTO `math.theme` from a frozen base (lossless round-trip asserted); the colour-blind pairs are
+MEASURED through the Machado 2009 dichromat model with the shipped green/red pair as the control that
+must fail, and both heat ramps are monotone in luminance at 21 samples. Persistence is the config
+(`expression.{engine,chart}` clamped by `config_store`, served by `/api/control/expression`, registered
+in `param_registry` — 81 → 86, with `ofx.ramp` now a config value). Verification found and fixed three
+defects (handoff §42): bare `r,g,b` colours THROW inside Lightweight Charts (`Cannot parse color`) —
+wrapped now and pinned by a CSS-validity check; the app-wide error reporter toasted `document.body`, so
+any uncaught error replaced the whole UI — body notices now land in a fixed `#noticeStrip`; and
+`default` + a colour-blind palette was stripped back to theme green/red by the studies pass — the
+re-assert now reads the palette too. Live: five modes with per-mode counters, four palettes writing the
+same eight keys with an exact theme restore, config round-trips clamped both ways, a chart A/B
+(theme 1112/3013 px vs deutan 1119/2636 px of exact pair colours; the settled state stable across
+polls), and a clean client-error log. Gates: pytest **553 passed / 2 skipped**, AUDIT CLEAN,
+seventeen selftests green (expression 50).
+
 **P1-9 · Keyboard-first completion (canon #7).** S–M
 One shortcut map with scopes: palette, freeze, view switch, zoom, selection clear, replay seek, export,
 alert-from-cursor; discoverable in-app; never fires inside a text field. Gate: live pass — every action
 reachable with no mouse; a text field swallows none of them.
 
-**P1-10 · Freshness declared on every panel (canon #8).** M
+**Done 2026-09-16 (§43 recon, §44 build).** `desktop/ui/keys.js` is the one map: modules register
+their own bindings (`OFAPKEYS.bind`), local-scope keys contribute sheet rows (`OFAPKEYS.document`), one
+dispatcher carries the typing guard, and the sheet renders from `OFAPKEYS.list()` (menu.js's hand-written
+list is gone). New keys: `=`/`-` engine time zoom, `[`/`]` price zoom, `X` clears the selection, `Ctrl+E`
+exports it, `A` alerts on the heatmap cursor, `Space`/`,`/`.` drive the replay. Live pass on the sandbox:
+all eight actions with no mouse, twelve chords swallowed by a focused field, Ctrl+Alt+T and Alt+Z now
+guarded. Found and fixed on the way: the palette threw on every non-empty query (the studies Guide
+section was pushed in the wrong shape — `searchScore` hit `undefined.toLowerCase`; 25 client errors,
+now zero) and that section had never rendered. Gates: pytest 563/2, AUDIT CLEAN, eighteen selftests
+(keys 42, ofx 145).
+
+**P1-10 · Freshness declared on every panel (canon #8).** M — **done, §46.**
 Show the age of what is displayed (depth 5 s / quote 60 s windows; `age_known:false` when the clock is
 unknown) and make a panel visibly stale-out instead of freezing. Gate: live — stop the feed, watch panels
 age and say so; restart, watch recovery.
 
 ### P2 — performance, only where measured
 
-**P2-1 · Index the hover path (fixes report1 §3.2-1 and §1.3 of this plan).** S–M
+**P2-1 · Index the hover path (fixes report1 §3.2-1 and §1.3 of this plan).** S–M — **done, §48** (p95 6.2 → 3.3 ms on the 10 k-print gate; probes byte-identical).
 Build `printsByBar` in `setData()`; index heat cells by column (or reuse the visible-column search);
 maintain CVD incrementally. Gate: a measurement on a 10 k-print tape — mousemove cost before/after, and
 `ofx.stats()` p95 unchanged or better under the standard synthetic load.
 
-**P2-2 · Engine next round — sweep R6.** M
-Incremental heat decay, `Float32Array` heat wire format, hover coalesced into the rAF tick. Gate: p95 must
-improve on today's numbers (heat 3.58 ms / live 1.34 ms) under the same synthetic load.
+**P2-2 · Engine next round — sweep R6.** M — **done, §50** (heat gated + ghost patches + coalesced hover + numeric adapt keys; `Float32Array` wire measured and deferred with its number: parse ~2 ms, adapt 25.5 ms of per-cell allocation). **Concluded in §57**: the wire was built and measured out of the default path (0.7 vs 0.8 ms @29 k cells; smaller than JSON only when cells are dense), the axis transposition it exposed is fixed, and the carry-over list closed live.
 
-**P2-3 · Heat-layer yielding — conditional.** S
-Render heat in one rAF and base+live in the next *only if* a 30 k-cell / 4K measurement crosses the 16 ms
-frame budget. Norm: defer complexity behind a measurement (§3.8). Gate: the measurement itself.
+**P2-3 · Heat-layer yielding — conditional.** S — **built, §52** (the measurement crossed: 17.5 ms at
+30 k cells / 4K; the frame now yields — max warm frame 12.4, cold 17.1, the heat pass itself is the
+residue and belongs to P3-1's trigger).
 
 ### P3 — hygiene, backend, packaging, deferred
 
-**P3-1 · WebGL for the heat layer only — deferred with a trigger.** L (when triggered)
+**P3-1 · WebGL for the heat layer only — deferred with a trigger, MEASURED NOT TRIGGERED (§59).** L (when triggered)
 Trigger, per brief §6: > ~2 k simultaneous cells or a forced 4K/144 Hz use case. Keep the coordinate
 matrix; port only `drawHeat()` to a point-sprite mesh. report1 agrees ("defer until there's an actual perf
-complaint").
+complaint"). **§59 measured it against his hardware (2560×1440 @ 144 Hz = 6.94 ms budget): the heat
+pass costs 0.6–0.7 ms on real payloads (1.7 k drawn cells — the payload caps drawn cells at ~6 k) and
+≤ 1.7 ms on the synthetic 30 k shape; re-open if drawn cells pass ~8 k at his resolution, the target
+becomes a true-4K canvas, or the heat's share of a warm frame passes 3.5 ms.**
 
-**P3-2 · Session model (R4) and storage retention (R5).** M
+**P3-2 · Session model (R4) and storage retention (R5).** M — **done, §54** (session window = config value + pure function; retention = 7-day default, batched prune, incremental vacuum + WAL checkpoint, storage route + Logs line; measured 4.4 M rows / 845 MB -> 336 MB on a live-DB copy).
 `session_date` is UTC-today with a rolling 24 h profile (`main.py:682-690`), so "today's" value area mixes
 sessions at the UTC boundary; make the boundary a config value and compute profiles per session. Retention:
 no pruning exists — 5.8 M rows / 547 MB and ~4.5 M rows/day; add an age/size retention job with incremental
 vacuum and surface the DB size in Logs. Gate: unit tests on the session-window function; run retention, read
 row counts and file size before/after.
 
-**P3-3 · Legacy dashboard page decision (R7).** S (decision) + M (whatever it implies)
+**P3-3 · Legacy dashboard page decision (R7).** S (decision) + M (whatever it implies) — **decided and done, §55**: retired behind a 307 redirect to `/desktop`; files stay, one reversible block.
 `dashboard/static/app.js` polls REST at 1 s/5 s and rewrites whole series per tick — the same page that
 loads `footprint.js`, which report1 wanted deleted. Decide: retire the page (desktop UI supersedes it) or
 give it the tape's incremental treatment. Gate: the page either 404s in the desktop shell's nav or its poll
