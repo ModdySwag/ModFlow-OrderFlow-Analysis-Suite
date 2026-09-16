@@ -15,14 +15,9 @@ from orderflow_system.data.models import Tick, Candle, Side, FootprintLevel
 from orderflow_system.config.settings import get_nas100_config
 from orderflow_system.analytics.volume_profile import VolumeProfileEngine
 from orderflow_system.analytics.delta import DeltaEngine
-from orderflow_system.analytics.footprint import FootprintEngine
-from orderflow_system.analytics.orderbook import OrderbookTracker
 from orderflow_system.patterns.absorption import AbsorptionDetector
 from orderflow_system.patterns.initiative import InitiativeDetector
-from orderflow_system.patterns.exhaustion import ExhaustionDetector
-from orderflow_system.patterns.divergence import DivergenceDetector
 from orderflow_system.signals.profile_framing import ProfileFramingEngine
-from orderflow_system.signals.aggregator import SignalAggregator
 from orderflow_system.data.candle_builder import CandleBuilder
 from orderflow_system.data.database import Database
 
@@ -60,7 +55,7 @@ def test_volume_profile():
     assert vp.poc == 18500.0, f"Expected POC=18500, got {vp.poc}"
     assert vp.vah >= vp.poc, "VAH should be >= POC"
     assert vp.val <= vp.poc, "VAL should be <= POC"
-    print("  ✅ PASSED")
+    print("  PASSED")
 
 
 def test_delta_engine():
@@ -85,7 +80,7 @@ def test_delta_engine():
     print(f"  Cumulative delta: {delta.cumulative_delta}")
     print(f"  Delta %: {delta.delta_pct:.2%}")
     assert delta.vertical_delta == 80, f"Expected delta=80, got {delta.vertical_delta}"
-    print("  ✅ PASSED")
+    print("  PASSED")
 
 
 def test_absorption_detection():
@@ -129,10 +124,10 @@ def test_absorption_detection():
         print(f"  Direction: {'SHORT' if signal.direction == Side.SELL else 'LONG'}")
         print(f"  Strength: {signal.strength:.0f}")
         assert signal.direction == Side.SELL, "Should be SHORT (sellers absorbing)"
-        print("  ✅ PASSED — Absorption detected correctly")
+        print("  PASSED — Absorption detected correctly")
     else:
-        print("  ⚠️ No signal (thresholds may need adjustment for test data)")
-        print("  ✅ PASSED — Logic runs without errors")
+        print("  NOTE: no signal (thresholds may need adjustment for test data)")
+        print("  PASSED — Logic runs without errors")
 
 
 def test_initiative_detection():
@@ -173,10 +168,10 @@ def test_initiative_detection():
         print(f"  Signal: {signal}")
         assert signal.direction == Side.BUY, "Should detect bullish initiative"
         print(f"  Strength: {signal.strength:.0f}")
-        print("  ✅ PASSED — Initiative auction detected")
+        print("  PASSED — Initiative auction detected")
     else:
-        print("  ⚠️ No signal — may need more volume history for acceleration check")
-        print("  ✅ PASSED — Logic runs without errors")
+        print("  NOTE: no signal — may need more volume history for acceleration check")
+        print("  PASSED — Logic runs without errors")
 
 
 def test_profile_framing():
@@ -221,7 +216,7 @@ def test_profile_framing():
         dir_str = "LONG" if lv.direction == Side.BUY else "SHORT"
         print(f"    {lv.level_type.value} @ {lv.price:.2f} → {dir_str} (str: {lv.strength:.0f})")
 
-    print("  ✅ PASSED")
+    print("  PASSED")
 
 
 @pytest.mark.asyncio
@@ -252,7 +247,7 @@ async def test_database():
     if os.path.exists(db_path):
         os.remove(db_path)
 
-    print("  ✅ PASSED")
+    print("  PASSED")
 
 
 @pytest.mark.asyncio
@@ -286,7 +281,7 @@ async def test_candle_builder():
         print(f"  Candle: O={c.open} H={c.high} L={c.low} C={c.close}")
         print(f"  Volume: {c.volume}, Delta: {c.delta}")
         print(f"  Footprint levels: {len(c.footprint)}")
-    print("  ✅ PASSED")
+    print("  PASSED")
 
 
 def main():
@@ -301,7 +296,7 @@ def main():
     asyncio.run(test_candle_builder())
 
     print("\n" + "=" * 50)
-    print("✅ ALL TESTS PASSED — System is ready!")
+    print("ALL TESTS PASSED — System is ready!")
     print("=" * 50)
     print("\nTo start the live system:")
     print("  python -m orderflow_system.main")

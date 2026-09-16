@@ -142,7 +142,13 @@ class WebSocketManager:
             while True:
                 message = await client.queue.get()
                 try:
-                    await asyncio.wait_for(client.ws.send_text(message), timeout=WRITE_TIMEOUT_S)
+                    # asyncio.timeout, never asyncio.wait_for: 3.11's wait_for answers a
+                    # cancellation with the finished write's result (`if fut.done(): return
+                    # fut.result()`), so a shutdown cancel was swallowed and this loop went
+                    # back to queue.get() forever — the 3.11 suite hang (handoff §65). 3.12's
+                    # wait_for is built on this same timeout context.
+                    async with asyncio.timeout(WRITE_TIMEOUT_S):
+                        await client.ws.send_text(message)
                 except asyncio.TimeoutError:
                     logger.warning(
                         "WebSocket client write timed out after %.1fs, dropping it (%d message(s) "
@@ -183,7 +189,9 @@ class WebSocketManager:
                 client.dropped += 1
             return
         try:
-            await asyncio.wait_for(client.queue.put(message), timeout=WRITE_TIMEOUT_S * 2)
+            # the same reason as the writer: a plain deadline, not wait_for (handoff §65)
+            async with asyncio.timeout(WRITE_TIMEOUT_S * 2):
+                await client.queue.put(message)
         except asyncio.TimeoutError:
             client.dropped += 1
             logger.warning("WebSocket client queue stayed full for %.1fs, one message was not delivered",

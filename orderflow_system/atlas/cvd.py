@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from orderflow_system.data.models import Tick
@@ -103,7 +104,7 @@ class CvdTracker:
             if (not lo or size >= lo) and (not hi or size <= hi):
                 if i < len(self.pro_band_cvd):
                     self.pro_band_cvd[i] += delta
-                row = self._pro_band_by_bucket.setdefault(bucket_key := self._bucket(ts).ts_ms, [])
+                row = self._pro_band_by_bucket.setdefault(self._bucket(ts).ts_ms, [])
                 while len(row) < len(self.pro_bands):
                     row.append(0.0)
                 row[i] += delta

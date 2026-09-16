@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import json
 
-import pytest
 
 from orderflow_system.dashboard import websocket_manager as wm
 from orderflow_system.dashboard.websocket_manager import Channel, WebSocketManager
@@ -155,3 +154,70 @@ def test_the_lock_is_not_held_across_a_write(monkeypatch):
         await task
 
     _run(scenario())
+
+
+def test_a_cancelled_writer_dies_even_when_its_write_just_finished():
+    """The 3.11 shutdown hang, pinned (handoff §65).
+
+    asyncio.run's exit cancels the tasks still alive with the loop stopped, then gathers them.
+    A writer parked in its write-timeout whose write had *just* completed is the state that made
+    that gather wait forever on 3.11: wait_for answered the cancellation with the finished
+    write's result, and the writer looped back to queue.get() instead of dying. The manager's
+    deadline is asyncio.timeout, which never eats a cancellation — this builds the state on a
+    stopped loop and requires the writer to finish.
+    """
+
+    loop = asyncio.new_event_loop()
+    manager = WebSocketManager()
+    manager._throttle_ms[Channel.TICK] = 0
+    gate = asyncio.Event()
+
+    class GatedWS(FakeWS):
+        async def send_text(self, message: str) -> None:
+            await gate.wait()
+            await super().send_text(message)
+
+    ws = GatedWS()
+
+    async def settle() -> None:
+        """One loop cycle that yields once — stops the loop one batch after the write completes."""
+        await asyncio.sleep(0)
+
+    async def open_up() -> None:
+        await manager.connect(ws)
+        await manager.broadcast(Channel.TICK, {"i": 0}, symbol="BTCUSDT")
+        await asyncio.sleep(0)              # the writer parks inside its write-timeout
+
+    async def bounded_shutdown(writer) -> None:
+        """asyncio.run's exit, bounded: cancel the survivor, then gather it — so a regression
+        fails this test instead of hanging the suite."""
+        shutdown = asyncio.ensure_future(asyncio.gather(writer, return_exceptions=True))
+        _, pending = await asyncio.wait({shutdown}, timeout=2)
+        if shutdown in pending:
+            shutdown.cancel()
+            await asyncio.wait({shutdown}, timeout=2)     # let the unwind finish, still bounded
+            try:
+                shutdown.exception()                       # retrieved, so the log stays clean
+            except asyncio.CancelledError:
+                pass
+            raise AssertionError(
+                "the cancelled writer never finished — asyncio.run's shutdown gather would hang "
+                "here (the 3.11 wait_for cancellation swallow; see handoff §65)")
+
+    writer = None
+    try:
+        loop.run_until_complete(open_up())
+        loop.call_later(0, gate.set)            # the write completes while the loop is stopped...
+        loop.run_until_complete(settle())       # ...and the loop stops with the writer's wake-up queued
+        writer = manager._connections[0].task
+        assert not writer.done(), "the writer is still parked in its write-timeout"
+        assert len(ws.sent) == 1, "the write itself completed"
+
+        writer.cancel()                          # what asyncio.run's exit does to a survivor
+        loop.run_until_complete(bounded_shutdown(writer))
+        assert writer.done(), "the writer died on cancellation"
+    finally:
+        if writer is not None and not writer.done():
+            writer.cancel()                      # never leave a live writer behind
+            loop.run_until_complete(asyncio.sleep(0))
+        loop.close()

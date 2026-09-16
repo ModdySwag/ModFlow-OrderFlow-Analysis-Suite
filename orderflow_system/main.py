@@ -26,10 +26,10 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Optional
 
+from orderflow_system.analytics.session import session_window
 from orderflow_system.config import settings as runtime_settings
 from orderflow_system.config.settings import (
     InstrumentConfig,
-    Instrument,
     DataSource,
     get_all_configs,
     TELEGRAM,
@@ -41,7 +41,7 @@ from orderflow_system.config.settings import (
     DASHBOARD,
 )
 from orderflow_system.data.models import (
-    Tick, Candle, Signal, Side, OrderbookSnapshot,
+    Tick, Candle, Signal, OrderbookSnapshot,
 )
 from orderflow_system.data.bybit_feed import BybitFeed
 from orderflow_system.data.mt5_feed import MT5Feed
@@ -119,7 +119,7 @@ class InstrumentPipeline:
 
     async def process_orderbook(self, snapshot: OrderbookSnapshot):
         """Process an orderbook update."""
-        book_state = self.orderbook_tracker.update(snapshot)
+        self.orderbook_tracker.update(snapshot)
 
         # Check for sweep on every book update
         current_candle = self.candle_builder.current_candle
@@ -222,13 +222,18 @@ class OrderflowSystem:
         for cfg in instruments:
             self.pipelines[cfg.instrument.value] = InstrumentPipeline(cfg)
 
+        # Standalone-pipeline defaults only: the desktop engine (desktop/engine.py) overrides
+        # BOTH values from the user's config `risk` block right after construction, and that is
+        # the cooldown/score a GUI user actually runs with. These numbers matter solely for a
+        # bare OrderflowSystem instantiation (tests, embedding). Pinned end-to-end by
+        # test_engine_wiring.py so the config knob can never silently stop working again.
         self.aggregator = SignalAggregator(
             min_composite_score=40.0,
             signal_cooldown_seconds=30.0,
         )
 
         # Wire candle-close signals from each pipeline back to the system
-        for sym, pipeline in self.pipelines.items():
+        for _sym, pipeline in self.pipelines.items():
             pipeline._on_signals_callback = self._on_candle_signals
             pipeline._on_candle_closed_callback = self._on_candle_closed
         self.telegram = TelegramAlertBot(
@@ -541,8 +546,8 @@ class OrderflowSystem:
             symbol, deque(maxlen=self._recent_signals_max)
         ).extend(signals)
 
-        for signal in signals:
-            await self._handle_signal(symbol, pipeline, signal)
+        for sig in signals:
+            await self._handle_signal(symbol, pipeline, sig)
 
     async def _on_candle_closed(self, symbol: str, candle: Candle):
         """Persist + broadcast a closed candle. Called BY the pipeline.
@@ -627,8 +632,10 @@ class OrderflowSystem:
         """Run periodic tasks: VP rebuild, bias update, stats logging."""
         profile_interval = 3600       # Rebuild VP every hour
         stats_interval = 15           # Broadcast stats every 15 sec
+        prune_interval = max(1, int(getattr(runtime_settings, "PRUNE_INTERVAL_HOURS", 6) or 6)) * 3600
         last_profile = 0
         last_stats = 0
+        last_prune = -prune_interval   # R5: the first pass prunes (when retention is enabled)
 
         while self._running:
             await asyncio.sleep(10)
@@ -647,6 +654,14 @@ class OrderflowSystem:
                 last_profile = now
                 for symbol, pipeline in self.pipelines.items():
                     await self._rebuild_volume_profile(symbol, pipeline)
+
+            # R5: storage retention — prune on its own interval; never kill the loop over it
+            if now - last_prune > prune_interval:
+                last_prune = now
+                try:
+                    await self._prune_storage()
+                except Exception as exc:                   # noqa: BLE001
+                    logger.warning("storage retention prune failed: %s", exc)
 
             # Stats logging
             if now - last_stats > stats_interval:
@@ -674,20 +689,54 @@ class OrderflowSystem:
                         "stats", pipeline.stats, symbol=symbol
                     )
 
+    async def _prune_storage(self) -> dict:
+        """R5: delete ticks older than the retention window, vacuum incrementally, and report
+        the numbers (rows deleted, bytes before/after) — the same summary the API returns."""
+        days = int(getattr(runtime_settings, "RETENTION_DAYS", 0) or 0)
+        if days <= 0:
+            return {"skipped": "retention_days=0 — nothing pruned"}
+        cutoff_ms = int((datetime.now(timezone.utc).timestamp() - days * 86400) * 1000)
+        before = await self.db.storage_snapshot()
+        instruments = await self.db.tick_instruments() or list(self.pipelines.keys())
+        deleted = await self.db.prune_ticks(cutoff_ms, instruments)
+        vacuum = await self.db.ensure_incremental_autovacuum() if deleted else "skipped"
+        if deleted:
+            await self.db.vacuum_incremental()
+        after = await self.db.storage_snapshot()
+        summary = {
+            "at_ms": int(datetime.now(timezone.utc).timestamp() * 1000),
+            "retention_days": days, "cutoff_ms": cutoff_ms, "deleted": deleted,
+            "vacuum": vacuum,
+            "bytes_before": before["bytes"] + before.get("wal_bytes", 0),
+            "bytes_after": after["bytes"] + after.get("wal_bytes", 0),
+            "rows_before": before["tables"].get("ticks", 0),
+            "rows_after": after["tables"].get("ticks", 0),
+        }
+        self._last_prune = summary
+        logger.info(
+            "[storage] retention %d d: deleted %d tick rows (%d -> %d rows, %.1f -> %.1f MB), vacuum=%s",
+            days, deleted, summary["rows_before"], summary["rows_after"],
+            summary["bytes_before"] / 1e6, summary["bytes_after"] / 1e6, vacuum,
+        )
+        return summary
+
     async def _rebuild_volume_profile(
         self, symbol: str, pipeline: InstrumentPipeline
     ):
         """Rebuild volume profile from recent candle data."""
         # Get today's candles from DB
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        start_ms = now_ms - 24 * 3600 * 1000  # Last 24h
+        # R4: the profile covers the CONFIGURED SESSION, not a rolling 24 h wearing a date
+        # label — at the UTC boundary the old window mixed two sessions into "today's" value area.
+        start_ms, _end_ms, session_label = session_window(
+            now_ms, int(getattr(runtime_settings, "SESSION_START_HOUR", 0) or 0)
+        )
 
         candles = await self.db.get_candles(symbol, "1m", start_ms, now_ms)
         if len(candles) < 10:
             return
 
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        vp = pipeline.vp_engine.compute_from_candles(candles, session_date=today)
+        vp = pipeline.vp_engine.compute_from_candles(candles, session_date=session_label)
 
         if vp.total_volume > 0:
             pipeline.profile_framing.add_profile(vp)
