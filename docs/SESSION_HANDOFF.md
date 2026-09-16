@@ -3956,3 +3956,103 @@ the zip/setup exe hashes in the RE-ATTENDANCE block remain the release candidate
 
 **Next (owner).** Push (the remote decision), the physical multi-monitor pass, release-notes
 review, then the tag `v0.1.0-beta` + attach zip + Setup exe.
+
+## §75 — the post-beta left-overs: N-1 in the build, CI lint/SBOM parity, and the screenshot re-shoot (in flight)
+
+**Why.** After §74 this pass picked up the plan's optional left-overs, asked for in one breath:
+(1) the N-1 single-instance guard, (2) ruff-in-CI step parity (N-4), (3) an SBOM artifact (SS-8
+was pip-audit only), and (4) re-shooting the pre-§62-branded screenshots in `docs/screenshots/`
+(the Sep 14 batch still shows the retired OF tile / "OrderFlow Analysis Pro" wording; the Sep 16
+p-series already carries the ModFlow badge). The owner paused the pass mid-way to bank the state —
+this section is the save point.
+
+**Landed and committed.**
+
+* `12211e2` — **the single-instance guard (N-1).** `desktop/single_instance.py`: a named mutex keyed
+  to the config directory (sha1 of the casefolded path), taken on windowed launches only — headless
+  runs stay exempt because every smoke recipe opens its own scratch APPDATA and runs alongside the
+  owner's app; non-Windows is a no-op; unexpected OS errors fail open. A second windowed launch
+  finds the mutex held, brings the existing window forward (EnumWindows by window title, best
+  effort) and exits 0; if no window can be found it says so in a message box. 4 pins in
+  `test_single_instance.py` (name stability across case/slashes/trailing separator, a second
+  acquisition of a held name refused, reacquisition after release, a quiet focus miss). Wiring:
+  `launcher.main`, after config load, `if not args.headless`. Suite: **716 passed / 2 skipped**
+  (3.12, 24.4 s — 712 + the four new pins; the 3.11 re-run belongs to this pass's end).
+* `d4fe370` — **CI parity + SBOM (N-4; SS-8's artifact).** CI now pins `ruff==0.16.7` and runs the
+  lint baseline on 3.11 and 3.12 (the step CONTRIBUTING always described but CI skipped), and the
+  dependency-audit job gains a lockfile SBOM: `uv export --frozen --format cyclonedx1.5`, uploaded
+  with `actions/upload-artifact` pinned to v4.6.2 (`ea165f8d`). CONTRIBUTING's intro sentence now
+  reads "the lint baseline and a dependency audit". The release SBOM for this build was generated
+  beside the zip: `dist/ModFlowOrderFlowAnalysisSuite-win64.sbom.cdx.json` (CycloneDX 1.5, 42
+  components) — attach it to the GitHub release with the zip and the Setup exe.
+
+**The screenshot re-shoot — staged, not landed.**
+
+Eleven shots (the Sep 14/15 batch: 4 atlas-* + 7 desktop-*) were re-captured from a live sandbox
+session at their original dimensions, staged at
+`C:\Users\Moddy\AppData\Local\Temp\ofap_shot_stage\` (all written 22:00:48–22:01:55 on 2026-09-16,
+one clean run — green Setup dot, no wizard, no MT5 notice):
+
+| file | size | state |
+|---|---|---|
+| atlas-heatmap.png | 1264×569 | **eye-verified** — map canvas full |
+| atlas-cvd.png | 1264×569 | staged, check due |
+| atlas-profile.png | 1264×569 | staged, check due |
+| atlas-trackers.png | 1264×569 | **eye-verified** — live prints + ladder |
+| desktop-heatmap-live.png | 1264×569 | staged, check due |
+| desktop-chart-value-area.png | 1264×569 | staged, check due |
+| desktop-overview-live.png | 1500×940 | **eye-verified** |
+| desktop-live-session.png | 1500×940 | staged, check due |
+| desktop-window-overview.png | 1500×940 | staged, check due |
+| desktop-window-heatmap.png | 1500×940 | **eye-verified** — full liquidity map |
+| desktop-chart.png | 1500×940 | **eye-verified** — candles + VWAP band |
+
+The sandbox: `APPDATA="$LOCALAPPDATA/Temp/ofap_shots_sandbox" .venv/Scripts/python.exe -m
+orderflow_system.desktop --headless --port 8093`, engine started via `POST
+/api/control/engine/start`; PID 20564 at save time (`taskkill /PID 20564 /F` to stop — scratch
+APPDATA only, nothing of the owner's touched). Sandbox config carries `onboarding_done: true`,
+`setup_complete: true`, `mt5.notice: seen`, so a reload carries no wizard, a green rail dot and no
+MT5 notice.
+
+The capture recipe (browser tool; the daemon session was named `shots`):
+
+1. `goto_url('http://127.0.0.1:8093/desktop/')`, wait; switch views with **`showView('<slug>')`**
+   (slugs = the rail's `button.nav-item[data-view]` values — overview, chart, heatmap, cvd,
+   profile, trackers, …; no hash navigation).
+2. Size via CDP `Emulation.setDeviceMetricsOverride` — **1264×569** for the atlas-* set, heatmap-live
+   and chart-value-area; **1500×940** for the desktop-* set. The override persists across calls in
+   a session — reset it before each size group.
+3. Heatmap views: scroll the view's scroller so the biggest canvas sits ~30 px below the scroller
+   top (the map otherwise sits below the cards fold).
+4. Chart shots: `#ovVP` (the POC/VAH/VAL overlay checkbox) on.
+5. Overlays: wizard `#wizClose`; MT5 notice `#mt5NoticeNever`. Both fire on a fresh load until
+   their config flags are set.
+6. Capture with CDP `Page.captureScreenshot` (PNG) → write the bytes to the staging dir.
+
+**Re-attendance checklist (this pass, in order).**
+
+1. Vision-check the six "check due" images above; re-shoot any miss with the recipe (restart the
+   sandbox first if it is gone).
+2. Copy the eleven into `docs/screenshots/` (same names — the old files are the ones being
+   replaced) and refresh the caption rows in `docs/DESKTOP_GUI_FEASIBILITY.md` that quote the old
+   session's numbers, so image and caption agree (keep captions timeless where the numbers moved),
+   plus one line noting the re-shoot.
+3. Counts re-measure for the two new files: README (tests badge 712 → **716**; line counts ~64 k —
+   re-run the house inventory; the `launcher.py` (NNNL) row grew ~12 lines), CONTRIBUTING's
+   baseline line, and any remaining 712 in README/RESUME.
+4. **The rebuild.** The guard touched a bundled file — the frozen `dist/` (zip `b571c655…`, Setup
+   `d2435b6f…`, exe `cfde70b0…`) has been **stale as a release candidate since `12211e2`**.
+   Rebuild (exe → zip → Setup), re-verify the payload against the tree, re-run the live probe
+   battery (Host/403, cross-origin POST/WS 403, native WS 101, GET 200, `/desktop` hash) and the
+   new **double-launch acceptance** on the frozen exe (scratch APPDATA; the second launch exits;
+   one process — the N-1 proof), then write the new hashes into
+   `docs/RELEASE_EVIDENCE_v0.1.0-beta.md` and RESUME.
+5. Gates on the final tree: full pytest on **both** interpreters (finish the 3.11 leg),
+   audit_ui_refs, both goldens, the 20 selftests, ruff, `pip-audit`. Then close this section with a
+   short record and hand back.
+
+**Receipts.** Suite 716/2 (3.12) on the guard commit; ruff 0.16.7 clean on the three touched files;
+SBOM valid (CycloneDX 1.5, 42 components); 5/11 screenshots eye-verified, 6 staged; sandbox alive
+at save time (PID 20564, port 8093, scratch APPDATA only). Nothing pushed — the owner's queue
+unchanged: push (remote decision), the physical multi-monitor pass (§76 if it finds anything),
+release-notes review, then the tag `v0.1.0-beta` + attach zip + Setup exe + SBOM.

@@ -1,30 +1,32 @@
 # Resume here — ModFlow OrderFlow Analysis Suite
 
-> ## ▶ RE-ATTENDANCE (latest, 2026-09-16 evening)
+> ## ▶ RE-ATTENDANCE (latest, 2026-09-16 late evening — §75 in flight)
 >
-> **State.** §70 (secure2 security sweep), §71 (display/multi-monitor audit), §72 (display hardening:
-> dpr canvas law, document-wide refit, window geometry, per-screen layouts) and **§73 (widget
-> windows)** are all landed on disk. Gates: **712 passed / 2 skipped**, AUDIT CLEAN, ruff clean, both
-> goldens byte-identical, **20** UI selftests green. Frozen artifacts rebuilt and smoked after §73:
-> exe 12.7 MB, zip 27,207,924 B `b571c6551c7afe5b…`, setup.exe 28,165,836 B `d2435b6f95c81328…`.
-> Tree is **clean**; the §40–§73 corpus is committed locally (18 commits + this §74 record),
-> **nothing pushed**. Frozen artefacts re-verified against the tree (§74) — no rebuild needed.
+> **State.** §74 landed (the §40–§73 corpus + record committed locally, nothing pushed). **§75 —
+> the post-beta left-overs — is half done.** Committed: the **single-instance guard (N-1)** —
+> `12211e2` — and the **CI lint (ruff 0.16.7) + CycloneDX SBOM** work — `d4fe370`; suite now
+> **716 passed / 2 skipped** (3.12) and the release SBOM sits at
+> `dist/ModFlowOrderFlowAnalysisSuite-win64.sbom.cdx.json`. Staged, not landed: the **11-shot
+> screenshot re-shoot** (`$LOCALAPPDATA/Temp/ofap_shot_stage\` — 5/11 eye-verified, 6 to check)
+> **and the rebuild**: the guard touched a bundled file, so the frozen artefacts and every hash in
+> this file are **stale as release candidates** until §75's rebuild lands. Full record: handoff §75.
 >
-> **Next, in order (owner's call):**
-> 1. **Push** — committed locally (§40–§73 corpus + §74 record); the remote decision is his
->    (`origin` is still the original author's repo, so this needs his own repo or a fork).
-> 2. **Physical multi-monitor pass by the owner** — the only claim this host cannot verify (one
->    display). Open the app → board → pull the Engine out to monitor 2 → pin → drag → quit → relaunch
->    and confirm it returns. Anything real-hardware-specific becomes a small follow-up pass (§75).
-> 3. **Release notes + tag message draft** (`v0.1.0-beta`) for review — his convention: reviewed
->    before publish, so drafts, never commits.
-> 4. **SS-8 closed (§74)** — `uv.lock` committed + a pinned `pip-audit` CI step over the locked set;
->    the third-party notices landed too. An SBOM artifact remains optional.
-> 5. Then the tag: `v0.1.0-beta` + attach `dist/ModFlowOrderFlowAnalysisSuite-win64.zip` and the
->    Setup exe.
+> **Next, in order:**
+> 1. **Finish §75's screenshot leg** — vision-check the remaining six staged images, copy all
+>    eleven into `docs/screenshots/`, refresh the caption rows in `docs/DESKTOP_GUI_FEASIBILITY.md`
+>    (recipe in handoff §75).
+> 2. **Counts re-measure** — README tests badge 712 → **716**, line counts ~64 k re-run,
+>    `launcher.py` (NNNL) row, CONTRIBUTING baseline.
+> 3. **Rebuild `dist/`** (exe → zip → Setup) + payload re-verify + the live probe battery + the
+>    frozen **double-launch acceptance**; new hashes into `docs/RELEASE_EVIDENCE_v0.1.0-beta.md`
+>    and this file. Gates on both interpreters to close the pass.
+> 4. Then the owner's queue: **push** (the remote decision — `origin` is still the original
+>    author's repo), his **physical multi-monitor pass** (§76 if it finds anything),
+>    release-notes/tag review, then the tag `v0.1.0-beta` + attach zip + Setup exe + SBOM.
 >
-> **Resume prompt:** `OFAP: continue from docs/RESUME.md — the corpus is committed; next is the push
-> (the remote decision), the owner's multi-monitor pass, and the release-notes/tag drafts.`
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §75 is in flight: finish the screenshot
+> leg + the counts, rebuild dist with the N-1 guard and re-verify, then hand back to the push /
+> multi-monitor / tag queue.`
 
 One page for picking this up cold. The full trail lives in `docs/SESSION_HANDOFF.md`
 (§24–§38 cover the terminal-mode build, the bus, the panels, the commit series, the P0 trust pass, the
@@ -70,7 +72,9 @@ sequence (commit → push → tag `v0.1.0-beta`), not these trigger-gated items.
 ## Where it stands
 
 - **Branch `master`; the tree is clean.** The P1-7 → §73 corpus is **committed** — 18 per-wave
-  commits from `fa202d6`, each file staged exactly once; §74 records the pre-tag pass around it.
+  commits from `fa202d6`, each file staged exactly once; §74 records the pre-tag pass, §75 (in
+  flight) adds the N-1 guard, the CI lint/SBOM work, and this save's record — **22 commits from
+  `fa202d6`**.
   **Nothing is pushed.** New in §56/§57:
   §63/§64 added `test_analytics_golden.py`, `test_no_numpy.py`, `test_source_switch.py`,
   `scripts/regen_analytics_golden.py` and `testdata/analytics_golden.json`; §66–§68 added ten audit-pin
@@ -88,7 +92,7 @@ sequence (commit → push → tag `v0.1.0-beta`), not these trigger-gated items.
 
 ```bash
 unset PYTHONPATH
-.venv/Scripts/python.exe -m pytest orderflow_system -q        # expect 712 passed / 2 skipped (same on 3.11 and 3.12)
+.venv/Scripts/python.exe -m pytest orderflow_system -q        # expect 716 passed / 2 skipped (712 + §75's four guard pins; 3.12 confirmed, 3.11 re-run due in §75)
 .venv/Scripts/python.exe scripts/audit_ui_refs.py             # expect AUDIT CLEAN
 ruff check orderflow_system scripts                           # expect: All checks passed
 .venv/Scripts/python.exe scripts/regen_analytics_golden.py    # expect: OK (40 cases, max diff 0.000e+00)
@@ -116,7 +120,7 @@ sandbox — sleep ≥3 s between a control change and the read, or you read the 
 | **P3-1 (WebGL heat) stays deferred — now measured on his hardware**: 2560×1440 @ 144 Hz = 6.94 ms budget; the heat pass measures 0.6–0.7 ms (real payload, 1.7 k cells) and 1.3–1.7 ms (synthetic 30 k) at his resolution; the payload caps drawn cells at ~6 k (`max_columns: 900` @ 1 s buckets → ≤15 merged bars). Re-open: >~8 k drawn cells at his res, a true-4K canvas, or a >3.5 ms heat share of a warm frame. | handoff §59 |
 | **The options/fundamentals residue is closed** — live captures: the supply cell's real child element (`20.09M BTC` + `of 21.00M max`), and the ATM strike's ticker strip shows `Γ 8.80e-4` (the exponential branch in live venue data, exactly as `fmtGreek` pins it). | handoff §59 |
 | **The frozen build is current and on a diet (§63)**: `dist/ModFlowOrderFlowAnalysisSuite/` is 49.2 MB raw (was 68 MB) — numpy (27 MB with OpenBLAS) and hook collateral (pytz/tzdata/watchfiles) are excluded from `scripts/build_exe.py`, and the analytics engines are stdlib-only (pinned by `test_analytics_golden.py` + `test_no_numpy.py`). Verified by a headless smoke of the exe itself. **UPX measured and not pursued** — a plain zip is 25.8 MB (−23.5 MB, zero risk) and packed DLLs barely zip further. | handoff §63 |
-| **The frozen `dist/` is current (§70)**: rebuilt from the hardened source; the zip (494 entries, 49.3 MB raw / 25.9 MB zipped) plus the installer artifact — `dist/ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe` release exe, 26.82 MB, sha256 `E71C53C1BE30393ECD9E86187E759C8E9AD8166C0CA53B451618347525F65DD7` — both built from the same frozen dist and both verified (exe smoked on 8099 with the §70 guards live: rebinding `Host` → 403, cross-origin POST → 403, CSP served, unknown symbol `[]`, 0 client errors; the setup install/uninstall journey was verified in §69 and the artifact refreshed in §70). Ship both attachments. | handoff §69/§70 |
+| **The frozen `dist/` is stale since §75** (built at §70; the N-1 guard changed a bundled file — rebuild before shipping, and every hash in this file pre-dates it): rebuilt from the hardened source; the zip (494 entries, 49.3 MB raw / 25.9 MB zipped) plus the installer artifact — `dist/ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe` release exe, 26.82 MB, sha256 `E71C53C1BE30393ECD9E86187E759C8E9AD8166C0CA53B451618347525F65DD7` — both built from the same frozen dist and both verified (exe smoked on 8099 with the §70 guards live: rebinding `Host` → 403, cross-origin POST → 403, CSP served, unknown symbol `[]`, 0 client errors; the setup install/uninstall journey was verified in §69 and the artifact refreshed in §70). Ship both attachments + the SBOM (`dist/ModFlowOrderFlowAnalysisSuite-win64.sbom.cdx.json`). | handoff §69/§70/§75 |
 | **The secure2 security sweep is applied (§70)** — report `docs/SECURITY_SWEEP_v0.1b.md` (14 findings, 13 fixed with pins; SS-8 open by design: lockfile/SBOM/dependency-scan CI). Loopback request guard + WS handshake check + feed-value gates + news-URL containment live in source, live sandbox and the frozen exe. | handoff §70 |
 | **Display / multi-monitor audit is done (§71) — actionables first, NOTHING changed** — report `docs/DISPLAY_MULTIMONITOR_AUDIT_v0.1b.md`: 16-size DPI matrix + drag/resize probes all pass (0 errors), but P0 fixes are needed before multi-monitor polish is worth doing: (A1) the Engine view paints at 1× — no `devicePixelRatio` in `ofx.js`/`ofx-view.js`, blurry on 125/150/200% displays; (A2) `mpCanvas` has no CSS size → inflates ×dpr per fit pass (measured 480×285→720×428 in one pass); (A3) `ofxRibbon` backing ≠ CSS box; (A4) generic refit covers only `.view.active` and `OFAPScale.register` has zero callers. P1: window geometry persistence + adaptive `min_size` + per-screen layout auto-apply (`screen_key` is stored but never applied at boot); P2: aux widget windows / send-to-monitor / pinning (pywebview 6.2.1 supports all of it; WebView2 cannot drag a window out of the page — the command form is the workable one). | handoff §71 |
 | **The Python 3.11 question is settled (§65)**: the hang was 3.11's `asyncio.wait_for` answering a shutdown cancellation with the finished write's result (`if fut.done(): return fut.result()`) — the writer looped back to `queue.get()` and `asyncio.run`'s gather waited forever. The write deadline and the queue offer use `asyncio.timeout` now, pinned by `test_a_cancelled_writer_dies_even_when_its_write_just_finished` (proven to bite: 1 failed in 2.3 s with the old code). Full suite on 3.11: **595 passed / 2 skipped in 27 s** — the CI matrix and `requires-python = ">=3.11"` stay. | handoff §65 |
