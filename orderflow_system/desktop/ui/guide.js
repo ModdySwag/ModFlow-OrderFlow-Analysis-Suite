@@ -575,7 +575,13 @@ const WIZ_STEPS = [
             return `
             <div class="field"><label>Where should market data come from?</label>
                 <label class="switch"><input type="radio" name="wizSrc" value="bybit" ${src === 'bybit' ? 'checked' : ''}>
-                    Exchange public feed — free, anonymous, works on Windows and macOS <b>(recommended)</b></label>
+                    Bybit — exchange public feed, free, anonymous, works on Windows and macOS <b>(recommended)</b></label>
+                <label class="switch"><input type="radio" name="wizSrc" value="binance" ${src === 'binance' ? 'checked' : ''}>
+                    Binance USDⓈ-M futures — public feed, no key, crypto perpetuals only</label>
+                <label class="switch"><input type="radio" name="wizSrc" value="hyperliquid" ${src === 'hyperliquid' ? 'checked' : ''}>
+                    Hyperliquid — public feed, no key, crypto perpetuals only</label>
+                <label class="switch"><input type="radio" name="wizSrc" value="okx" ${src === 'okx' ? 'checked' : ''}>
+                    OKX — public feed, no key, crypto perpetuals only</label>
                 <label class="switch"><input type="radio" name="wizSrc" value="mt5" ${src === 'mt5' ? 'checked' : ''}>
                     MetaTrader 5 terminal — Windows only, needs a broker install${mt5.available === false ? ' (not detected here)' : ''}</label>
                 <label class="switch"><input type="radio" name="wizSrc" value="both" ${src === 'both' ? 'checked' : ''}>
@@ -1928,7 +1934,7 @@ WIZ_STEPS.splice(2, 0, {
             const src = (GUIDE.cfg.data_source || 'bybit');
             const mt5 = (GUIDE.cfg.mt5 = GUIDE.cfg.mt5 || {});
             const caps = (S.caps && S.caps.mt5) || {};
-            if (src === 'bybit') {
+            if (src === 'bybit' || src === 'binance' || src === 'hyperliquid' || src === 'okx') {
                 return `
                 <p>You picked the exchange\u2019s public feed \u2014 nothing to do here.</p>
                 <p class="help-lead">If you ever want indices, gold, FX or CFDs as well, the MetaTrader 5 source

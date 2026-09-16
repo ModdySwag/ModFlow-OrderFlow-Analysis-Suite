@@ -309,3 +309,29 @@ def test_unknown_symbols_serve_nothing_from_the_demo_fillers():
     assert len(client.get("/api/footprint/BTCUSDT").json()) > 0
     assert len(client.get("/api/tape/BTCUSDT?count=5").json()) > 0
 
+
+# ──────────────────────────────────────────────────────────────
+# §76: a module-local `api()` must name the shell's helper (window.api)
+# ──────────────────────────────────────────────────────────────
+
+def test_a_module_local_api_helper_must_name_the_shells_helper():
+    """A module-local `function api(...)` that guards with `typeof api === 'function'` is checking
+    itself: the guard is always true, the call recurses, and the RangeError lands in the caller's
+    `catch` — so the module silently runs on its fallback data.
+
+    Measured live on the ☰ menu (§76): `/api/control/sources` never loaded (`state.sources` stayed
+    empty), the Connections list painted its hardcoded fallback with every source looking usable,
+    and switching anything answered "source switch failed: RangeError: Maximum call stack size
+    exceeded". menubar.js does it right (`typeof window.api`); this pins the rule for every module:
+    name the shell's helper, never the local one.
+    """
+    offenders = []
+    for path in sorted(UI.glob("*.js")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r"function\s+api\s*\(", text) \
+                and re.search(r"typeof\s+api\s*===\s*['\"]function", text):
+            offenders.append(path.name)
+    assert not offenders, (
+        f"{offenders} declares a local api() and then tests the bare name — which resolves to that "
+        "same function. The guard must read `typeof window.api` (the shell's helper in ui.js).")
+

@@ -257,6 +257,11 @@
         if (path === 'ofx.sweep_c' && window.OFX) OFX.setParams({ sweepC: value });
         if (path === 'ofx.min_block' && window.OFX) OFX.setParams({ minBlock: value });
         if (path === 'ofx.lambda_ms' && window.OFX) OFX.setParams({ lambda: value });
+        if (path.startsWith('audio.') && window.OFAPAUDIO) {
+            /* The Tape view's Chart menu owns the audio paths; the player adopts the accepted
+               value so the sound follows the switch without a config round trip. */
+            OFAPAUDIO.setParam(path.slice('audio.'.length), value);
+        }
         if (path.startsWith('expression.')) {
             /* Both chart surfaces keep their own mode + palette, and the menu has no idea which is
                live: announce the write instead of calling into either one. */

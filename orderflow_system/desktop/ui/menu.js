@@ -59,8 +59,12 @@
     const state = { open: false, filter: '', workspace: 'default', sources: [], active: '' };
 
     function el(id) { return document.getElementById(id); }
+    /* The shell's api() (ui.js) is the app's one fetch wrapper. A bare `api` here would name THIS
+       function — the guard would be checking itself, the call would recurse, and the RangeError
+       lands in every caller's catch (measured: /sources never loaded and the ☰ menu ran on its
+       fallback list while the failure stayed invisible). Name the global. */
     function api(path, options) {
-        if (typeof api === 'function') return api(path, options);
+        if (typeof window.api === 'function') return window.api(path, options);
         return fetch(path, options || {}).then((r) => r.json());
     }
     function esc(text) {

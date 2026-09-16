@@ -395,6 +395,14 @@ function handleChannel(msg) {
             S.lastPrice = data.price; S.tickCount++;
             /* P1-10: a tape tick just landed — the tape panel's sample time, for its chip. */
             if (window.OFAPFRESH) OFAPFRESH.stamp('tape', { ageMs: 0, kind: 'trades' });
+            /* Trade audio (opt-in, `audio.enabled` in the config). Driven from the same tick the
+               tape draws, so what is heard and what is seen can never disagree; silent until the
+               user turns it on in the Tape view's Chart menu. */
+            if (window.OFAPAUDIO) {
+                OFAPAUDIO.setSymbol(S.symbol);
+                OFAPAUDIO.onTick({ symbol: data.symbol || S.symbol, price: data.price,
+                                   size: data.size, side: data.side });
+            }
             updatePriceKpis(data.price, data.side);
             if (S.inst.tape && truthyView('tape')) S.inst.tape.addTrade({ time: Date.now(), price: data.price, size: data.size, side: data.side });
             break;

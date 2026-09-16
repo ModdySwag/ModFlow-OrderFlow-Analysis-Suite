@@ -28,6 +28,7 @@ class TimeAndSales {
         this.trades = [];
         this.cumulativeVolume = { buy: 0, sell: 0 };
         this._timeCache = new Map();     // second -> formatted clock time (see _timeText)
+        this._topPrice = null;           // the newest price on screen (the changed-digit reference)
         
         this._init();
     }
@@ -215,20 +216,40 @@ class TimeAndSales {
         return true;
     }
 
-    _rowHtml(trade) {
+    _rowHtml(trade, referencePrice) {
         const sideClass = trade.side === 'buy' ? 'tape-row-buy' : 'tape-row-sell';
         const bigClass = trade.isBig ? 'tape-row-big' : '';
         const cursorClass = this._cursorClass(trade.price);
         return `
                 <tr class="tape-row ${sideClass} ${bigClass} ${cursorClass}" data-price="${trade.price}" data-time="${trade.time}">
                     <td class="tape-time">${this._timeText(trade.time)}</td>
-                    <td class="tape-price">${this._formatPrice(trade.price)}</td>
+                    <td class="tape-price">${this._priceHtml(trade.price, referencePrice)}</td>
                     <td class="tape-size">${this._formatSize(trade.size)}</td>
                     <td class="tape-side">
                         <span class="tape-side-badge ${trade.side}">${trade.side.toUpperCase()}</span>
                     </td>
                 </tr>
             `;
+    }
+
+    /* The changed-digit tint — how a professional tape is actually read: not the number, the
+       MOVEMENT. Only the digits that differ from the print before it are wrapped, so a screen of
+       figures becomes a column of movement without any extra glyphs or width. The reference is the
+       older neighbour (the row below); the first row of a batch compares against the print that was
+       at the top before it, and a width change (100.0 → 99.75) is left plain — a different number of
+       digits says nothing about which digit moved. */
+    _priceHtml(price, reference) {
+        const text = this._formatPrice(price);
+        if (reference === null || reference === undefined) return text;
+        const prev = this._formatPrice(reference);
+        if (prev.length !== text.length) return text;
+        let out = '';
+        for (let i = 0; i < text.length; i += 1) {
+            out += (text[i] !== prev[i] && text[i] >= '0' && text[i] <= '9')
+                ? `<span class="tape-digit-changed">${text[i]}</span>`
+                : text[i];
+        }
+        return out;
     }
 
     /* A tape repeats the same second many times and toLocaleTimeString is the most expensive
@@ -257,14 +278,22 @@ class TimeAndSales {
      *                   reader's view: rows are uniform, so one measured row height is enough and
      *                   the trim below cannot distort it.
      */
-    _prependRows(trades) {
+    _prependRows(trades, tailPrice) {
         let html = '';
         let rows = 0;
-        for (const trade of trades) {
-            if (this._visible(trade)) { html += this._rowHtml(trade); rows += 1; }
+        /* The batch is newest-first, so each row's older neighbour is the NEXT one in the batch; the
+           last row of the batch neighbours whatever was at the top before it (tailPrice), which is
+           what makes the changed-digit tint continuous across two batches. */
+        for (let i = 0; i < trades.length; i += 1) {
+            const trade = trades[i];
+            if (!this._visible(trade)) continue;
+            const older = i + 1 < trades.length ? trades[i + 1].price : tailPrice;
+            html += this._rowHtml(trade, older);
+            rows += 1;
         }
         if (!html) return 0;
         this.tbody.insertAdjacentHTML('afterbegin', html);
+        this._topPrice = trades.length ? trades[0].price : this._topPrice;
         const rowH = this.tbody.firstElementChild ? this.tbody.firstElementChild.offsetHeight : 0;
         this._trimRows();
         return rows * rowH;
@@ -313,7 +342,7 @@ class TimeAndSales {
         if (normalizedTrade.side === 'buy') this.cumulativeVolume.buy += normalizedTrade.size;
         else this.cumulativeVolume.sell += normalizedTrade.size;
 
-        this._afterAppend(this._prependRows([normalizedTrade]));
+        this._afterAppend(this._prependRows([normalizedTrade], this._topPrice));
     }
 
     /**
@@ -333,9 +362,10 @@ class TimeAndSales {
         }
         if (!batch.length) return;
         const newestFirst = batch.slice().reverse();
+        const tail = this._topPrice;                 // the print this batch sits on top of
         this.trades = newestFirst.concat(this.trades);
         if (this.trades.length > this.options.maxTrades) this.trades.length = this.options.maxTrades;
-        this._afterAppend(this._prependRows(newestFirst));
+        this._afterAppend(this._prependRows(newestFirst, tail));
     }
 
     /**
@@ -360,15 +390,19 @@ class TimeAndSales {
        calls this: it is the O(displayTrades) path, not the O(1)-per-print one. */
     _renderTrades() {
         const max = this.options.displayTrades;
-        let html = '';
-        let shown = 0;
+        const visible = [];
         for (const trade of this.trades) {
             if (!this._visible(trade)) continue;
-            html += this._rowHtml(trade);
-            shown += 1;
-            if (shown >= max) break;
+            visible.push(trade);
+            if (visible.length >= max) break;
+        }
+        let html = '';
+        for (let i = 0; i < visible.length; i += 1) {
+            const older = i + 1 < visible.length ? visible[i + 1].price : null;
+            html += this._rowHtml(visible[i], older);
         }
         this.tbody.innerHTML = html;
+        this._topPrice = visible.length ? visible[0].price : null;
         this._updateStats();
         const parked = window.OFAPSTRIPS && OFAPSTRIPS.holds && OFAPSTRIPS.holds(this.bodyEl);
         if (this.options.autoScroll && this.bodyEl && !parked) this.bodyEl.scrollTop = 0;

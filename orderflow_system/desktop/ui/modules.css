@@ -85,6 +85,10 @@
 .tape-row > * { padding: 3px 8px; }
 .tape-time { color: var(--m-muted); }
 .tape-price { color: var(--m-text); text-align: right; }
+/* The changed-digit tint: only the digits that moved against the older print, so a screen of figures
+   reads as movement. Accent-coloured and one weight up — enough to catch the eye in a fast tape,
+   quiet enough not to compete with the buy/sell colours on the same row. */
+.tape-digit-changed { color: var(--m-accent); font-weight: 600; }
 .tape-size { color: var(--m-dim); text-align: right; }
 .tape-side { text-align: center; }
 .tape-side-badge { padding: 1px 6px; border-radius: 4px; font-size: 10px; text-transform: uppercase; }
