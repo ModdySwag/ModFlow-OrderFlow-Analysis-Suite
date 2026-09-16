@@ -693,42 +693,42 @@ Automated notifications for every trade lifecycle event:
 
 ## Installation
 
-### Prerequisites
-
-- **Windows 10/11** for the packaged desktop build (source installs also run on Linux/macOS; the
-  frozen-build script targets Windows)
-- **Python 3.11 or newer** when running from source
-- **MetaTrader 5 terminal** (optional, Windows only — the MT5 feed) or the built-in **Bybit** feed,
-  which needs no account and no key
-
-### Setup (from source)
+### Quick start — clone, install, run (5 commands)
 
 ```bash
+# 1. Clone
 git clone https://github.com/ModdySwag/ModFlow-OrderFlow-Analysis-Suite.git
 cd ModFlow-OrderFlow-Analysis-Suite
 
+# 2. Python 3.11+ venv (Windows; `source .venv/bin/activate` on Linux/macOS)
 python -m venv .venv
-.venv\Scripts\activate              # Windows;  source .venv/bin/activate on Linux/macOS
+.venv/Scripts/activate
 
-pip install -e ".[dev]"             # app + test tooling
-pip install -e ".[mt5]"             # optional: MetaTrader 5 feed support
+# UI is served at /desktop; REST API + OpenAPI schema (/docs) are on the same origin.
+
+# 3. Install app + dev tooling
+pip install -e ".[dev]"
+
+# 4. (Optional) MT5 feed support
+pip install -e ".[mt5]"
+
+# 5a. Run desktop app (native window)
+python -m orderflow_system.desktop
+
+# 5b. Or headless server on port 8099
+python -m orderflow_system.desktop --headless --port 8099
+
+# 5c. Or CLI pipeline (feeds → detectors → Telegram)
+python -m orderflow_system.main
 ```
 
-### Run the desktop app
+That's the whole path from zero to a running app. The rest of this section covers prerequisites and optional build steps.
 
-```bash
-python -m orderflow_system.desktop                          # native window (pywebview)
-python -m orderflow_system.desktop --headless --port 8099   # server only
-```
+### Prerequisites
 
-The UI is served at `/desktop` on that port (the window opens it directly); the REST API and its
-OpenAPI schema (`/docs`) are on the same origin.
-
-### Headless pipeline (feeds → detectors → Telegram)
-
-```bash
-python -m orderflow_system.main       # the original CLI orchestrator, config-driven
-```
+- **Windows 10/11** for the packaged desktop build (source installs also run on Linux/macOS; the frozen-build script targets Windows)
+- **Python 3.11 or newer** when running from source
+- **MetaTrader 5 terminal** (optional, Windows only — the MT5 feed) or the built-in **Bybit** feed, which needs no account and no key
 
 ### Demo mode (no feed required)
 
@@ -737,16 +737,17 @@ python -m orderflow_system.dashboard               # deterministic demo data —
 python -m orderflow_system.dashboard --port 8099   # …or pin the port
 ```
 
-The port rule matches the desktop app's: `--port` first, else `dashboard.port` from the per-user
-config (Windows: `%APPDATA%\OrderFlowAnalysisPro\config.json`), else 8080 — and when that port is
-already held by another process the next free one is used and printed, so a busy 8080 never blocks
-the demo server.
+The port rule matches the desktop app's: `--port` first, else `dashboard.port` from the per-user config (Windows: `%APPDATA%\OrderFlowAnalysisPro\config.json`), else 8080 — and when that port is already held by another process the next free one is used and printed, so a busy 8080 never blocks the demo server.
 
 ### Standalone executable
 
 ```bash
 python scripts/build_exe.py           # -> dist/ModFlowOrderFlowAnalysisSuite/
 ```
+
+### Next steps
+
+How to run the system, dashboard endpoints, configuration, and per-instrument tuning are all in [Usage](https://github.com/ModdySwag/ModFlow-OrderFlow-Analysis-Suite#usage) and [Configuration](https://github.com/ModdySwag/ModFlow-OrderFlow-Analysis-Suite#configuration).
 
 ---
 
