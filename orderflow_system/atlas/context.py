@@ -29,6 +29,7 @@ import logging
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Iterable, Optional
 from xml.etree import ElementTree
@@ -51,12 +52,51 @@ _FEAR_GREED = "https://api.alternative.me/fng/?limit=1"
 
 _USER_AGENT = "OrderFlow-Analysis-Pro/1.0 (market context; public endpoints)"
 
+#: A feed page is kilobytes; this ceiling bounds what one hostile URL can pull into memory.
+_MAX_BYTES = 4 * 1024 * 1024
 
-def _fetch_text(url: str, timeout_s: float = 8.0) -> str:
-    """Blocking GET with a browser-ish UA (a couple of these feeds 403 a bare one)."""
+#: Internal DTD subset (`<!DOCTYPE x [ … ]>`) — the entity-trick carrier; refused on sight.
+_DTD_INTERNAL_SUBSET = re.compile(r"<!DOCTYPE[^>]*\[", re.IGNORECASE)
+
+
+def _venue_symbol(symbol: str) -> str:
+    """The symbol as a URL query VALUE: quoted, so no symbol can add or change a parameter."""
+    return urllib.parse.quote(str(symbol or "").upper(), safe="")
+
+
+def _fetch_text(url: str, timeout_s: float = 8.0, max_bytes: int = _MAX_BYTES) -> str:
+    """Blocking GET with a browser-ish UA (a couple of these feeds 403 a bare one).
+
+    Two containments, because one caller hands this function a URL the *user* supplied (the
+    news feed — reachable as a GET query parameter): only http(s) is fetched (``file://``
+    would read local files into the RSS parser), redirects may not leave http(s) either, and
+    the body is read through a hard byte ceiling so a hostile or broken endpoint cannot
+    stream unbounded bytes into the worker thread's memory.
+    """
+    scheme = urllib.parse.urlsplit(str(url or "")).scheme.lower()
+    if scheme not in ("http", "https"):
+        raise ValueError(f"refused feed scheme {scheme or '(none)'!r} — only http(s) is fetched")
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "*/*"})
-    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-        return resp.read().decode("utf-8", errors="replace")
+    with _OPENER.open(req, timeout=timeout_s) as resp:
+        raw = resp.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise ValueError(f"feed response exceeds {max_bytes} bytes — refused before parsing")
+    return raw.decode("utf-8", errors="replace")
+
+
+class _HttpOnlyRedirects(urllib.request.HTTPRedirectHandler):
+    """Keep redirects inside http(s): a feed URL must not be able to bounce to ``file://``."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):      # noqa: N802
+        target = urllib.parse.urljoin(req.full_url, str(newurl))
+        if urllib.parse.urlsplit(target).scheme.lower() not in ("http", "https"):
+            raise urllib.error.HTTPError(req.full_url, code, "redirect left http(s)", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, target)
+
+
+#: One opener for every context fetch: default handlers (proxy, https) plus the http(s)-only
+#: redirect rule. build_opener skips its own default redirect handler when given a subclass.
+_OPENER = urllib.request.build_opener(_HttpOnlyRedirects())
 
 
 def _fetch_json(url: str, timeout_s: float = 8.0) -> Any:
@@ -68,7 +108,16 @@ def parse_rss(xml_text: str, source: str = "", limit: int = 12) -> list[dict[str
 
     ElementTree needs namespace-agnostic matching for Atom, so every tag is
     compared on its local name.
+
+    One refusal runs first: a document carrying an *internal* DTD subset
+    (`<!DOCTYPE x [ … ]>`) is dropped before the parser sees it. Feeds never need one, and it
+    is the only XML feature whose purpose in an untrusted feed would be entity tricks — with
+    the 4 MiB read cap on `_fetch_text`, that closes the XML attack class without adding a
+    dependency to the frozen build.
     """
+    if _DTD_INTERNAL_SUBSET.search(xml_text[:65536]):
+        logger.debug("news feed %s carries an internal DTD subset — refused", source)
+        return []
     try:
         root = ElementTree.fromstring(xml_text)
     except ElementTree.ParseError as exc:
@@ -158,7 +207,7 @@ class MarketContext:
             out: dict[str, Any] = {"ok": False, "symbol": sym}
             self.requests += 1
             try:
-                payload = _fetch_json(_BYBIT_TICKERS.format(symbol=sym), timeout_s=self.timeout_s)
+                payload = _fetch_json(_BYBIT_TICKERS.format(symbol=_venue_symbol(sym)), timeout_s=self.timeout_s)
                 row = ((payload.get("result") or {}).get("list") or [{}])[0]
                 if not row:
                     raise ValueError("symbol not listed on the venue")
@@ -181,7 +230,7 @@ class MarketContext:
                 out["error"] = self.last_error
                 return out
             try:
-                ratio_payload = _fetch_json(_BYBIT_RATIO.format(symbol=sym), timeout_s=self.timeout_s)
+                ratio_payload = _fetch_json(_BYBIT_RATIO.format(symbol=_venue_symbol(sym)), timeout_s=self.timeout_s)
                 ratio_row = ((ratio_payload.get("result") or {}).get("list") or [{}])[0]
                 buy = float(ratio_row.get("buyRatio") or 0.0)
                 sell = float(ratio_row.get("sellRatio") or 0.0)

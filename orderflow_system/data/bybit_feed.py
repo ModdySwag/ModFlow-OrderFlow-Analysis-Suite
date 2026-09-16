@@ -9,8 +9,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import websockets
 
@@ -28,6 +29,31 @@ def _update_id(data: dict) -> int:
         return int(data.get("u") or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _finite(value: Any) -> Optional[float]:
+    """A JSON number that is safe to carry, or None.
+
+    ``json`` accepts the bare tokens ``NaN``/``Infinity``, and every comparison with NaN is
+    False — so `float(x) <= 0` cannot catch one and the value would sail into the aggregates
+    unguarded. This is the one gate every venue value passes first.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _level(pair: Any) -> Optional["OrderbookLevel"]:
+    """One venue ``[price, qty]`` pair → OrderbookLevel, or None when the value is unusable."""
+    try:
+        price, qty = _finite(pair[0]), _finite(pair[1])
+    except (TypeError, IndexError, KeyError):
+        return None
+    if price is None or qty is None or price <= 0 or qty < 0:
+        return None
+    return OrderbookLevel(price=price, quantity=qty)
 
 
 class BybitFeed:
@@ -57,6 +83,11 @@ class BybitFeed:
         self._book_stale: set[str] = set()
         self._book_gaps = 0
         self._deltas_dropped = 0
+        # Venue values refused as unusable (NaN/Infinity/negative — json carries the bare
+        # tokens and comparisons cannot catch them). Counted so a bad socket is visible.
+        self._junk_values = 0
+        # One warning per connection when a trade arrives without the venue's own T stamp
+        self._ts_fallback_warned = False
 
     async def start(self):
         """Connect and begin receiving data."""
@@ -85,7 +116,8 @@ class BybitFeed:
         async with websockets.connect(BYBIT_WS_URL, ping_interval=20) as ws:
             self._ws = ws
             self._reconnect_delay = 1.0
-            logger.info(f"Connected to Bybit WebSocket")
+            self._ts_fallback_warned = False          # a fresh connection may say it again
+            logger.info("Connected to Bybit WebSocket")
 
             # Subscribe to trades + orderbook for each symbol
             subscribe_args = []
@@ -130,10 +162,30 @@ class BybitFeed:
 
         for trade in data_list:
             side_str = trade.get("S", "")
+            price = _finite(trade.get("p"))
+            size = _finite(trade.get("v"))
+            if price is None or price <= 0 or size is None or size < 0:
+                # One malformed print (NaN/Infinity/negative/zero price) would poison the
+                # footprint, delta and CVD aggregates downstream without ever raising, so it
+                # is dropped here and counted — never substituted with something plausible.
+                self._junk_values += 1
+                continue
+            ts = trade.get("T")
+            if ts is None:
+                # Defensive, not expected: Bybit stamps publicTrade with T. A silent
+                # wall-clock substitution would drift session boundaries and the VP session
+                # window, so say it once per connection instead of pretending the venue
+                # clock agreed.
+                if not self._ts_fallback_warned:
+                    self._ts_fallback_warned = True
+                    logger.warning(
+                        "Bybit trade without T (venue time) — falling back to the local clock; "
+                        "timestamps are loose until the next reconnect")
+                ts = int(time.time() * 1000)
             tick = Tick(
-                timestamp_ms=trade.get("T", int(time.time() * 1000)),
-                price=float(trade.get("p", 0)),
-                size=float(trade.get("v", 0)),
+                timestamp_ms=int(ts),
+                price=price,
+                size=size,
                 side=Side.BUY if side_str == "Buy" else Side.SELL,
                 trade_id=trade.get("i", ""),
             )
@@ -154,14 +206,11 @@ class BybitFeed:
         ts = data.get("u", int(time.time() * 1000))
 
         if msg_type == "snapshot":
-            bids = [
-                OrderbookLevel(price=float(b[0]), quantity=float(b[1]))
-                for b in data.get("b", [])
-            ]
-            asks = [
-                OrderbookLevel(price=float(a[0]), quantity=float(a[1]))
-                for a in data.get("a", [])
-            ]
+            raw_bids = data.get("b") or []
+            raw_asks = data.get("a") or []
+            bids = [lv for lv in map(_level, raw_bids) if lv is not None]
+            asks = [lv for lv in map(_level, raw_asks) if lv is not None]
+            self._junk_values += (len(raw_bids) - len(bids)) + (len(raw_asks) - len(asks))
             self._orderbooks[symbol] = OrderbookSnapshot(
                 timestamp_ms=ts,
                 bids=sorted(bids, key=lambda x: -x.price),
@@ -230,14 +279,19 @@ class BybitFeed:
             "stale": sorted(self._book_stale),
             "gaps": self._book_gaps,
             "dropped_deltas": self._deltas_dropped,
+            "junk_values": self._junk_values,
             "seq": dict(self._book_seq),
         }
 
     def _apply_delta(self, book: OrderbookSnapshot, data: dict):
-        """Apply incremental orderbook updates."""
+        """Apply incremental orderbook updates (non-finite or negative values are refused)."""
         # Update bids
-        for b in data.get("b", []):
-            price, qty = float(b[0]), float(b[1])
+        for b in data.get("b") or []:
+            lv = _level(b)
+            if lv is None:
+                self._junk_values += 1
+                continue
+            price, qty = lv.price, lv.quantity
             if qty == 0:
                 book.bids = [lv for lv in book.bids if lv.price != price]
             else:
@@ -252,8 +306,12 @@ class BybitFeed:
                 book.bids.sort(key=lambda x: -x.price)
 
         # Update asks
-        for a in data.get("a", []):
-            price, qty = float(a[0]), float(a[1])
+        for a in data.get("a") or []:
+            lv = _level(a)
+            if lv is None:
+                self._junk_values += 1
+                continue
+            price, qty = lv.price, lv.quantity
             if qty == 0:
                 book.asks = [lv for lv in book.asks if lv.price != price]
             else:

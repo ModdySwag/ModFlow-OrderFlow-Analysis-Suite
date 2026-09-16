@@ -19,11 +19,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from orderflow_system.dashboard.websocket_manager import WebSocketManager, _serialize
@@ -76,6 +76,76 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
         return response
 
 app.add_middleware(NoCacheMiddleware)
+
+# ──────────────────────────────────────────────
+# Loopback trust boundary (secure2 sweep)
+# ──────────────────────────────────────────────
+#
+# The API is unauthenticated by design: a single-user desktop app on 127.0.0.1 whose only
+# legitimate client is its own UI. Two browser-native attacks on that shape are closed here,
+# with no endpoint touched:
+#
+#   * DNS rebinding — a name an attacker controls that resolves to 127.0.0.1 makes the
+#     attacker's script SAME-ORIGIN with this API, so it could read anything a GET returns
+#     (including /api/control/config, which carries the Alpaca key and Telegram token). The
+#     guard refuses any request whose Host is not a loopback name.
+#   * Cross-site request forgery — body-less mutating POSTs (config/reset, engine/stop,
+#     logs/clear, storage/prune, alerts/clear, replay …) are "simple requests": a page the
+#     user visits can fire them without a preflight. Mutating requests must therefore carry
+#     either no browser Origin (native clients, curl, the test client) or a loopback one, and
+#     must never declare `Sec-Fetch-Site: cross-site`. Reads stay open.
+#
+# The same check runs on the WebSocket handshake (a websocket is not CORS-gated at all), so a
+# cross-origin page cannot open the live stream either. `test_request_guard.py` is the pin.
+
+LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "testserver"})
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
+
+
+def local_hostname(value: str) -> str:
+    """A Host header or an Origin URL → its bare, lowercased hostname ("" when absent).
+
+    Handles `host:port`, `http://host:port`, IPv6 literals (`[::1]:8099`) and a trailing path;
+    anything it cannot parse keeps its text, so an unknown value fails the allowlist closed.
+    """
+    text = str(value or "").strip().lower()
+    if "://" in text:
+        text = text.split("://", 1)[1]
+    text = text.split("/", 1)[0]
+    if text.startswith("["):                       # [::1]:8099
+        return text.split("]", 1)[0][1:]
+    return text.rsplit(":", 1)[0] if ":" in text else text
+
+
+def is_trusted_ws_handshake(headers) -> bool:
+    """True when a websocket handshake looks first-party.
+
+    An absent Origin passes (native clients and the test client send none); a present one must
+    be loopback; `Sec-Fetch-Site: cross-site` always fails.
+    """
+    if (headers.get("sec-fetch-site") or "").strip().lower() == "cross-site":
+        return False
+    origin = local_hostname(headers.get("origin") or "")
+    return not origin or origin in LOCAL_HOSTS
+
+
+class LocalRequestGuard(BaseHTTPMiddleware):
+    """Refuse non-loopback Hosts outright, and cross-site mutations on top of that."""
+
+    async def dispatch(self, request: Request, call_next):
+        host = local_hostname(request.headers.get("host") or "")
+        if host and host not in LOCAL_HOSTS:
+            return PlainTextResponse("forbidden: non-loopback Host", status_code=403)
+        if request.method not in _SAFE_METHODS:
+            origin = local_hostname(request.headers.get("origin") or "")
+            if origin and origin not in LOCAL_HOSTS:
+                return PlainTextResponse("forbidden: cross-origin request", status_code=403)
+            if (request.headers.get("sec-fetch-site") or "").strip().lower() == "cross-site":
+                return PlainTextResponse("forbidden: cross-site request", status_code=403)
+        return await call_next(request)
+
+
+app.add_middleware(LocalRequestGuard)
 
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
@@ -233,6 +303,10 @@ async def get_markers(symbol: str, limit: int = Query(default=200, le=500)):
     """Get chart markers for signal events on this instrument."""
     system = get_system()
     if not system:
+        # Demo mode: only honest for symbols the generator models (see get_footprint /
+        # models_symbol) — an unknown symbol gets nothing, not an invented marker set.
+        if not demo_data.models_symbol(symbol):
+            return []
         return demo_data.demo_markers(symbol)
 
     pipeline = system.pipelines.get(symbol)
@@ -274,6 +348,10 @@ async def get_candles(
     """Get candle history, optionally aggregated to a higher timeframe."""
     system = get_system()
     if not system:
+        # Demo mode: only honest for symbols the generator models (see get_footprint /
+        # models_symbol) — an unknown symbol gets nothing, not an invented chart.
+        if not demo_data.models_symbol(symbol):
+            return []
         return demo_data.demo_candles(symbol, tf=tf, range_s=range_s)
 
     pipeline = system.pipelines.get(symbol)
@@ -377,6 +455,10 @@ async def get_volume_profile(
     """
     system = get_system()
     if not system:
+        # Demo mode: only honest for symbols the generator models (see get_footprint /
+        # models_symbol) — an unknown symbol gets nothing, not an invented profile.
+        if not demo_data.models_symbol(symbol):
+            return []
         return demo_data.demo_volume_profile(symbol)
 
     pipeline = system.pipelines.get(symbol)
@@ -510,6 +592,15 @@ async def get_bias(symbol: str):
     """Get current daily bias and qualified levels."""
     system = get_system()
     if not system:
+        if not demo_data.models_symbol(symbol):
+            # Neutral empty in the engine's own no-bias shape — tagged to this branch,
+            # and claiming no levels rather than inventing them.
+            return _with_source({
+                "direction": "neutral",
+                "confidence": 0,
+                "qualified_levels": [],
+                "notes": f"Unknown symbol: {symbol} — the demo generator does not model it",
+            }, "demo")
         return _with_source(demo_data.demo_bias(symbol), "demo")
 
     pipeline = system.pipelines.get(symbol)
@@ -570,6 +661,9 @@ async def get_strategy_status(symbol: str):
     """
     system = get_system()
     if not system:
+        if not demo_data.models_symbol(symbol):
+            # No engine, no demo coverage → the OFFLINE checklist, nothing invented.
+            return _with_source(_empty_strategy_status(symbol, f"Unknown symbol: {symbol}"), "demo")
         return _with_source(demo_data.demo_strategy_status(symbol), "demo")
 
     pipeline = system.pipelines.get(symbol)
@@ -579,8 +673,6 @@ async def get_strategy_status(symbol: str):
     trade = system.aggregator.get_active_trade(symbol)
     bias = pipeline.profile_framing.current_bias
     current_price = pipeline.current_price
-    recent_candles = pipeline.candle_builder.get_recent_candles(10)
-    last_candle = recent_candles[-1] if recent_candles else None
 
     # ── Step 1: Profile Framing ──
     step_profile = {
@@ -803,11 +895,29 @@ def _empty_strategy_status(symbol: str, reason: str):
     }
 
 
+def _empty_microstructure() -> dict:
+    """The honest snapshot for a symbol the demo generator does not model: the live
+    payload's shape with nothing claimed. The caller tags `source` via _with_source to
+    match its branch (demo-mode empties read "demo", engine-mode empties "engine")."""
+    return {
+        "marketState": "OFFLINE",
+        "session": {"name": "—", "remaining": 0},
+        "absorption": {"level": None, "attempts": 0, "strength": 0, "side": "neutral"},
+        "initiative": {"count": 0, "direction": "none", "strength": 0},
+        "delta": {"cumulative": 0, "direction": 0, "divergence": False},
+        "exhaustion": 0,
+        "patterns": [],
+    }
+
+
 @app.get("/api/orderbook/{symbol}")
 async def get_orderbook(symbol: str, levels: int = Query(default=10, le=25)):
     """Get current orderbook state."""
     system = get_system()
     if not system:
+        if not demo_data.models_symbol(symbol):
+            # The engine's own empty book shape — no invented bids/asks.
+            return _with_source({"bids": [], "asks": [], "imbalance": 0.0}, "demo")
         return _with_source(demo_data.demo_orderbook(symbol), "demo")
 
     pipeline = system.pipelines.get(symbol)
@@ -848,6 +958,10 @@ async def get_delta(
     """Get cumulative delta history, aggregated to requested timeframe."""
     system = get_system()
     if not system:
+        # Demo mode: only honest for symbols the generator models (see get_footprint /
+        # models_symbol) — an unknown symbol gets nothing, not an invented delta series.
+        if not demo_data.models_symbol(symbol):
+            return []
         return demo_data.demo_delta(symbol, tf=tf, range_s=range_s)
 
     pipeline = system.pipelines.get(symbol)
@@ -1094,6 +1208,10 @@ async def get_footprint(
     annotate = {"mode": mode, "threshold": threshold, "equal_tolerance": equal_tolerance}
     system = get_system()
     if not system:
+        # Demo mode: the fill is only honest for symbols the generator models (see
+        # models_symbol) — an unknown symbol gets nothing, not a $1,000 fiction.
+        if not demo_data.models_symbol(symbol):
+            return []
         return _annotate_footprint_bars(demo_data.demo_footprint(symbol, tf=tf, range_s=range_s), **annotate)
     pipeline = system.pipelines.get(symbol)
     if not pipeline:
@@ -1116,6 +1234,8 @@ async def get_tape(symbol: str, count: int = Query(default=60, le=200)):
     """Get recent time & sales trades for initial tape fill."""
     system = get_system()
     if not system:
+        if not demo_data.models_symbol(symbol):
+            return []
         return demo_data.demo_tape_trades(symbol, count=count)
     ticks = system.recent_ticks(symbol, count=count) if hasattr(system, "recent_ticks") else []
     if not ticks:
@@ -1132,13 +1252,21 @@ async def get_microstructure(symbol: str):
     """Get microstructure snapshot (absorption, initiative, delta, exhaustion, patterns)."""
     system = get_system()
     if not system:
+        if not demo_data.models_symbol(symbol):
+            return _with_source(_empty_microstructure(), "demo")
         return _with_source(demo_data.demo_microstructure(symbol), "demo")
     pipeline = system.pipelines.get(symbol)
     if not pipeline:
+        # Not pipelined (or a venue symbol) → demo fill, but only for symbols the
+        # generator models (see get_footprint); anything else gets the neutral empty.
+        if not demo_data.models_symbol(symbol):
+            return _with_source(_empty_microstructure(), "engine")
         return demo_data.demo_microstructure(symbol)
     snap = _live_microstructure(system, pipeline)
     if snap["delta"]["cumulative"] == 0 and not snap["patterns"] and not pipeline.candle_builder.current_candle:
-        # No live state yet → demo fill, tagged as demo.
+        # No live state yet → demo fill, tagged as demo — same models_symbol rule.
+        if not demo_data.models_symbol(symbol):
+            return _with_source(_empty_microstructure(), "engine")
         return _with_source(demo_data.demo_microstructure(symbol), "demo")
     return snap
 
@@ -1157,7 +1285,7 @@ async def get_stats():
         }
 
     instruments = []
-    for sym, pipeline in system.pipelines.items():
+    for _sym, pipeline in system.pipelines.items():
         instruments.append(pipeline.stats)
 
     return {
@@ -1179,6 +1307,12 @@ async def websocket_endpoint(ws: WebSocket):
     Real-time data stream.
     Clients receive all broadcasts on all channels.
     """
+    # secure2: a websocket handshake is not CORS-gated, so any page the user visits could open
+    # ws://127.0.0.1:PORT/ws and read the stream. The handshake checks its own claims (the
+    # loopback trust boundary above); a cross-origin client is closed before anything is sent.
+    if not is_trusted_ws_handshake(ws.headers):
+        await ws.close(code=1008)
+        return
     await ws_manager.connect(ws)
     try:
         # Send initial state snapshot

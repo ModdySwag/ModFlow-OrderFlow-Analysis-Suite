@@ -22,6 +22,7 @@ Two honest notes:
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -83,10 +84,17 @@ def classify_side(price: float, mid: Optional[float], tick_side: Any = None) -> 
 
 
 def _num(value: Any, default: float = 0.0) -> float:
+    """A finite float, or ``default``.
+
+    ``json`` accepts the bare tokens ``NaN``/``Infinity``, and a comparison like ``x <= 0``
+    cannot catch them (every comparison with NaN is False) — so the mere conversion is not
+    enough; a non-finite venue value must fall back here, before it can reach anything.
+    """
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return default
+    return number if math.isfinite(number) else default
 
 
 # ──────────────────────────────────────────────

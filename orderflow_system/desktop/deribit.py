@@ -402,7 +402,7 @@ def instruments(currency: str) -> tuple[list[dict[str, Any]], str, bool, int]:
     cached = _INSTRUMENTS_CACHE.get(key)
     if cached is not None:
         return cached["rows"], "", True, cached["skipped"]
-    url = f"{BASE}/get_instruments?currency={currency}&kind=option&expired=false"
+    url = f"{BASE}/get_instruments?currency={urllib.parse.quote(str(currency or '').upper())}&kind=option&expired=false"
     payload, error = get_json(url)
     if error:
         _note_error(error)

@@ -173,9 +173,14 @@ class TelegramConfig:
 
 @dataclass
 class DashboardConfig:
-    """Web dashboard settings."""
+    """Web dashboard settings.
+
+    Loopback by default: this API is unauthenticated, so the standalone pipeline must not put
+    it on the LAN by accident. Expose it deliberately (`host="0.0.0.0"`) only if you mean to,
+    and remember the whole API is then readable by every device on the network.
+    """
     enabled: bool = True
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8080
     log_level: str = "warning"        # uvicorn log level
 
@@ -292,75 +297,98 @@ class Bank:
     volume_profile: VolumeProfileConfig
 
 
-#: One row per asset class. Read the fields as: price tick, aggressive volume,
-#: displacement in ticks, attempts, big-trade filter, delta threshold, initiative
-#: displacement, volume acceleration, levels swept, volume per level, thin-book
-#: threshold, volume decline, session, profile tick — plus sweep window in ms where
-#: a class differs. Attempts (2), declining bars (3) and the 30 s rolling window are
-#: the same everywhere; they stay settable per instrument from the settings view.
+#: One row per asset class. The keys ARE the destination field names, so a row reads as a
+#: partial constructor: min_aggressive_volume and max_price_displacement_ticks go to
+#: AbsorptionConfig; min_delta_threshold, volume_acceleration_min and
+#: min_price_displacement_ticks to InitiativeConfig; min_levels_swept, max_volume_per_level
+#: and thin_book_threshold to SweepConfig; volume_decline_pct to ExhaustionConfig; session
+#: and vp_tick to VolumeProfileConfig — plus sweep window in ms where a class differs.
+#: Attempts (2), declining bars (3) and the 30 s rolling window are the same everywhere;
+#: they stay settable per instrument from the settings view.
 _CONFIG_BANKS: dict[str, dict[str, Any]] = {
-    "index_major": dict(tick_size=0.1, aggressive=40, displacement=2, attempts=2, big_trade=5,
-                        delta=25, initiative_ticks=3, levels=3, per_level=15, thin_book=8,
-                        decline_pct=0.3, session=SessionType.NY_CASH, vp_tick=1.0),
-    "index_large": dict(tick_size=0.1, aggressive=30, displacement=2, attempts=2, big_trade=4,
-                        delta=20, initiative_ticks=3, levels=3, per_level=12, thin_book=6,
-                        decline_pct=0.3, session=SessionType.LONDON, vp_tick=1.0),
-    "index_intl": dict(tick_size=0.1, aggressive=25, displacement=2, attempts=2, big_trade=3,
-                       delta=18, initiative_ticks=3, levels=3, per_level=10, thin_book=5,
-                       decline_pct=0.3, session=SessionType.ASIAN, vp_tick=1.0),
-    "stock": dict(tick_size=0.01, aggressive=20, displacement=2, attempts=2, big_trade=3,
-                  delta=15, initiative_ticks=3, levels=3, per_level=8, thin_book=5,
-                  decline_pct=0.3, session=SessionType.NY_CASH, vp_tick=0.50),
-    "forex_major": dict(tick_size=0.00001, aggressive=20, displacement=2, attempts=2, big_trade=3,
-                        delta=15, initiative_ticks=3, accel=1.4, levels=3, per_level=8,
-                        thin_book=5, decline_pct=0.25, session=SessionType.FULL_DAY, vp_tick=0.0005),
-    "forex_jpy": dict(tick_size=0.001, aggressive=20, displacement=2, attempts=2, big_trade=3,
-                      delta=15, initiative_ticks=3, accel=1.4, levels=3, per_level=8,
-                      thin_book=5, decline_pct=0.25, session=SessionType.FULL_DAY, vp_tick=0.05),
-    "metal_gold": dict(tick_size=0.01, aggressive=30, displacement=3, attempts=2, big_trade=3,
-                       delta=20, initiative_ticks=4, levels=3, per_level=10, thin_book=5,
-                       decline_pct=0.25, session=SessionType.NY_CASH, vp_tick=0.50, sweep_ms=3000),
-    "metal_silver": dict(tick_size=0.001, aggressive=25, displacement=3, attempts=2, big_trade=3,
-                         delta=15, initiative_ticks=4, levels=3, per_level=8, thin_book=5,
-                         decline_pct=0.25, session=SessionType.FULL_DAY, vp_tick=0.05, sweep_ms=3000),
-    "energy": dict(tick_size=0.01, aggressive=30, displacement=3, attempts=2, big_trade=3,
-                   delta=20, initiative_ticks=4, levels=3, per_level=10, thin_book=5,
-                   decline_pct=0.25, session=SessionType.NY_CASH, vp_tick=0.1),
-    "crypto": dict(tick_size=0.01, aggressive=20, displacement=3, attempts=2, big_trade=3,
-                   delta=15, initiative_ticks=4, levels=3, per_level=8, thin_book=5,
-                   decline_pct=0.25, session=SessionType.FULL_DAY, vp_tick=10.0),
+    "index_major": dict(tick_size=0.1, min_aggressive_volume=40, max_price_displacement_ticks=2,
+                        min_attempts=2, big_trade_filter=5, min_delta_threshold=25,
+                        min_price_displacement_ticks=3, min_levels_swept=3, max_volume_per_level=15,
+                        thin_book_threshold=8, volume_decline_pct=0.3,
+                        session=SessionType.NY_CASH, vp_tick=1.0),
+    "index_large": dict(tick_size=0.1, min_aggressive_volume=30, max_price_displacement_ticks=2,
+                        min_attempts=2, big_trade_filter=4, min_delta_threshold=20,
+                        min_price_displacement_ticks=3, min_levels_swept=3, max_volume_per_level=12,
+                        thin_book_threshold=6, volume_decline_pct=0.3,
+                        session=SessionType.LONDON, vp_tick=1.0),
+    "index_intl": dict(tick_size=0.1, min_aggressive_volume=25, max_price_displacement_ticks=2,
+                       min_attempts=2, big_trade_filter=3, min_delta_threshold=18,
+                       min_price_displacement_ticks=3, min_levels_swept=3, max_volume_per_level=10,
+                       thin_book_threshold=5, volume_decline_pct=0.3,
+                       session=SessionType.ASIAN, vp_tick=1.0),
+    "stock": dict(tick_size=0.01, min_aggressive_volume=20, max_price_displacement_ticks=2,
+                  min_attempts=2, big_trade_filter=3, min_delta_threshold=15,
+                  min_price_displacement_ticks=3, min_levels_swept=3, max_volume_per_level=8,
+                  thin_book_threshold=5, volume_decline_pct=0.3,
+                  session=SessionType.NY_CASH, vp_tick=0.50),
+    "forex_major": dict(tick_size=0.00001, min_aggressive_volume=20, max_price_displacement_ticks=2,
+                        min_attempts=2, big_trade_filter=3, min_delta_threshold=15,
+                        min_price_displacement_ticks=3, volume_acceleration_min=1.4,
+                        min_levels_swept=3, max_volume_per_level=8, thin_book_threshold=5,
+                        volume_decline_pct=0.25, session=SessionType.FULL_DAY, vp_tick=0.0005),
+    "forex_jpy": dict(tick_size=0.001, min_aggressive_volume=20, max_price_displacement_ticks=2,
+                      min_attempts=2, big_trade_filter=3, min_delta_threshold=15,
+                      min_price_displacement_ticks=3, volume_acceleration_min=1.4,
+                      min_levels_swept=3, max_volume_per_level=8, thin_book_threshold=5,
+                      volume_decline_pct=0.25, session=SessionType.FULL_DAY, vp_tick=0.05),
+    "metal_gold": dict(tick_size=0.01, min_aggressive_volume=30, max_price_displacement_ticks=3,
+                       min_attempts=2, big_trade_filter=3, min_delta_threshold=20,
+                       min_price_displacement_ticks=4, min_levels_swept=3, max_volume_per_level=10,
+                       thin_book_threshold=5, volume_decline_pct=0.25,
+                       session=SessionType.NY_CASH, vp_tick=0.50, sweep_ms=3000),
+    "metal_silver": dict(tick_size=0.001, min_aggressive_volume=25, max_price_displacement_ticks=3,
+                         min_attempts=2, big_trade_filter=3, min_delta_threshold=15,
+                         min_price_displacement_ticks=4, min_levels_swept=3, max_volume_per_level=8,
+                         thin_book_threshold=5, volume_decline_pct=0.25,
+                         session=SessionType.FULL_DAY, vp_tick=0.05, sweep_ms=3000),
+    "energy": dict(tick_size=0.01, min_aggressive_volume=30, max_price_displacement_ticks=3,
+                   min_attempts=2, big_trade_filter=3, min_delta_threshold=20,
+                   min_price_displacement_ticks=4, min_levels_swept=3, max_volume_per_level=10,
+                   thin_book_threshold=5, volume_decline_pct=0.25,
+                   session=SessionType.NY_CASH, vp_tick=0.1),
+    "crypto": dict(tick_size=0.01, min_aggressive_volume=20, max_price_displacement_ticks=3,
+                   min_attempts=2, big_trade_filter=3, min_delta_threshold=15,
+                   min_price_displacement_ticks=4, min_levels_swept=3, max_volume_per_level=8,
+                   thin_book_threshold=5, volume_decline_pct=0.25,
+                   session=SessionType.FULL_DAY, vp_tick=10.0),
 }
 
 
-def _bank(tick_size: float, aggressive: float, displacement: float, attempts: int,
-          big_trade: float, delta: float, initiative_ticks: float, levels: int,
-          per_level: float, thin_book: float, decline_pct: float, session: SessionType,
-          vp_tick: float, accel: float = 1.5, sweep_ms: int = 2000,
-          bars_declining: int = 3, rolling_window_s: float = 30) -> Bank:
-    """Turn one bank row into sub-configs (kwargs are spelled out at the call sites)."""
+def _bank(tick_size: float, min_aggressive_volume: float, max_price_displacement_ticks: float,
+          min_attempts: int, big_trade_filter: float, min_delta_threshold: float,
+          min_price_displacement_ticks: float, min_levels_swept: int,
+          max_volume_per_level: float, thin_book_threshold: float, volume_decline_pct: float,
+          session: SessionType, vp_tick: float, volume_acceleration_min: float = 1.5,
+          sweep_ms: int = 2000, bars_declining: int = 3, rolling_window_s: float = 30) -> Bank:
+    """Turn one bank row into sub-configs (the row's keys ARE these parameter names)."""
     return Bank(
         tick_size=tick_size,
         absorption=AbsorptionConfig(
-            min_aggressive_volume=aggressive,
-            max_price_displacement_ticks=displacement,
+            min_aggressive_volume=min_aggressive_volume,
+            max_price_displacement_ticks=max_price_displacement_ticks,
             rolling_window_seconds=rolling_window_s,
-            min_attempts=attempts,
-            big_trade_filter=big_trade,
+            min_attempts=min_attempts,
+            big_trade_filter=big_trade_filter,
         ),
         initiative=InitiativeConfig(
-            min_delta_threshold=delta,
-            volume_acceleration_min=accel,
-            min_price_displacement_ticks=initiative_ticks,
+            min_delta_threshold=min_delta_threshold,
+            volume_acceleration_min=volume_acceleration_min,
+            min_price_displacement_ticks=min_price_displacement_ticks,
         ),
         sweep=SweepConfig(
-            min_levels_swept=levels,
-            max_volume_per_level=per_level,
+            min_levels_swept=min_levels_swept,
+            max_volume_per_level=max_volume_per_level,
             max_time_ms=sweep_ms,
-            thin_book_threshold=thin_book,
+            thin_book_threshold=thin_book_threshold,
         ),
         exhaustion=ExhaustionConfig(
             min_bars_declining=bars_declining,
-            volume_decline_pct=decline_pct,
+            volume_decline_pct=volume_decline_pct,
         ),
         volume_profile=VolumeProfileConfig(session=session, tick_size=vp_tick),
     )
@@ -486,9 +514,19 @@ def get_config_for(instrument: Instrument, tick_size: Optional[float] = None) ->
 
     fields = dict(_CONFIG_BANKS[bank_key])
     if spec is not None:
-        for name in ("aggressive", "delta", "levels", "per_level", "thin_book", "decline_pct"):
-            if getattr(spec, name) is not None:
-                fields[name] = getattr(spec, name)
+        # Spec fields keep their short names (a Spec row reads as a diff); this maps them
+        # onto the bank's destination-field keys.
+        for spec_name, bank_name in (
+            ("aggressive", "min_aggressive_volume"),
+            ("delta", "min_delta_threshold"),
+            ("levels", "min_levels_swept"),
+            ("per_level", "max_volume_per_level"),
+            ("thin_book", "thin_book_threshold"),
+            ("decline_pct", "volume_decline_pct"),
+        ):
+            value = getattr(spec, spec_name)
+            if value is not None:
+                fields[bank_name] = value
         if spec.vp_session is not None:
             fields["session"] = spec.vp_session
         if spec.vp_tick is not None:
@@ -765,6 +803,13 @@ DASHBOARD = DashboardConfig()
 
 # Database
 DB_PATH = "orderflow_data.db"
+
+# R4/R5: the session boundary hour (UTC) and the storage retention window. The desktop
+# config's `data` block overrides these at runtime (engine.apply_settings clamps them).
+SESSION_START_HOUR = 0        # a session starts at this UTC hour; 0 = UTC midnight
+RETENTION_DAYS = 7           # tick rows older than this are pruned; 0 keeps everything
+#                              (7 d ~= 2.6 GB at this app's ~376 MB/day; 30 d would be ~11 GB)
+PRUNE_INTERVAL_HOURS = 6     # how often the retention job runs once the engine is up
 
 # Logging
 LOG_LEVEL = "INFO"

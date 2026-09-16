@@ -3,12 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- secure2 sweep: the shell is fully self-contained (every script/style/image is served from
+     this origin; no CDN, no web font, no iframe), so the policy can be tight: nothing loads,
+     connects or posts anywhere except this app. 'unsafe-inline'/'unsafe-eval' are required by
+     the app's own inline boot script and the Studies engine (it compiles pasted modules with
+     new Function) — what this policy still guarantees is that an injected script could not
+     fetch, beacon, or load anything from another host. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'self'">
 <title>ModFlow OrderFlow Analysis Suite</title>
 <link rel="stylesheet" href="/desktop/ui.css">
 <link rel="stylesheet" href="/desktop/modules.css">
 <link rel="stylesheet" href="/desktop/atlas.css">
 <link rel="stylesheet" href="/desktop/themes/dark.css">
 <link rel="stylesheet" href="/desktop/themes/light.css">
+<!-- P60: the app icon (built from assets/modflow-icon-1024.png) as the page/tab icon -->
+<link rel="icon" type="image/png" href="/desktop/app-icon.png">
+<link rel="icon" type="image/x-icon" href="/desktop/app.ico">
 <link rel="stylesheet" href="/desktop/themes/contrast.css">
 <link rel="stylesheet" href="/desktop/themes/accents.css">
 <link rel="stylesheet" href="/desktop/themes/density.css">
@@ -28,10 +38,11 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
     <!-- ═══ Rail ═══ -->
     <aside class="rail">
         <div class="brand">
-            <div class="brand-mark">MF</div>
+            <!-- P62: the rail brand — the mark is the badge icon (not a text tile) and the wording is sentence case -->
+            <img class="brand-mark" src="/desktop/brand-icon.png" alt="ModFlow" width="32" height="32">
             <div class="brand-text">
                 <span class="brand-name">ModFlow</span>
-                <span class="brand-sub">OrderFlow Analysis Suite</span>
+                <span class="brand-sub">Orderflow Analysis Suite</span>
             </div>
         </div>
 
@@ -75,6 +86,9 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
         <nav id="menuBar" class="menubar" role="menubar" aria-label="Application menu"></nav>
         <header class="topbar">
       <button id="menuBtn" class="menu-btn" aria-haspopup="true" aria-expanded="false" title="Main menu (/) — workspaces, panels by purpose, free data connections">☰</button>
+      <!-- §73: the widget-window control (desktop app only). windows-ui.js fills it in Classic
+           mode; the terminal bar carries its own copy, so exactly one is ever visible. -->
+      <span class="top-wins" id="topWins"></span>
       <span class="brand-mini">ModFlow</span>
             <div class="symbol-picker">
                 <label for="symbolSelect">Instrument</label>
@@ -154,6 +168,13 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                         <div class="field"><label>Overlays</label><div class="row">
                             <label class="switch"><input type="checkbox" id="ovMarkers" checked> markers</label>
                             <label class="switch"><input type="checkbox" id="ovVP" checked> value area</label></div></div>
+                        <div class="field"><label>Bars</label><select id="chartMode" title="Bar expression: delta-tinted body, split candle, heat body, wick-only, or the plain candles. Split candles need pixels inside the range and the vendor chart cannot draw them — the legend says so.">
+                            <option value="default">candles</option><option value="delta">delta tint</option>
+                            <option value="split">split candle</option><option value="heat">heat body</option>
+                            <option value="wick">wick only</option></select></div>
+                        <div class="field"><label>Palette</label><select id="chartPalette" title="Colour vocabulary for the candles and the delta lane: the theme pair, or a two-hue set measured for a colour vision deficiency.">
+                            <option value="theme">theme</option><option value="deutan">deutan-safe</option>
+                            <option value="protan">protan-safe</option><option value="tritan">tritan-safe</option></select></div>
                     </div>
                 </div>
                 <div class="grid cols-4">
@@ -163,6 +184,7 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                     <div class="kpi" id="chBias"><span class="kpi-label">Daily bias</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
                 </div>
                 <div class="card"><div class="card-head"><span class="card-title">Price action</span><div class="spacer"></div>
+                    <span class="dim" id="chartExpr"></span>
                     <span class="dim" id="chartStatus"></span></div>
                     <div class="card-body"><div class="chart-wrap" id="chart"></div></div>
                 </div>
@@ -245,7 +267,14 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                     <button id="ofxApply">Apply</button>
                     <label>min block <input id="ofxMinBlock" type="number" step="5" min="0" style="width:70px" title="hide execution blocks below this size"><span class="ofx-hidden" id="ofxHiddenBlocks"></span></label>
                     <label>VA % <input id="ofxVaPct" type="number" step="0.05" min="0.5" max="0.95" style="width:70px" title="share of the candle that counts as the value area"></label>
-                    <label title="classic: blue-to-red by magnitude. thermal: slate-to-gold, monotonic in heat, with the baseline desaturated so sized cells stand out on their own.">ramp <select id="ofxRamp">
+                    <label title="How each bar is expressed: the footprint default, a delta-tinted body, a split candle (sell left / buy right), a heat-gradient body, or wick + footprint only. The legend under the stage names whichever is active.">bars <select id="ofxMode" title="Bar expression mode">
+                        <option value="default">default</option><option value="delta">delta tint</option>
+                        <option value="split">split candle</option><option value="heat">heat body</option>
+                        <option value="wick">wick + footprint</option></select></label>
+                    <label title="Colour vocabulary: the theme's own green/red pair, or a two-hue set chosen and MEASURED for a colour vision deficiency (expression.selftest.js simulates each palette under protanopia, deuteranopia and tritanopia).">palette <select id="ofxPalette" title="Colour palette (theme or a colour-blind-safe pair)">
+                        <option value="theme">theme</option><option value="deutan">deutan-safe</option>
+                        <option value="protan">protan-safe</option><option value="tritan">tritan-safe</option></select></label>
+                    <label title="Depth-heat ramp behind the matrix. Both ramps are monotone in luminance — magnitude never rides on hue alone — and the engine's selftest measures that.">ramp <select id="ofxRamp">
                         <option value="classic">classic</option><option value="thermal">thermal</option></select></label>
                     <button id="ofxSnap" class="ofx-chip">● live</button>
                     <button id="ofxFit" class="ofx-chip" title="Show the whole session in view (double-clicking the stage does the same)">⤢ fit</button>
@@ -521,19 +550,23 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
             <!-- ── Alerts ── -->
             <section class="view" data-view="alerts" data-surface="alerts">
                 <div class="view-head"><div class="view-title">Order-flow alerts</div>
-                    <div class="view-sub">rules over every detection · per-rule thresholds, channels and cooldowns</div>
+                    <div class="view-sub">rules over every detection · what each one watches, in words, and where it goes</div>
                     <div class="grow"></div>
                     <label class="switch"><input type="checkbox" id="alSound" checked> sound</label>
                     <label class="switch"><input type="checkbox" id="alAuto" checked> auto-refresh</label>
                     <button class="btn small" id="alClear">Clear log</button></div>
+                <div id="alBanner"></div>
                 <div class="card"><div class="card-head"><span class="card-title">Alert log</span><div class="spacer"></div>
                     <span class="dim" id="alStats">--</span></div>
                     <div class="card-body" style="padding:0"><table class="data" id="alertTable">
-                        <thead><tr><th>Time</th><th>Severity</th><th>Kind</th><th>Symbol</th><th>Message</th></tr></thead><tbody></tbody></table></div></div>
+                        <thead><tr><th>Time</th><th>Severity</th><th>Kind</th><th>Symbol</th><th>Level</th><th>Size</th><th>Why</th></tr></thead><tbody></tbody></table></div></div>
                 <div class="card"><div class="card-head"><span class="card-title">Rules</span><div class="spacer"></div>
-                    <button class="btn small" id="alSave">Save rules</button></div>
+                    <label class="switch" title="rules the depth map's alert buttons created — their id starts with hm-"><input type="checkbox" id="alOnlyHm"> created from heatmap</label>
+                    <label class="switch"><input type="checkbox" id="alOnlyOn"> enabled only</label>
+                    <span class="dim" id="alRuleCount">--</span>
+                    <button class="btn small" id="alNewRule" title="start a rule by hand — it opens the same editor the heatmap's rules use">+ New rule</button></div>
                     <div class="card-body" style="padding:0"><table class="data" id="ruleTable">
-                        <thead><tr><th>On</th><th>Name</th><th>Kind</th><th>Params (JSON)</th><th>Cooldown s</th><th>Fired</th></tr></thead><tbody></tbody></table></div></div>
+                        <thead><tr><th>On</th><th>Rule</th><th>Fired</th><th></th></tr></thead><tbody></tbody></table></div></div>
                 <div class="card"><div class="card-head"><span class="card-title">Persisted history</span><div class="spacer"></div>
                     <span class="dim" id="histStats">--</span>
                     <button class="btn small" id="histReload">Reload</button></div>
@@ -739,7 +772,7 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                 <div class="card"><div class="card-head"><span class="card-title">Engine log</span><div class="spacer"></div>
                     <select id="logLevel"><option value="">all levels</option><option>INFO</option><option>WARNING</option><option>ERROR</option></select>
                     <label class="switch"><input type="checkbox" id="logAuto" checked> auto-refresh</label>
-                    <button class="btn small" id="btnLogClear">Clear</button></div>
+                    <button class="btn small" id="btnLogClear">Clear</button><span class="dim" id="logStorage" style="margin-left:8px" title="Database size, retention and the last prune — the data block in the config file owns the numbers.">storage: —</span></div>
                     <div class="card-body" style="padding:0"><div class="log-list" id="logList"><div class="dim">No log lines yet.</div></div></div>
                 </div>
             </section>
@@ -805,6 +838,19 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
 <script src="/static/microstructure.js"></script>
 <script src="/desktop/ui.js"></script>
 <script src="/desktop/theme.js"></script>
+<script src="/desktop/keys.js"></script>
+<script src="/desktop/freshness.js"></script>
+<!-- freshness.js owns the AGE of what every panel displays (P1-10): panels stamp their newest
+     sample into it and it paints one chip per view-head, aging on its own 1 s tick. -->
+<!-- keys.js is the app's one shortcut map: every module that registers a binding calls
+     OFAPKEYS.bind at parse time, and the hotkey sheet renders from OFAPKEYS.list(), so a key and
+     its documentation cannot drift. Keep this tag ahead of menu.js, pause.js, atlas.js,
+     heatmap-pro.js, ofx-view.js, strips.js, drawings.js, menubar.js and shell.js; search.js
+     (injected later) registers too. -->
+<!-- alert-format.js is pure (a rule in, words out) and atlas.js reads OFAPALERTS when it renders the
+     Alerts card, so this tag must stay ahead of atlas.js. test_alert_format.py pins the order. -->
+<script src="/desktop/alert-format.js"></script>
+<script src="/desktop/expression.js"></script>
 <script src="/desktop/atlas.js"></script>
 <!-- The arbiter must be parsed BEFORE atlas-v2.js runs its loader: that loader injects the rest of
      the modules (intent.js among them) and its guard looks for this exact attribute. With the tag
@@ -823,6 +869,7 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
 <script src="/desktop/drawings.js"></script>
 <script src="/desktop/menubar.js"></script>
 <script src="/desktop/shell.js"></script>
+<script src="/desktop/windows-ui.js"></script>
 <script src="/desktop/links.js"></script>
 <script src="/desktop/bus.js"></script>
 <script src="/desktop/watchlist.js"></script>

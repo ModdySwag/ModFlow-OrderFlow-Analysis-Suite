@@ -15,11 +15,28 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
 
 UI = Path(__file__).parent / "desktop" / "ui"
 INDEX = UI / "index.html"
 ROOT = Path(__file__).resolve().parents[1]
+
+_APP = None
+
+
+def _desktop_app():
+    """The desktop app for the served-page checks.
+
+    `build_app()` may run once per process: the FastAPI app it decorates is a module-level
+    singleton, and a second `add_middleware` raises "Cannot add middleware after an application
+    has started" once any client has exercised it. Both served-page tests share this build, so
+    they hold in any order.
+    """
+    global _APP
+    if _APP is None:
+        from orderflow_system.desktop.launcher import build_app
+
+        _APP = build_app(8099)
+    return _APP
 
 
 def _html() -> str:
@@ -157,7 +174,8 @@ def test_ordering_the_modules_depend_on():
 def test_the_audit_lists_every_panel_module():
     """A module the audit does not scan is a module whose element ids are unchecked."""
     audit = (ROOT / "scripts" / "audit_ui_refs.py").read_text(encoding="utf-8", errors="replace")
-    for panel in ("watchlist.js", "news.js", "options.js", "fundamentals.js", "shell.js", "links.js", "bus.js"):
+    for panel in ("watchlist.js", "news.js", "options.js", "fundamentals.js", "shell.js", "links.js", "bus.js",
+                  "keys.js", "freshness.js"):
         assert f'"{panel}"' in audit, f"{panel} is missing from JS_FILES"
 
 
@@ -174,3 +192,120 @@ def test_panels_scope_their_section_lookup_to_the_view_element():
                 offenders.append(name)
                 break
     assert not offenders, f"section lookup not scoped to .view: {offenders}"
+
+# ──────────────────────────────────────────────────────────────
+# P3-3 (R7): the legacy page is retired behind the desktop shell
+# ──────────────────────────────────────────────────────────────
+
+# ──────────────────────────────────────────────
+# secure2 sweep: the shell's Content-Security-Policy
+# ──────────────────────────────────────────────
+
+def test_the_shell_carries_a_csp_that_forbids_remote_hosts():
+    """The shell is self-contained (every script/style/image is same-origin, no CDN, no web
+    font, no iframe), so its CSP must not allow any remote target — while keeping the two
+    allowances the app genuinely needs: the inline pre-paint boot script and the Studies
+    engine's `new Function` compilation of user-pasted modules."""
+    import re as _re
+
+    match = _re.search(r'http-equiv="Content-Security-Policy"\s+content="([^"]+)"', _html())
+    assert match, "the shell lost its Content-Security-Policy"
+    policy = match.group(1)
+    for directive in ("default-src 'self'", "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+                      "style-src 'self' 'unsafe-inline'", "object-src 'none'",
+                      "frame-src 'none'", "base-uri 'none'", "form-action 'self'"):
+        assert directive in policy, f"CSP lost {directive!r}: {policy}"
+    for loopback_ws in ("ws://127.0.0.1:*", "ws://localhost:*"):
+        assert loopback_ws in policy, f"CSP must allow the app's own stream {loopback_ws!r}: {policy}"
+    # the only permitted wildcard is the loopback WS port; everything else is closed
+    without_ws = _re.sub(r"ws://[^;\s]+", "", policy)
+    assert "*" not in without_ws, f"a non-loopback wildcard crept into the CSP: {policy}"
+    assert "http:" not in without_ws and "https:" not in without_ws, \
+        f"a remote source crept into the CSP: {policy}"
+
+
+# ──────────────────────────────────────────────
+# secure2 sweep — the loopback request guard's wiring (behaviour lives in test_request_guard)
+# ──────────────────────────────────────────────
+
+def test_the_app_registers_the_loopback_request_guard_middleware():
+    """The guard must be attached at app level, not only mentioned: a rebinding Host or a
+    cross-site mutation is refused before any endpoint runs (test_request_guard.py pins the
+    behaviour; this pins that the middleware is actually in the stack)."""
+    from orderflow_system.dashboard.app import LocalRequestGuard
+
+    app = _desktop_app()
+    stacks = [entry for entry in app.user_middleware if entry.cls is LocalRequestGuard]
+    assert stacks, "LocalRequestGuard is not in the application middleware stack"
+
+
+def test_the_repo_ships_a_security_policy():
+    """A public release needs a disclosure path: without SECURITY.md, a reporter's only
+    obvious door is a public issue — the worst place for a live vulnerability."""
+    policy = ROOT / "SECURITY.md"
+    assert policy.is_file(), "SECURITY.md (responsible disclosure) is missing"
+    text = policy.read_text(encoding="utf-8")
+    assert "Report a vulnerability" in text, "SECURITY.md must name the private reporting route"
+    assert "127.0.0.1" in text, "SECURITY.md must state the loopback-only model"
+
+
+def test_legacy_root_redirects_to_the_desktop_shell():
+    """`GET /` must hand the browser to /desktop (307, method-preserving), and /desktop must
+    answer with the desktop shell itself — the legacy terminal page is no longer the front
+    door. The redirect is one block in launcher.build_app, reversible by deleting it."""
+    from fastapi.testclient import TestClient
+
+    client = TestClient(_desktop_app())
+    res = client.get("/", follow_redirects=False)
+    assert res.status_code == 307, res.status_code
+    assert res.headers.get("location") == "/desktop"
+
+    shell = client.get("/desktop", follow_redirects=True)
+    assert shell.status_code == 200
+    assert "ModFlow OrderFlow Analysis Suite" in shell.text
+    assert "Orderflow Trading Terminal" not in shell.text
+# ──────────────────────────────────────────────────────────────
+# P62: the rail brand — the mark is the badge icon, the wording reads sentence case
+# ──────────────────────────────────────────────────────────────
+
+def test_rail_brand_mark_is_the_badge_icon_and_the_wording_reads_sentence_case():
+    """P62: the rail's top-left mark is the badge icon asset (a real file, served by the desktop
+    mount) instead of the old text tile, and the subtitle is sentence case — the all-caps
+    transform is gone from the stylesheet that styles it."""
+    page = _html()
+    assert 'class="brand-mark" src="/desktop/brand-icon.png"' in page
+    assert ">MF<" not in page, "the rail mark is the icon now; a text tile is a regression"
+    assert '<span class="brand-sub">Orderflow Analysis Suite</span>' in page
+    assert (UI / "brand-icon.png").is_file(), "the mark must be a real asset on disk"
+
+    css = (UI / "ui.css").read_text(encoding="utf-8", errors="replace")
+    sub_rule = css.split(".brand-sub", 1)[1].split("}", 1)[0]
+    assert "uppercase" not in sub_rule, "the rail sub must read sentence case (P62 wording modernisation)"
+
+    from fastapi.testclient import TestClient
+
+    res = TestClient(_desktop_app()).get("/desktop/brand-icon.png")
+    assert res.status_code == 200, res.status_code
+    # The bytes, not the header: on Windows the served content-type comes from the host's MIME
+    # database (mimetypes reads HKCR — a host whose ".png\Content Type" is empty makes 3.11 answer
+    # application/octet-stream while 3.12 falls back to image/png), so byte identity is both the
+    # stronger check and the host-independent one.
+    assert res.content == (UI / "brand-icon.png").read_bytes(), "the mount serves the mark itself"
+
+
+def test_unknown_symbols_serve_nothing_from_the_demo_fillers():
+    """v0.1b Tier 8 #2: with no engine running, /api/footprint and /api/tape must serve an
+    UNKNOWN symbol NOTHING — not the old invented $1,000 chart. The models_symbol guard
+    applies to the no-engine branch exactly as it does to the warming branch (an engine
+    running with a symbol that has not printed yet). Modeled symbols keep their demo fill."""
+    from fastapi.testclient import TestClient
+
+    client = TestClient(_desktop_app())
+
+    assert client.get("/api/footprint/UNKNOWNXYZ").json() == [], "no invented chart"
+    assert client.get("/api/tape/UNKNOWNXYZ?count=5").json() == [], "no invented prints"
+
+    # the demo fill itself must not regress for symbols the generator models
+    assert len(client.get("/api/footprint/BTCUSDT").json()) > 0
+    assert len(client.get("/api/tape/BTCUSDT?count=5").json()) > 0
+
