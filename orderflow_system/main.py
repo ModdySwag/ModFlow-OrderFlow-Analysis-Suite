@@ -44,6 +44,9 @@ from orderflow_system.data.models import (
     Tick, Candle, Signal, OrderbookSnapshot,
 )
 from orderflow_system.data.bybit_feed import BybitFeed
+from orderflow_system.data.binance_feed import BinanceFeed
+from orderflow_system.data.hyperliquid_feed import HyperliquidFeed
+from orderflow_system.data.okx_feed import OkxFeed
 from orderflow_system.data.mt5_feed import MT5Feed
 from orderflow_system.data.candle_builder import CandleBuilder
 from orderflow_system.data.database import Database
@@ -323,6 +326,40 @@ class OrderflowSystem:
             )
             feed_tasks.append(self.feed.start())
             logger.info(f"Bybit feed configured: {symbols}")
+
+        if self.data_source in (DataSource.BINANCE,):
+            # ── Binance USDⓈ-M futures Feed ──
+            # Same callback contract as the Bybit feed (trades + L2 book), so every downstream
+            # consumer — pipelines, the atlas hub, the heatmap — is source-agnostic.
+            self.feed = BinanceFeed(
+                symbols=symbols,
+                on_tick=self._on_tick,
+                on_orderbook=self._on_orderbook,
+            )
+            feed_tasks.append(self.feed.start())
+            logger.info(f"Binance feed configured: {symbols}")
+
+        if self.data_source in (DataSource.HYPERLIQUID,):
+            # ── Hyperliquid perpetuals Feed ──
+            # Same callback contract as the Bybit and Binance feeds (trades + book snapshots), so
+            # every downstream consumer — pipelines, the atlas hub, the heatmap — is source-agnostic.
+            self.feed = HyperliquidFeed(
+                symbols=symbols,
+                on_tick=self._on_tick,
+                on_orderbook=self._on_orderbook,
+            )
+            feed_tasks.append(self.feed.start())
+            logger.info(f"Hyperliquid feed configured: {symbols}")
+
+        if self.data_source in (DataSource.OKX,):
+            # ── OKX USDT swaps Feed ──
+            self.feed = OkxFeed(
+                symbols=symbols,
+                on_tick=self._on_tick,
+                on_orderbook=self._on_orderbook,
+            )
+            feed_tasks.append(self.feed.start())
+            logger.info(f"OKX feed configured: {symbols}")
 
         if self.data_source in (DataSource.ALPACA, DataSource.ALL):
             # ── Alpaca Markets Feed (US equities/ETFs/options + crypto) ──

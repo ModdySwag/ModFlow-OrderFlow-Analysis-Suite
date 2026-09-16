@@ -23,7 +23,7 @@ from typing import Any, Iterable
 
 # Roots of the config that hold display variables. A leaf under these roots that is not registered
 # fails the test suite, so nothing display-relevant can be forgotten.
-DISPLAY_ROOTS: tuple[str, ...] = ("ofx", "atlas", "risk", "studies.data_box", "search.default_view")
+DISPLAY_ROOTS: tuple[str, ...] = ("ofx", "atlas", "risk", "audio", "studies.data_box", "search.default_view")
 
 # Keys under those roots that are deliberately not display variables.
 NOT_DISPLAY: frozenset[str] = frozenset({
@@ -290,6 +290,27 @@ PARAMS: tuple[Param, ...] = (
       choices=("overview", "chart", "heatmap", "orderflow", "ofx", "depth", "tape", "cvd", "profile",
                "frames", "scanner", "trackers", "signals"),
       meaning="Where the command palette takes you when you press Enter on a symbol."),
+    # Trade audio — the tape you can hear. The Tape view owns these because prints are what they
+    # speak about; the master switch is off until it is turned on here.
+    P("audio.enabled", "Trade audio", "Audio", "tape", kind="bool",
+      meaning="Play a sound for qualifying prints on the active instrument. Off by default."),
+    P("audio.volume", "Volume", "Audio", "tape", minimum=0.0, maximum=1.0, step=0.05,
+      meaning="Master gain, applied on top of the overlap attenuation."),
+    P("audio.min_size", "Min print size", "Audio", "tape", minimum=0.0, maximum=1_000_000.0,
+      step=0.001, unit="base", meaning="Prints smaller than this stay silent. 0 = every print the "
+                                       "feed publishes (the tick channel is throttled to 5/s)."),
+    P("audio.hard_multiple", "Hard alert at", "Audio", "tape", minimum=1.0, maximum=50.0, step=0.5,
+      unit="x", meaning="A print at least this multiple of the minimum plays the two-tone alert "
+                        "instead of the single blip."),
+    P("audio.hard_enabled", "Two-tone alert", "Audio", "tape", kind="bool",
+      meaning="Use the loud sample for oversized prints at all."),
+    P("audio.active_symbol_only", "Symbol box only", "Audio", "tape", kind="bool",
+      meaning="Follow the selected instrument rather than every enabled one — the desk hears what "
+              "it is looking at."),
+    P("audio.overlap_window_ms", "Overlap window", "Audio", "tape", minimum=0, maximum=5000, step=5,
+      unit="ms", meaning="A retrigger inside this window is attenuated rather than stacked."),
+    P("audio.overlap_floor", "Overlap floor", "Audio", "tape", minimum=0.01, maximum=1.0, step=0.01,
+      meaning="Quietest share of full gain the attenuation can reach."),
 )
 
 BY_PATH: dict[str, Param] = {p.path: p for p in PARAMS}

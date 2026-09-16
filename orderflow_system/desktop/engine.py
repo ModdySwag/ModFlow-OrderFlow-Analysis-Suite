@@ -43,6 +43,48 @@ def bybit_capable(spec: dict[str, Any]) -> bool:
     """
     return bool(spec.get("bybit_symbol")) or spec.get("symbol") in BYBIT_SUPPORTED
 
+
+def binance_capable(spec: dict[str, Any]) -> bool:
+    """Can the Binance USDⓈ-M feed serve this instrument?
+
+    Offline rule: Binance futures lists the same USDT perpetuals this suite ships (a config added
+    from the venue catalogue proves itself with `binance_symbol`). The live check is
+    `/api/control/capabilities?refresh=true`, which asks exchangeInfo and reports per symbol.
+    """
+    if spec.get("binance_symbol"):
+        return True
+    symbol = str(spec.get("symbol") or "").upper()
+    return symbol in BYBIT_SUPPORTED or symbol.endswith("USDT")
+
+
+def hyperliquid_capable(spec: dict[str, Any]) -> bool:
+    """Can the Hyperliquid feed serve this instrument?
+
+    Offline rule: the venue trades crypto perpetuals, and this suite's USDT instruments map onto
+    its coins by stripping the quote suffix (a config added from the venue catalogue proves itself
+    with `hyperliquid_symbol`). The live check is `/api/control/capabilities?refresh=true`, which
+    reads the venue's meta listing and reports per symbol.
+    """
+    if spec.get("hyperliquid_symbol"):
+        return True
+    symbol = str(spec.get("symbol") or "").upper()
+    return symbol in BYBIT_SUPPORTED or symbol.endswith("USDT")
+
+
+def okx_capable(spec: dict[str, Any]) -> bool:
+    """Can the OKX feed serve this instrument?
+
+    Offline rule: OKX lists the same USDT swaps this suite ships (a config added from the venue
+    catalogue proves itself with `okx_symbol`). The live check is
+    `/api/control/capabilities?refresh=true`, which reads the venue's instruments listing and
+    reports per symbol.
+    """
+    if spec.get("okx_symbol"):
+        return True
+    symbol = str(spec.get("symbol") or "").upper()
+    return symbol in BYBIT_SUPPORTED or symbol.endswith("USDT")
+
+
 _BASE_CONFIGS: dict[str, InstrumentConfig] = {}
 
 
@@ -209,6 +251,39 @@ def bybit_validate(symbols: list[str]) -> dict[str, bool]:
             logger.warning("Bybit symbol check failed for %s: %s", sym, exc)
             result[sym] = False
     return result
+
+
+def binance_validate(symbols: list[str]) -> dict[str, bool]:
+    """Ask Binance which of these symbols exist as USDⓈ-M perpetuals (one exchangeInfo call).
+
+    Delegates to the feed module so the check has exactly one implementation, and the capability
+    block cannot drift from what the adapter will actually accept.
+    """
+    from orderflow_system.data.binance_feed import BinanceFeed
+
+    return BinanceFeed.validate_symbols(list(symbols))
+
+
+def hyperliquid_validate(symbols: list[str]) -> dict[str, bool]:
+    """Ask the Hyperliquid meta listing which of these symbols actually trade here (one call).
+
+    Delegates to the feed module so the check has exactly one implementation, and the capability
+    block cannot drift from what the adapter will actually accept.
+    """
+    from orderflow_system.data.hyperliquid_feed import HyperliquidFeed
+
+    return HyperliquidFeed.validate_symbols(list(symbols))
+
+
+def okx_validate(symbols: list[str]) -> dict[str, bool]:
+    """Ask OKX which of these symbols exist as live USDT swaps (one instruments call).
+
+    Delegates to the feed module so the check has exactly one implementation, and the capability
+    block cannot drift from what the adapter will actually accept.
+    """
+    from orderflow_system.data.okx_feed import OkxFeed
+
+    return OkxFeed.validate_symbols(list(symbols))
 
 
 def alpaca_capability_block(cfg: dict[str, Any], report: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -535,9 +610,20 @@ async def _wire_atlas(system, cfg: dict) -> Any:
 
 
 async def _start_atlas_extras(system) -> None:
-    """Start the extra Bybit streams for the instruments Bybit can actually serve."""
+    """Start the extra Bybit streams for the instruments Bybit can actually serve.
+
+    Only when Bybit is the *primary* source: the extras book is a Bybit book, and folding it into a
+    heatmap fed by another venue's trades would show one venue's depth under another's prints. The
+    Binance, Hyperliquid and OKX sources each carry their own depth (Binance deeper than Bybit's
+    200 levels), so nothing is lost when this is skipped.
+    """
     hub = getattr(system, "_atlas_hub", None)
     if hub is None:
+        return
+    data_source = getattr(system, "data_source", None)
+    source = str(getattr(data_source, "value", data_source) or "")
+    if source in ("binance", "hyperliquid", "okx"):
+        logger.info("the reference layout extras: skipped — the %s source carries its own depth", source)
         return
     symbols: dict[str, float] = {}
     for pipeline in system.pipelines.values():

@@ -86,6 +86,9 @@ class ProfileShape(Enum):
 class DataSource(Enum):
     """Data feed source selection."""
     BYBIT = "bybit"              # Bybit perpetual futures (free WebSocket)
+    BINANCE = "binance"          # Binance USDⓈ-M futures (free WebSocket + REST snapshots)
+    HYPERLIQUID = "hyperliquid" # Hyperliquid perpetuals (free WebSocket: trades + whole-book snapshots)
+    OKX = "okx"                  # OKX USDT swaps (free WebSocket: trades + 400-level book)
     MT5 = "mt5"                  # MetaTrader 5 terminal (real broker data)
     BOTH = "both"                # Exchange + MT5 simultaneously
     ALPACA = "alpaca"            # Alpaca Markets: US equities/ETFs/options/crypto
@@ -771,11 +774,14 @@ FOOTPRINT_MIN_PRINT_SIZE: float = 0.0
 
 # ── Data Source ──
 # Change this to select your data feed:
-#   DataSource.MT5    → Use MetaTrader 5 (real broker data for NAS100, XAUUSD)
-#   DataSource.BYBIT  → Use Bybit perpetuals (free crypto data)
-#   DataSource.BOTH   → Run the exchange and MT5 feeds simultaneously
-#   DataSource.ALPACA → Use Alpaca Markets (US equities, ETFs, options, crypto)
-#   DataSource.ALL    → Run every configured source at once
+#   DataSource.MT5         → Use MetaTrader 5 (real broker data for NAS100, XAUUSD)
+#   DataSource.BYBIT       → Use Bybit perpetuals (free crypto data)
+#   DataSource.BINANCE     → Use Binance USDⓈ-M futures (free crypto data)
+#   DataSource.HYPERLIQUID → Use Hyperliquid perpetuals (free crypto data)
+#   DataSource.OKX         → Use OKX USDT swaps (free crypto data)
+#   DataSource.BOTH        → Run the exchange and MT5 feeds simultaneously
+#   DataSource.ALPACA      → Use Alpaca Markets (US equities, ETFs, options, crypto)
+#   DataSource.ALL         → Run every configured source at once
 DATA_SOURCE = DataSource.MT5
 
 # ── MT5 Configuration ──

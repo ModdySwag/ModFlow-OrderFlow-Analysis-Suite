@@ -11,6 +11,7 @@ from __future__ import annotations
 import time
 
 import asyncio
+import datetime as dt
 import json
 import logging
 import re
@@ -89,6 +90,9 @@ async def capabilities(refresh: bool = Query(default=False)) -> dict[str, Any]:
     if refresh:
         symbols = [i["symbol"] for i in config_store.load_config()["instruments"]]
         caps["bybit_symbols"] = await asyncio.to_thread(engine_mod.bybit_validate, symbols)
+        caps["binance_symbols"] = await asyncio.to_thread(engine_mod.binance_validate, symbols)
+        caps["hyperliquid_symbols"] = await asyncio.to_thread(engine_mod.hyperliquid_validate, symbols)
+        caps["okx_symbols"] = await asyncio.to_thread(engine_mod.okx_validate, symbols)
         caps["validated"] = True
     return caps
 
@@ -115,6 +119,24 @@ async def datasources() -> dict[str, Any]:
             "reason": "Public Bybit perpetuals — crypto instruments only",
             "symbols": [s for s in symbols
                         if engine_mod.bybit_capable(config_store.instrument_cfg(cfg, s) or {"symbol": s})],
+        },
+        "binance": {
+            "usable": True,
+            "reason": "Public Binance USDⓈ-M futures — crypto perpetuals only",
+            "symbols": [s for s in symbols
+                        if engine_mod.binance_capable(config_store.instrument_cfg(cfg, s) or {"symbol": s})],
+        },
+        "hyperliquid": {
+            "usable": True,
+            "reason": "Public Hyperliquid perpetuals — crypto instruments only",
+            "symbols": [s for s in symbols
+                        if engine_mod.hyperliquid_capable(config_store.instrument_cfg(cfg, s) or {"symbol": s})],
+        },
+        "okx": {
+            "usable": True,
+            "reason": "Public OKX USDT swaps — crypto instruments only",
+            "symbols": [s for s in symbols
+                        if engine_mod.okx_capable(config_store.instrument_cfg(cfg, s) or {"symbol": s})],
         },
     }
 
@@ -320,20 +342,29 @@ async def studies_save(payload: dict = Body(default={})) -> dict[str, Any]:
 FREE_SOURCES = (
     ("bybit", "Bybit", "public WS + REST — trades, order book depth, candles, no key",
      "https://api.bybit.com/v5/market/time", True),
+    ("binance", "Binance Futures", "public WS + REST — trades, 100–1000-level book, candles, no key",
+     "https://fapi.binance.com/fapi/v1/time", True),
     ("mt5", "MetaTrader 5", "your local terminal — free if it is installed here", "", True),
     ("alpaca", "Alpaca crypto", "keyless crypto quotes and bars (no book)",
      "https://data.alpaca.markets/v1beta3/crypto/us/latest/quotes?symbols=BTC%2FUSD", True),
-    ("binance", "Binance Futures", "public market data — reachable, no feed adapter in this build yet",
-     "https://fapi.binance.com/fapi/v1/time", False),
-    ("okx", "OKX", "public market data — reachable, no feed adapter in this build yet",
-     "https://www.okx.com/api/v5/public/time", False),
-    ("hyperliquid", "Hyperliquid", "public API — reachable, no feed adapter in this build yet",
-     "https://api.hyperliquid.xyz/info", False),
+    ("okx", "OKX", "public WS + REST — trades, 400-level book, no key",
+     "https://www.okx.com/api/v5/public/time", True),
+    ("hyperliquid", "Hyperliquid", "public WS + REST — trades, whole-book snapshots, no key",
+     "https://api.hyperliquid.xyz/info", True),
 )
 
+#: POST-only probe bodies: Hyperliquid's `/info` answers a bare GET with 405, so a plain GET probe
+#: would paint the venue "unreachable" while it is healthy. The probe then sends what the adapter
+#: itself sends (one `meta` call).
+_PROBE_PAYLOADS = {"hyperliquid": {"type": "meta"}}
 
-def _probe_source(url: str, timeout: float = 4.0) -> str:
-    """ok / unreachable / installed — a reachability fact, never a guess about capability."""
+
+def _probe_source(url: str, timeout: float = 4.0, payload: Optional[dict] = None) -> str:
+    """ok / unreachable / installed — a reachability fact, never a guess about capability.
+
+    ``payload`` is for POST-only endpoints (see `_PROBE_PAYLOADS`): the probe then makes the same
+    request the adapter makes, instead of a GET the venue answers with 405.
+    """
     if not url:
         try:
             import importlib
@@ -343,7 +374,11 @@ def _probe_source(url: str, timeout: float = 4.0) -> str:
             return "idle"
     try:
         import urllib.request
-        req = urllib.request.Request(url, headers={"User-Agent": "OrderFlow-Analysis-Pro"})
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        headers = {"User-Agent": "OrderFlow-Analysis-Pro"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, headers=headers)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return "ok" if 200 <= getattr(resp, "status", 200) < 400 else "unreachable"
     except Exception:
@@ -356,7 +391,8 @@ async def sources() -> dict[str, Any]:
     cfg = config_store.load_config()
     active = str(cfg.get("data_source") or "bybit")
     rows = [
-        {"id": sid, "name": name, "hint": hint, "status": _probe_source(url), "wired": wired}
+        {"id": sid, "name": name, "hint": hint,
+         "status": _probe_source(url, payload=_PROBE_PAYLOADS.get(sid)), "wired": wired}
         for sid, name, hint, url, wired in FREE_SOURCES
     ]
     return {"ok": True, "sources": rows, "active": active,
@@ -1543,6 +1579,155 @@ async def profiles_status() -> dict[str, Any]:
 @router.get("/logs")
 async def get_logs(lines: int = Query(default=200, le=1000), level: str = Query(default="")) -> dict[str, Any]:
     return {"lines": logs.tail(lines=lines, min_level=level)}
+
+
+# ──────────────────────────────────────────────────────────────
+# History — the archive backfill and reading our own stored ticks
+# ──────────────────────────────────────────────────────────────
+# The suite's panels are live views; this is the one place that can fill in the past. The pass runs
+# on its own database connection (WAL + busy timeout), so it works whether the engine is streaming
+# or stopped, and it never touches the live head: rows go in behind it, a window at a time.
+
+#: One job at a time. Two passes would double the archive traffic for no gain, and "is it still
+#: running?" would stop having an answer.
+_backfill_job: dict[str, Any] = {"state": "idle"}
+
+
+def _backfill_job_public() -> dict[str, Any]:
+    return dict(_backfill_job)
+
+
+async def _run_backfill(symbol: str, days: list[Any]) -> None:
+    from orderflow_system.data import backfill as backfill_mod
+    from orderflow_system.data.database import Database
+
+    job = _backfill_job
+    db = Database(str(config_store.db_path()))
+    try:
+        await db.connect()
+        job["stage"] = "download"
+
+        def progress(stage: str, **fields: Any) -> None:
+            job["stage"] = stage
+            for key in ("ticks", "bytes", "cached", "deleted"):
+                if key in fields:
+                    job[key] = fields[key]
+
+        result = await backfill_mod.backfill_range(
+            db, symbol, days, cache_dir=config_store.backfill_cache_dir(), progress=progress)
+        job.update(state="done", stage="done", ticks=result["ticks"],
+                   days_done=result["days"], days_without_prints=result["days_without_prints"],
+                   finished_at=time.time())
+        logger.info("backfill: %s complete — %d ticks over %d day(s)",
+                    symbol, result["ticks"], len(result["days"]))
+    except Exception as exc:
+        job.update(state="failed", error=f"{type(exc).__name__}: {exc}", finished_at=time.time())
+        logger.warning("backfill failed for %s: %s", symbol, exc, exc_info=True)
+    finally:
+        try:
+            await db.close()
+        except Exception:                          # pragma: no cover - closing must never mask a result
+            logger.debug("backfill db close failed", exc_info=True)
+
+
+@router.get("/backfill")
+async def backfill_status() -> dict[str, Any]:
+    """The state of the (single) backfill job — idle, running, done or failed."""
+    return {"ok": True, "job": _backfill_job_public()}
+
+
+@router.post("/backfill")
+async def backfill_start(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Fetch stored history for one configured instrument from the venue's public archive.
+
+    Body: {"symbol": "BTCUSDT", "from": "YYYY-MM-DD", "to": "YYYY-MM-DD"} (both days inclusive), or
+    {"symbol": ..., "days": ["YYYY-MM-DD", ...]}. At most 7 days per request; the archive does not
+    publish today or the future, and a request that asks for either is refused with the reason.
+    """
+    from orderflow_system.data import backfill as backfill_mod
+
+    symbol = str(payload.get("symbol") or "").strip().upper()
+    cfg = config_store.load_config()
+    known = {str(i.get("symbol", "")).upper() for i in (cfg.get("instruments") or [])}
+    if not symbol or symbol not in known:
+        return {"ok": False, "error": f"{symbol or '(none)'} is not one of the configured instruments"}
+    if _backfill_job.get("state") == "running":
+        return {"ok": False, "error": "a backfill is already running", "job": _backfill_job_public()}
+
+    try:
+        if payload.get("days"):
+            days = sorted({backfill_mod.parse_day(d) for d in payload["days"]})
+        else:
+            first = backfill_mod.parse_day(payload.get("from"))
+            last = backfill_mod.parse_day(payload.get("to") or payload.get("from"))
+            if last < first:
+                return {"ok": False, "error": "`to` is before `from`"}
+            days = [first + dt.timedelta(days=n) for n in range((last - first).days + 1)]
+        if len(days) > backfill_mod.MAX_DAYS_PER_REQUEST:
+            return {"ok": False,
+                    "error": f"at most {backfill_mod.MAX_DAYS_PER_REQUEST} days per request "
+                             f"(asked for {len(days)})"}
+        today = dt.datetime.now(dt.timezone.utc).date()
+        if any(day >= today for day in days):
+            return {"ok": False, "error": "the archive does not publish today or the future yet"}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    _backfill_job.clear()
+    _backfill_job.update({
+        "state": "running", "symbol": symbol, "days": [d.isoformat() for d in days],
+        "stage": "starting", "ticks": 0, "started_at": time.time(),
+    })
+    asyncio.create_task(_run_backfill(symbol, days))
+    return {"ok": True, "job": _backfill_job_public()}
+
+
+@router.get("/trades")
+async def trades(symbol: str = Query(default=""), since: Optional[int] = Query(default=None),
+                 until: Optional[int] = Query(default=None),
+                 limit: int = Query(default=5_000, ge=1, le=50_000)) -> dict[str, Any]:
+    """Read stored ticks for one instrument — the suite's own trade history, in a plain shape.
+
+    The window is capped at 24 h and the page at `limit` rows (newest kept), because a day of a
+    liquid instrument is millions of prints. Each row is
+    {"ts": <ms>, "price": …, "size": …, "side": "buy"|"sell", "trade_id": …} — the same conventions
+    the feed publishes, so a caller cannot tell a backfilled row from a live one.
+    """
+    from orderflow_system.data.database import Database
+
+    symbol = str(symbol or "").strip().upper()
+    cfg = config_store.load_config()
+    known = {str(i.get("symbol", "")).upper() for i in (cfg.get("instruments") or [])}
+    if not symbol or symbol not in known:
+        return {"ok": False, "error": f"{symbol or '(none)'} is not one of the configured instruments"}
+    now_ms = int(time.time() * 1000)
+    start = int(since) if since is not None else now_ms - 3_600_000
+    end = int(until) if until is not None else now_ms
+    if end <= start:
+        return {"ok": False, "error": "`until` must be after `since`"}
+    if end - start > 86_400_000:
+        return {"ok": False, "error": "a window is capped at 24 h — narrow it and ask again"}
+
+    db = Database(str(config_store.db_path()))
+    try:
+        await db.connect()
+        total = await db.count_ticks(symbol, start, end)
+        ticks = await db.get_recent_ticks(symbol, start, end, limit=limit)
+    finally:
+        try:
+            await db.close()
+        except Exception:                          # pragma: no cover
+            logger.debug("trades read: db close failed", exc_info=True)
+
+    return {
+        "ok": True, "symbol": symbol, "from": start, "to": end,
+        "count": len(ticks), "total": total, "truncated": total > len(ticks),
+        "ticks": [
+            {"ts": t.timestamp_ms, "price": t.price, "size": t.size,
+             "side": t.side.value, "trade_id": t.trade_id}
+            for t in ticks
+        ],
+    }
 
 
 # ──────────────────────────────────────────────────────────────
