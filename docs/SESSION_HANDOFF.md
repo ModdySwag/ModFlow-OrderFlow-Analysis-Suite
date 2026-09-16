@@ -3957,14 +3957,16 @@ the zip/setup exe hashes in the RE-ATTENDANCE block remain the release candidate
 **Next (owner).** Push (the remote decision), the physical multi-monitor pass, release-notes
 review, then the tag `v0.1.0-beta` + attach zip + Setup exe.
 
-## §75 — the post-beta left-overs: N-1 in the build, CI lint/SBOM parity, and the screenshot re-shoot (in flight)
+## §75 — the post-beta left-overs: N-1 in the build, CI lint/SBOM parity, and the screenshot re-shoot (closed)
 
 **Why.** After §74 this pass picked up the plan's optional left-overs, asked for in one breath:
 (1) the N-1 single-instance guard, (2) ruff-in-CI step parity (N-4), (3) an SBOM artifact (SS-8
 was pip-audit only), and (4) re-shooting the pre-§62-branded screenshots in `docs/screenshots/`
 (the Sep 14 batch still shows the retired OF tile / "OrderFlow Analysis Pro" wording; the Sep 16
-p-series already carries the ModFlow badge). The owner paused the pass mid-way to bank the state —
-this section is the save point.
+p-series already carries the ModFlow badge). The owner paused the pass mid-way to bank the state
+(`b0681a2` was the save point); the **re-attendance closed it** — screenshots landed, counts
+re-measured, `dist/` rebuilt and re-verified, gates green on both interpreters — and the closing
+commits are `58101f4` (the shots, the counts, the release evidence) and this record.
 
 **Landed and committed.**
 
@@ -3986,26 +3988,36 @@ this section is the save point.
   beside the zip: `dist/ModFlowOrderFlowAnalysisSuite-win64.sbom.cdx.json` (CycloneDX 1.5, 42
   components) — attach it to the GitHub release with the zip and the Setup exe.
 
-**The screenshot re-shoot — staged, not landed.**
+**The screenshot re-shoot — landed.**
 
-Eleven shots (the Sep 14/15 batch: 4 atlas-* + 7 desktop-*) were re-captured from a live sandbox
-session at their original dimensions, staged at
-`C:\Users\Moddy\AppData\Local\Temp\ofap_shot_stage\` (all written 22:00:48–22:01:55 on 2026-09-16,
-one clean run — green Setup dot, no wizard, no MT5 notice):
+Eleven shots (the Sep 14/15 batch: 4 atlas-* + 7 desktop-*) were re-captured from one live sandbox
+session at their original dimensions and are now in `docs/screenshots/` (1264×569 for the atlas-*
+set, desktop-heatmap-live and desktop-chart-value-area; 1500×940 for the desktop-* set — every
+frame matching the size of the file it replaced, header-checked), all from one clean run (green
+Setup dot, no wizard, no MT5 notice). **All eleven were vision-checked**, one was re-shot:
 
 | file | size | state |
 |---|---|---|
-| atlas-heatmap.png | 1264×569 | **eye-verified** — map canvas full |
-| atlas-cvd.png | 1264×569 | staged, check due |
-| atlas-profile.png | 1264×569 | staged, check due |
-| atlas-trackers.png | 1264×569 | **eye-verified** — live prints + ladder |
-| desktop-heatmap-live.png | 1264×569 | staged, check due |
-| desktop-chart-value-area.png | 1264×569 | staged, check due |
-| desktop-overview-live.png | 1500×940 | **eye-verified** |
-| desktop-live-session.png | 1500×940 | staged, check due |
-| desktop-window-overview.png | 1500×940 | staged, check due |
-| desktop-window-heatmap.png | 1500×940 | **eye-verified** — full liquidity map |
-| desktop-chart.png | 1500×940 | **eye-verified** — candles + VWAP band |
+| atlas-heatmap.png | 1264×569 | verified — map canvas full |
+| atlas-cvd.png | 1264×569 | verified — divergence series + table drawn |
+| atlas-profile.png | 1264×569 | verified — TPO ladder + volume bars drawn |
+| atlas-trackers.png | 1264×569 | verified — live prints + ladder |
+| desktop-heatmap-live.png | 1264×569 | verified — full liquidity map (240 buckets × 200 rows) |
+| desktop-chart-value-area.png | 1264×569 | **re-shot this pass** — card note + POC/Δ-V chips, no clip |
+| desktop-overview-live.png | 1500×940 | verified — KPIs, session summary, market context |
+| desktop-live-session.png | 1500×940 | verified — live session, Stop engine visible |
+| desktop-window-overview.png | 1500×940 | verified — live session + headlines |
+| desktop-window-heatmap.png | 1500×940 | verified — full liquidity map |
+| desktop-chart.png | 1500×940 | verified — candles + VWAP band + the POC line |
+
+**One re-shoot, and the rule it taught.** `desktop-chart-value-area.png` first came back with the
+Price-action card's note clipped mid-line at the top edge — the previous session had scrolled the
+view's scroller ~297 px to bring the chart canvas up. Fix (now in the skill's screenshot
+reference): **align the card head to the scroller top by measuring** (`.views` scroller +=
+`card.top − views.top`), never by a fixed amount — and read the 70–100 px band under the toolbar as
+chrome, not as a clip: the toolbar's own controls (`Classic|Terminal` segment, `Stop engine`, the
+live chip) stick ~16 px into the content area and look like clipped content in a crop.
+
 
 The sandbox: `APPDATA="$LOCALAPPDATA/Temp/ofap_shots_sandbox" .venv/Scripts/python.exe -m
 orderflow_system.desktop --headless --port 8093`, engine started via `POST
@@ -4029,30 +4041,60 @@ The capture recipe (browser tool; the daemon session was named `shots`):
    their config flags are set.
 6. Capture with CDP `Page.captureScreenshot` (PNG) → write the bytes to the staging dir.
 
-**Re-attendance checklist (this pass, in order).**
+**How the re-attendance closed (in order).**
 
-1. Vision-check the six "check due" images above; re-shoot any miss with the recipe (restart the
-   sandbox first if it is gone).
-2. Copy the eleven into `docs/screenshots/` (same names — the old files are the ones being
-   replaced) and refresh the caption rows in `docs/DESKTOP_GUI_FEASIBILITY.md` that quote the old
-   session's numbers, so image and caption agree (keep captions timeless where the numbers moved),
-   plus one line noting the re-shoot.
-3. Counts re-measure for the two new files: README (tests badge 712 → **716**; line counts ~64 k —
-   re-run the house inventory; the `launcher.py` (NNNL) row grew ~12 lines), CONTRIBUTING's
-   baseline line, and any remaining 712 in README/RESUME.
-4. **The rebuild.** The guard touched a bundled file — the frozen `dist/` (zip `b571c655…`, Setup
-   `d2435b6f…`, exe `cfde70b0…`) has been **stale as a release candidate since `12211e2`**.
-   Rebuild (exe → zip → Setup), re-verify the payload against the tree, re-run the live probe
-   battery (Host/403, cross-origin POST/WS 403, native WS 101, GET 200, `/desktop` hash) and the
-   new **double-launch acceptance** on the frozen exe (scratch APPDATA; the second launch exits;
-   one process — the N-1 proof), then write the new hashes into
-   `docs/RELEASE_EVIDENCE_v0.1.0-beta.md` and RESUME.
-5. Gates on the final tree: full pytest on **both** interpreters (finish the 3.11 leg),
-   audit_ui_refs, both goldens, the 20 selftests, ruff, `pip-audit`. Then close this section with a
-   short record and hand back.
+1. **Screenshots** — the six "check due" frames vision-checked plus the five eye-verified ones
+   reviewed; one re-shoot (`desktop-chart-value-area.png`, above); all eleven copied into
+   `docs/screenshots/`, and the caption rows in `docs/DESKTOP_GUI_FEASIBILITY.md` re-written to
+   describe these files (kept timeless where the numbers moved) with a line recording the re-shoot.
+2. **Counts** — README tests badge 712 → **716**; File Inventory re-measured (**176 files /
+   27,407 py / 36,583 UI / 63,990 total** — the Desktop-app row 23 → 24 files, 8,895 → 9,065 lines:
+   `single_instance.py`'s 162 plus `launcher.py`'s +8 net); suite **69 files / 12,422 lines**;
+   CONTRIBUTING's baseline 716. The `launcher.py` (NNNL) row the plan expected does not exist — the
+   Project Structure tree carries no per-file counts for `desktop/`; the File Inventory row is where
+   the growth shows. One stale count turned up while re-measuring: the architecture diagram's
+   "132 REST/WS routes" (the badge already read 133) — corrected.
+3. **Rebuild.** The guard touched a bundled file, so the frozen `dist/` (zip `b571c655…`, Setup
+   `d2435b6f…`, exe `cfde70b0…`) was stale as a release candidate since `12211e2`. Rebuilt the
+   chain — exe (`build_exe.py`) → zip → Setup (`installer/make_installer.ps1`, 0 errors) — re-ran
+   the payload check (90/90), the live probe battery (21/21) and the new double-launch acceptance
+   on the frozen exe, and re-ran the installer journey. New hashes in
+   `docs/RELEASE_EVIDENCE_v0.1.0-beta.md`; the stale ones are gone from this file.
+4. **Gates on the final tree** — full pytest on **both** interpreters (716/2 each), audit_ui_refs
+   (AUDIT CLEAN), both goldens, 20 selftests, ruff, `pip-audit`: all green (receipts below).
 
-**Receipts.** Suite 716/2 (3.12) on the guard commit; ruff 0.16.7 clean on the three touched files;
-SBOM valid (CycloneDX 1.5, 42 components); 5/11 screenshots eye-verified, 6 staged; sandbox alive
-at save time (PID 20564, port 8093, scratch APPDATA only). Nothing pushed — the owner's queue
-unchanged: push (remote decision), the physical multi-monitor pass (§76 if it finds anything),
-release-notes review, then the tag `v0.1.0-beta` + attach zip + Setup exe + SBOM.
+**Receipts.** Suite **716 passed / 2 skipped on both interpreters** (3.12 in 24.4 s, 3.11 in
+24.6 s); `audit_ui_refs.py` AUDIT CLEAN (71 modules); ruff 0.16.7 clean; analytics golden 0.000e+00
+(40 cases, 2196 numeric leaves); config golden 31/18/49; **20/20 UI selftests**; `pip-audit` over
+the locked set (42 packages) clean. Screenshots 11/11 vision-verified at their original sizes and
+landed in `docs/screenshots/` (+ captions). Frozen artefacts rebuilt from the hardened tree: exe
+`10e6bdf8755abb0e…` (13,371,238 B), zip `00b96304e54949e0…` (27,229,338 B — 496 files, 7-Zip test
+OK, extraction byte-identical to the folder), Setup `c3a14576a5a5a5b5…` (28,173,338 B, 0 errors /
+4 warnings, ships the same exe), SBOM CycloneDX 1.5 (42 components); all four hashed into
+`docs/RELEASE_EVIDENCE_v0.1.0-beta.md`. Payload check: **90/90 loose files byte-identical** to the
+tree, no source file newer than the build. Probe battery against the frozen exe: **21/21** — hostile
+`Host` → 403 on `/healthz` and `/api/control/bootstrap` (nothing leaked), cross-origin + cross-site
+POST → 403, cross-origin + cross-site WS handshake → 403, native WS → 101 with the app's own
+`pong`, same-origin/native POST → 200, cross-origin read → 200, `/desktop` byte-identical to the
+packaged `index.html` (sha256 `d61ebc1f8c2c33d3…`) and carrying the CSP, unknown symbol → `[]`
+(candles + markers), 0 numpy entries in 586 `_internal` entries, 0 `client error:` lines.
+Double-launch acceptance (windowed, scratch APPDATA): first launch opens the window on 8080; the
+second **exits 0** and focuses it — still one process, one window, one port; a third is refused the
+same way; WM_CLOSE closes in ~2 s, frees the port, and the next launch comes up (the guard releases
+on close). Installer journey: silent install 496 files, installed exe hash == dist exe, shortcut
+targeting the installed exe, ARP entry `0.1.0` (`{197F9514-…}`); the installed app smoked on 8098
+(healthz 200, BTCUSDT candles 200, unknown symbol `[]`, hostile Host refused, 0 client errors);
+silent uninstall cleaned dir + shortcut + ARP; `%APPDATA%` untouched and the owner's development
+shortcut restored.
+
+**Two build-tool lessons (both measured here).** (1) PowerShell 5.1's `Compress-Archive` **mangles
+this tree's archive entry names** (truncated prefixes, the main exe entry lost) — the release zip is
+built with Python's `zipfile` (or 7-Zip) instead; verify with `namelist()` + a `7z t` pass. (2) The
+installer's Add/Remove Programs entry registers under the **32-bit** registry view
+(`HKLM\Software\WOW6432Node\…\Uninstall`), so a native-view query reports "no ARP entry" while the
+product is installed — query the WOW6432Node key (or `Win32_Product`) before concluding anything
+about the install.
+
+**Nothing pushed.** The owner's queue is unchanged: push (the remote decision — `origin` is still
+the original author's repo), his **physical multi-monitor pass** (§76 if it finds anything), the
+release-notes/tag review, then the tag `v0.1.0-beta` + attach the zip + Setup exe + SBOM.
