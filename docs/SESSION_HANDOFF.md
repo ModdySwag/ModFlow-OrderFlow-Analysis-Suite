@@ -4096,5 +4096,239 @@ product is installed — query the WOW6432Node key (or `Win32_Product`) before c
 about the install.
 
 **Nothing pushed.** The owner's queue is unchanged: push (the remote decision — `origin` is still
-the original author's repo), his **physical multi-monitor pass** (§76 if it finds anything), the
-release-notes/tag review, then the tag `v0.1.0-beta` + attach the zip + Setup exe + SBOM.
+the original author's repo), his **physical multi-monitor pass** (§77 if it finds anything — §76 is
+the fold-in below), the release-notes/tag review, then the tag `v0.1.0-beta` + attach the zip + Setup
+exe + SBOM.
+
+---
+
+## §76 — the flowsurface fold-in: Binance ingest, trade audio, archive backfill, two more venues (closed 2026-09-17; nothing committed)
+
+**Why.** The owner approved a subset of `docs/FLOWSURFACE_FOLD_IN_PLAN.md` (ideas only — flowsurface
+is GPL-3.0, so not one line of its code is in this tree): **Binance first**, **ship four generated
+finance-alert samples**, **both** backfill paths, and the heatmap "order runs" model **deferred**
+behind its measured triggers. This section is the receipt for what is on disk; nothing is committed.
+
+**Gate status at the end of the pass (measured, one run):** **839 passed / 2 skipped** (3.12) ·
+`audit_ui_refs.py` AUDIT CLEAN (74 modules) · **22/22** JS selftests · `ruff check` clean.
+`HEAD` is still `aa43f40`, **36 paths** modified or new (these two docs included), `dist/` **not**
+rebuilt.
+
+**1. The feed-session rule (`data/feed_session.py`, new) and the Bybit hardening.**
+The flowsurface bug at its newest commit is a Python-shaped bug: a read future cancelled mid-frame by
+a shared timeout desyncs the parser and the socket dies with a protocol error that looks like a venue
+problem. The rule is now a module: the **reader is never cancelled**, the **heartbeat is its own
+task**, each venue's liveness is **data** (`VENUE_POLICIES`: bybit client-ping 20/60, binance
+server-driven 240, hyperliquid ping-after-idle 30/…, okx ping-after-idle 20/40), the reconnect ladder
+**resets only on a parsed frame** and carries **±25 % jitter** so several adapters cannot stampede a
+venue at once. `data/bybit_feed.py` got the same two-line treatment (the ladder no longer resets when
+a socket merely *opens* — a connect-and-die loop used to hammer the venue at 1 s forever).
+*Pins:* `test_feed_session.py` (11) — including the replayed-cancellation detector and the Bybit
+ladder, both driven by a **virtual clock** so the timing contract is tested without waiting.
+
+**2. Binance USDⓈ-M futures (`data/binance_feed.py`, new).** Public streams + REST snapshot with the
+chain rules the venue actually documents: buffer diffs while the snapshot lands, drop `u < lastUpdateId`,
+require the first applied event to straddle (`U ≤ lastUpdateId+1 ≤ u`), then require `pu == previous u`;
+on a break, mark stale, clear the buffer and refetch — deduped and rate-limited (`snapshot_cooldown_s`),
+so a stale book always has exactly one fetch outstanding and heals itself. 1000 levels/side from the
+REST snapshot (Bybit gives 50 base / 200 extras).
+*Live-verified, and the live check earned its keep:* **on futures the documented `@aggTrade` stream
+does not flow — `@trade` does.** The adapter subscribes `@trade` (individual fills, which is also the
+better input for footprint/CVD than a 100 ms aggregate) and parses both shapes (`e: trade`/`aggTrade`,
+id from `t`/`a`). Live: 4,759 ticks / 20 s over BTCUSDT+ETHUSDT, 382 book publishes, both books
+1000×1000, 0 gaps, 0 junk, 0 reconnects; the pre-snapshot stale window behaves as designed.
+*Wiring:* `settings.DataSource.BINANCE`, the config allow-list, `main.py`'s feed branch,
+`FREE_SOURCES` `wired=True`, `datasources()` + `binance_capable()`/`binance_validate()` (one
+`exchangeInfo` call), the guide wizard radio, and **`_start_atlas_extras` skips the Bybit extras feed
+when Binance is the primary source** — the extras book is a Bybit book, and mixing it under another
+venue's prints would be a lie the heatmap tells.
+
+**3. Trade audio (new; his explicit choice).** `scripts/make_alert_sounds.py` (stdlib only) generates
+four WAVs into `desktop/ui/audio/`: soft buy/sell blips (90 ms, 1.18 kHz / 880 Hz bells over a
+tape-tick transient) and rising/falling two-tone alerts (225 ms, 1046↔1568 Hz). `ui/audio.js` is a
+decide/play split: `decide()` is pure (master switch, `min_size` threshold, the two-tone variant at
+`min_size × hard_multiple`, overlap attenuation halving per retrigger down to `overlap_floor`, the
+active-symbol rule) and `play()` owns the elements (one per sample, `play()` rejections counted and
+announced as `ofap:audio-failed`, never a crash). Config: an `audio` block, clamped **twice** —
+`config_store._sanitise` (strict: only a real `True` enables, a hand-edited `"yes"` cannot) and the
+player. Eight registry parameters put it in the **Tape** view's Chart menu; `applyLocally` adopts the
+accepted value without a round trip. Off by default.
+*Pins:* `audio.selftest.js` (39) + `test_alert_audio.py` (11) — the WAVs' format, that they are four
+different sounds, audible-and-not-clipped, that the shipped files are **byte-reproducible from the
+generator**, and the clamp contract.
+
+**4. Archive backfill (both paths).** `data/backfill.py` + `POST/GET /api/control/backfill` +
+`GET /api/control/trades` + `Database.delete_ticks_window/count_ticks/get_recent_ticks`.
+Four rules worth keeping: a **window is replaced, never appended** (delete + insert for the same
+window, so re-running an interrupted day cannot double-count volume); the parse runs in **one worker
+thread feeding a bounded queue** (a day of a liquid instrument is millions of rows — never parse it on
+the event loop); the timestamp's **unit is detected, not assumed** (16-digit ⇒ µs ⇒ ÷1000; verified
+live that the current futures file is ms); and junk rows are gated (integer trade id, plausible
+timestamp ≥ 2019-06, positive price/size) because a mangled line quietly poisoning a volume profile is
+exactly the failure nobody sees. Downloads land in `.part` and are renamed on completion, so a
+half-download can never become a cache hit; the cache prunes by age; the job is **one at a time** with
+a stage/ticks progress channel.
+*Live end-to-end:* a real DYDXUSDT archive (150 KB, 2026-09-13) → **9,799 rows** into a scratch DB,
+first ts 00:00:04Z / last 23:59:57Z, every row inside the day, sides 4,591 buy / 5,208 sell.
+*Pins:* `test_backfill.py` (18) + `test_backfill_api.py` (11).
+
+**5. Two more venues, delegated (files only, NOT wired).** `data/hyperliquid_feed.py` (+27 tests) and
+`data/okx_feed.py` (+23 tests), both built on `FeedSession` with their own policies, both run against
+their real venues by their authors before being reported. The venue realities they found (each is a
+documented behaviour that is **not** what the docs say):
+- **Hyperliquid:** frames *are* wrapped (`{channel, data}`); trades arrive as **arrays**; `side` is the
+  taker side (`B`/`A` — confirmed against the book's mid); the **l2Book is a 20-level snapshot**, not a
+  diff stream (~2.6–5.6 s cadence, hence a 10 s stale window, configurable); the REST `meta` listing is
+  the only real gate — an **unknown coin does not error, the venue drops the socket ~0.2 s later**, and a
+  **delisted coin acks and then streams a dead backlog** (MATIC prints from 2024), so `isDelisted` is
+  read and skipped; no coin name in the listing contains "USD" (so `BTCUSDT → BTC` cannot collide);
+  the venue answers the library's protocol pings *and* the documented `{"method":"ping"}`, so the
+  session stays the single liveness owner (`ping_interval=None`); `tick = 10^-(6-szDecimals)` verified
+  live (BTC one decimal, MATIC five). The 5-significant-figures half of the venue's price rule is
+  **documented but deliberately not enforced** (rounding could alter a legitimate print).
+- **OKX:** the `crc32` checksum is **dead** — every live frame carries `checksum: 0` and the venue now
+  marks the field deprecated in favour of `seqId`/`prevSeqId`, so the documented algorithm is
+  implemented and tested (self-consistent vector + mutation rejection) but a `0` is read as "no
+  verdict" and **continuity comes from `seqId`/`prevSeqId`** — verified live (snapshot `seqId` == the
+  next update's `prevSeqId`). `{"op":"ping"}` is **rejected** (`60012`); a bare text `ping` is answered
+  by a bare `pong` — which is exactly what `FeedSession` sends by default, so the policy drives it
+  untouched and the frame handler counts pongs instead of logging a parse error. Re-subscribing is only
+  re-acked; the working resync is **unsubscribe → subscribe** (verified live: an immediate fresh
+  400×400 snapshot, other symbols untouched). REST needs a **User-Agent** (a bare urllib request is
+  403'd) and the listing's coin-margined swaps are filtered out via `settleCcy`. Live adapter run:
+  644 ticks, 286 book publishes, 400×400 books, 0 gaps, 0 reconnects.
+  **Open concern flagged by its author and NOT acted on:** `VENUE_POLICIES["okx"].silence_budget_s = 40`
+  is shorter than the venue's documented ~60 s quiet-instrument keepalive — worth a look when OKX is
+  wired (no live evidence of harm; the quietest listed USDT swap still pushed ~10 updates/s).
+
+**6. The polish pass — and the finding that most of it already existed.** Of the plan's four tape/heatmap
+"gems", **three were already implemented here under other names**: the pause-on-scroll + "N new" pill is
+`OFAPSTRIPS` (per-strip chips with counts and click-to-resume), size shading is `isBig` →
+`tape-row-big`, and the heatmap cell readout is `heatmap-pro.cellAt()` + its HUD. Only the
+**changed-digit price tint** was genuinely missing and landed: `tape.js` wraps only the digits that
+moved against the older print (`_priceHtml`, a width change is left plain, the decimal point never
+tinted), threaded through `_prependRows`/`_renderTrades` with a `_topPrice` tail so the tint is
+continuous across batches. `tape.selftest.js` (11) pins the rule **and** that `modules.css` defines the
+class the widget emits. (Read the panel before believing a feature list — three of four "gaps" were not
+gaps, and folding them in again would have been duplicate work.)
+
+**What is NOT done (the next session's list, in order):**
+1. **Wire Hyperliquid + OKX exactly like Binance** — `settings.DataSource`, the config allow-list,
+   `main.py`, `FREE_SOURCES` wired flags, `datasources()` rows, the capabilities/validate pair, the
+   extras gate, the wizard radios — then live-probe both **from the repo tree**.
+2. **Sandbox end-to-end**: source switch to Binance through the control API, the audio parameters
+   through `/api/control/params`, a backfill round trip over the API, then `orderflow.log` for
+   `client error:` lines.
+3. **Counts/docs pass**: README badge 716 → 839, CONTRIBUTING baseline, File Inventory (py files +~6,
+   four WAVs, the new modules), the selftest list 20 → 22, and `docs/FLOWSURFACE_FOLD_IN_PLAN.md`
+   marked as executed (with what was deferred and why).
+4. **Then the owner's queue**: push, his physical multi-monitor pass (**§77** if it finds anything),
+   release-notes review, tag `v0.1.0-beta` + attach zip + Setup exe + SBOM. A `dist/` rebuild is owed
+   before any release artefact is replaced — nothing in this pass was built into it.
+5. The 3.11 parity run for this build (839/2 was measured on 3.12 only).
+
+---
+
+**§76 closed (2026-09-17).** The list above is done — plus what the verification found on the way:
+
+1. **Hyperliquid + OKX wired exactly like Binance, then live-probed from the repo tree.**
+   `DataSource.HYPERLIQUID/OKX`, the config allow-list, `main.py`'s feed branches, `FREE_SOURCES`
+   `wired=True` (hints now say what the adapters actually do), `datasources()` rows, the
+   `hyperliquid_capable/validate` + `okx_capable/validate` pair (`/api/control/capabilities?
+   refresh=true`, the one-implementation rule Binance set), the extras gate widened to
+   `("binance", "hyperliquid", "okx")`, the wizard radios + its MT5 step, and the `settings.py`
+   DataSource comment block re-aligned (it had been missing BINANCE).
+   *Live:* Hyperliquid **128 ticks / 20 s** (20×20 books, 0 junk, 0 reconnects); OKX **577 ticks /
+   20 s** (400×400 books, 0 gaps, 0 reconnects). *Pins:* +3 tests in `test_source_switch.py`
+   (wired-and-switchable for both; the refusal path re-pinned via a patched table row), +1 in
+   `test_wiring.py` — 839 → **843**.
+2. **Two flagged concerns turned into work:**
+   - **The reachability probe speaks the venue's method now.** Hyperliquid's `/info` answers a bare
+     GET with **405** — the old probe painted it "unreachable" while healthy. `_probe_source` takes
+     an optional POST payload (`_PROBE_PAYLOADS`); the Connections menu shows **ok** (live-verified).
+   - **The OKX silence budget is 75 s** (was 40): the venue's documented quiet-instrument keepalive
+     is ~60 s, so 40 tripped first. Insurance, not a fix for an observed failure — pinned.
+3. **A live defect surfaced while verifying, and it sat right on this wiring's front door:** the ☰
+   menu (`desktop/ui/menu.js`) had a local `api()` whose guard tested `typeof api` — itself — so
+   every call recursed and the `RangeError` died in each caller's `catch`. The menu ran entirely on
+   fallback data (`/sources` never loaded; switching answered "source switch failed: RangeError:
+   Maximum call stack size exceeded"). Fixed to `typeof window.api`; pinned by
+   `test_wiring.py::test_a_module_local_api_helper_must_name_the_shells_helper`; re-verified live
+   over CDP (Edge :9223) — the menu lists the six server rows and real clicks switch OKX → Binance
+   (`Engine started: source=okx|binance` in the log).
+4. **The sandbox pass (scratch `APPDATA`, port 8094):** source switch to Binance (tape + orderbook
+   live), the eight audio parameters driven through `/api/control/params` (adopted values read
+   back; the config block matches), a backfill round trip — DYDXUSDT 2026-09-13 → **9,799 ticks /
+   150,613 B downloaded fresh**, `/api/control/trades` returns all 9,799 inside the day with sides
+   4,591 / 5,208 *(identical to §76's module-level receipt)* — then engine switches to okx →
+   hyperliquid → binance with per-symbol ticks > 0 (394 / 91 / 1,159). `orderflow.log`: **0
+   `client error:` / 0 ERROR / 0 Traceback**, with the extras-gate line for all three venues.
+5. **Counts/docs:** README badge **843**; File Inventory **185 files / 30,406 py / 37,136 UI /
+   67,542 total** (Config 2/821 · Data 16/6,058 · Analytics 17/3,077 · Atlas 26/7,558 · Desktop
+   app 25/9,529 · Desktop UI 84/32,469 · Legacy dashboard 14/2,506+4,667 · `main.py` 857); suite
+   **76 files / 15,091 lines**; five drifted tree counts re-derived (main.py 857, settings.py 821,
+   bybit_feed.py 339, database.py 472, dashboard tape.js 448); CONTRIBUTING baseline 843 + 22
+   selftests; `FLOWSURFACE_FOLD_IN_PLAN.md` marked executed (order-runs model deferred by decision).
+6. **The 3.11 parity run measured the same: 843 passed / 2 skipped** in 25.3 s (3.11.16, the
+   `%LOCALAPPDATA%\Temp\ofap311` venv from §65).
+
+**Gates at close (2026-09-17):** 843 passed / 2 skipped on **3.11 and 3.12** · AUDIT CLEAN ·
+ruff clean · both goldens OK · 22/22 selftests. `HEAD` still `aa43f40`, **40 paths** touched
+(the 38 above plus `README.md` and `CONTRIBUTING.md` from the counts pass),
+`dist/` untouched (a rebuild is owed before any release artefact is replaced). Still **nothing
+committed, nothing pushed**.
+
+---
+
+## §77 — the audit send-back: the judgement, §76 committed, artefacts rebuilt (closed 2026-09-17; nothing pushed, no tag)
+
+**Why.** The owner's Desktop carried `sendback.txt` — a release-readiness audit ("SHIP ONLY AFTER
+REQUIRED FIXES") of `aa43f40` + the 40 uncommitted §76 paths. Every finding was re-verified against
+the tree before acting; the value judgement + staged plan live in
+`docs/AUDIT_SENDBACK_RESPONSE_v0.1b.md`. The owner's instruction: "go with plan .. no final commit
+to github".
+
+**The judgement (what the audit got right / wrong).** F-01 (artefacts stale vs the tree) — **true**:
+`dist/` predated every §76 source file and contained none of the fold-in; closed by the rebuild
+below. F-02/F-04 (the "pyproject.toml missing aiosqlite" P0) — **withdrawn**: the manifest has
+declared it since `b2ff4ee`, and the audit's `ModuleNotFoundError` reproduces only with the bare
+system `python` (no project deps). Both failure modes were reproduced; `scripts/audit_ui_refs.py`
+now prints the interpreter it used and the venv command when its import gate fails. F-05 —
+install/entry-point wording was already accurate; two **un-tagged** count claims were genuinely
+stale (README L231/L535: "70 files / ~30,400L" → 75 files / 30,113 lines) and were fixed. F-03 —
+the six new feed/backfill test files already carry 106 fault-path cases; the residual is receipts
+(delivered below). F-06 — the supply-chain posture is already in SECURITY.md + CI + the evidence
+page; 2–3 notes lines remain for the release-notes review.
+
+**What landed (5 commits, then the docs wave).**
+1. `47ae326` feeds: Binance, Hyperliquid and OKX adapters — the session rule, snapshot chains,
+   archive backfill, fault-path tests (§76).
+2. `096c055` desktop: the four-venue switch — config, capabilities, engine branches,
+   source-switch pins (§76).
+3. `25efd48` ui: trade audio, the tape tint, and the ☰ menu's self-recursive api() fixed (§76).
+4. `96cd327` scripts: the reference audit names its interpreter when the import gate fails (§77).
+5. The docs wave: README counts, CONTRIBUTING, this §77 record + RESUME, the send-back response
+   doc, the refreshed release-evidence page, installer/README's latest-build line.
+
+**Artefacts (rebuilt from the committed tree).** exe 13,550,202 B `2731442153…` · zip 27,419,732 B
+`111198918d…` (503 entries; +7 = the §76 payload: four WAVs + `audio.js` + `audio.selftest.js` +
+`tape.selftest.js`) · Setup 28,412,633 B `b2309cc9…` (0 errors / 4 warnings) · SBOM 430,051 B
+`97184c0b…` (CycloneDX 1.5, 42 components). No source file newer than the build; the served
+`/desktop` is byte-identical to the packaged `index.html` (`369fbbc6…`).
+
+**Verified.** pytest **843/2** on 3.12 (24.6 s) and 3.11 (25.2 s — the §76 venv at
+`%LOCALAPPDATA%\Temp\ofap311` was half-corrupted (pygments stub, typing_extensions missing) and
+was recreated with `--clear`); AUDIT CLEAN (74 modules); ruff 0.16.7 clean; both goldens; 22/22
+selftests; `pip-audit` 2.10.1 clean over the locked set. **Frozen exe smoke 18/18** (hostile Host
+403, cross-origin + cross-site POST 403, loopback POST 200, native WS ping/pong, cross-origin WS
+403, `/desktop` hash-match + CSP, unknown symbols `[]`, six venue rows with binance/okx/hyperliquid
+wired, 0 client errors). **Sandbox from the tree:** engine start + four venue switches (ticks on
+every venue, fresh `last_tick_ms`; tape `live` on bybit); backfill round trip BTCUSDT 2026-09-13 →
+512,737 ticks / 6,390,912 B, read back via `/api/control/trades` total 512,737 (page capped at
+50,000, truncated); the eight audio params set through `/api/control/params` and read back from the
+registry + `config.json`; demo guards `[]`/neutral for `UNKNOWNXYZ`; 0 client errors.
+
+**Nothing pushed; no tag.** The owner's queue stands: the push decision, his physical
+multi-monitor pass (§78 if it finds anything), the release-notes review (with the F-06 lines),
+then tag `v0.1.0-beta` with the zip + Setup + SBOM.
+

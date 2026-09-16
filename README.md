@@ -5,9 +5,9 @@
 [![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](.)
 [![License](https://img.shields.io/badge/license-MIT-informational?style=for-the-badge)](LICENSE)
 [![Instruments](https://img.shields.io/badge/instruments-49-blue?style=for-the-badge)](.)
-[![Code](https://img.shields.io/badge/code-~64k%20lines-brightgreen?style=for-the-badge)](.)
+[![Code](https://img.shields.io/badge/code-~68k%20lines-brightgreen?style=for-the-badge)](.)
 [![API](https://img.shields.io/badge/API-133%20routes-orange?style=for-the-badge)](.)
-[![Tests](https://img.shields.io/badge/tests-716%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+[![Tests](https://img.shields.io/badge/tests-843%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
 
 ---
 
@@ -123,7 +123,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
                             │
      ┌──────────────┐       │       ┌──────────────┐
      │  Bybit Feed  │───────┤       │   Database   │
-     │  (329L)      │       ├──────▶│  (430L)      │
+     │  (339L)      │       ├──────▶│  (472L)      │
      │  WebSocket   │       │       │  SQLite WAL  │
      │  Free, no key│       │       └──────────────┘
      └──────────────┘       │
@@ -183,16 +183,16 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 ### Module Dependency Graph
 
 ```
-main.py (820L) ─── System orchestrator
+main.py (857L) ─── System orchestrator
     │
-    ├── config/settings.py (815L) ─── 31 instrument configs, 14 config dataclasses
+    ├── config/settings.py (821L) ─── 31 instrument configs, 14 config dataclasses
     │
     ├── data/
     │   ├── models.py (330L) ─── 9 dataclasses: Tick, Candle, Signal, FootprintLevel, TradeState...
     │   ├── candle_builder.py (132L) ─── Tick → 1m aggregation + footprint
     │   ├── mt5_feed.py (493L) ─── MT5 terminal: ticks, book, history
-    │   ├── bybit_feed.py (329L) ─── Bybit WebSocket: trades + orderbook
-    │   └── database.py (430L) ─── SQLite: 5 tables, WAL mode
+    │   ├── bybit_feed.py (339L) ─── Bybit WebSocket: trades + orderbook
+    │   └── database.py (472L) ─── SQLite: 5 tables, WAL mode
     │
     ├── analytics/
     │   ├── volume_profile.py (283L) ─── POC/VAH/VAL/LVN/shape
@@ -228,7 +228,7 @@ main.py (820L) ─── System orchestrator
     │   ├── launcher.py ─── pywebview window / --headless server
     │   ├── api.py ─── /api/control/* (config, feeds, alerts, exports, layouts)
     │   ├── engine.py ─── the live pipeline host the UI reads from
-    │   └── ui/ ─── vanilla-JS modules (~30,400L across 70 files) + index.html
+    │   └── ui/ ─── vanilla-JS modules (~30,100L across 75 files) + index.html
 ```
 
 ---
@@ -532,7 +532,7 @@ The system auto-discovers instruments across 200+ broker-specific naming variant
 
 ### Frontend Components
 
-The current UI is the desktop suite: **70 vanilla-JS modules** in `orderflow_system/desktop/ui/`
+The current UI is the desktop suite: **75 vanilla-JS modules** (22 of them selftests) in `orderflow_system/desktop/ui/`
 (shell and menus, chart, the order-flow engine, heatmap, tape, alerts, options, fundamentals, news,
 search, watchlist, studies — no build step, no framework). The 8 modules listed below are the legacy
 dashboard page's assets, still served at `/static/`:
@@ -815,19 +815,19 @@ curl http://localhost:8080/api/trade/NAS100USDT
 
 ```
 orderflow_system/
-├── main.py                          # System orchestrator (820L)
+├── main.py                          # System orchestrator (857L)
 ├── __init__.py                      # Package init
 ├── test_integration.py              # Integration tests (309L)
 │
 ├── config/
-│   └── settings.py                  # 31 instrument configs, 14 config dataclasses (815L)
+│   └── settings.py                  # 31 instrument configs, 14 config dataclasses (821L)
 │
 ├── data/
 │   ├── models.py                    # 9 dataclasses: Tick, Candle, Signal, FootprintLevel, TradeState... (330L)
 │   ├── candle_builder.py            # Tick → 1m candle aggregation (132L)
-│   ├── bybit_feed.py                # Bybit WebSocket feed (329L)
+│   ├── bybit_feed.py                # Bybit WebSocket feed (339L)
 │   ├── mt5_feed.py                  # MT5 terminal feed with auto-discovery (493L)
-│   └── database.py                  # SQLite persistence, 5 tables (430L)
+│   └── database.py                  # SQLite persistence, 5 tables (472L)
 │
 ├── analytics/
 │   ├── volume_profile.py            # POC, VAH, VAL, LVN, shape classification (283L)
@@ -863,7 +863,7 @@ orderflow_system/
         ├── performance.js           # Performance analytics (599L)
         ├── orderbook.js             # Orderbook depth ladder (398L)
         ├── microstructure.js        # Microstructure indicators (417L)
-        └── tape.js                  # Time & sales (414L)
+        └── tape.js                  # Time & sales (448L)
 ```
 
 ---
@@ -872,17 +872,17 @@ orderflow_system/
 
 | Area | Files | Python Lines | UI Lines (JS/CSS/HTML) | Total Lines |
 |------|-------|-------------|------------------------|-------------|
-| Config | 2 | 815 | — | 815 |
-| Data feeds + storage | 11 | 3,566 | — | 3,566 |
+| Config | 2 | 821 | — | 821 |
+| Data feeds + storage | 16 | 6,058 | — | 6,058 |
 | Analytics (delta, footprint, volume profile, patterns, signals, alerts) | 17 | 3,077 | — | 3,077 |
 | Atlas (live analytics + `/api/atlas/*`) | 26 | 7,558 | — | 7,558 |
-| Desktop app (desktop package + packaging scripts) | 24 | 9,065 | — | 9,065 |
-| Desktop UI (vanilla JS + CSS + HTML, no build step) | 81 | — | 31,950 | 31,950 |
-| Legacy dashboard (host + legacy page assets) | 14 | 2,506 | 4,633 | 7,139 |
-| Orchestrator (`main.py`) | 1 | 820 | — | 820 |
-| **Total (excluding tests)** | **176** | **27,407** | **36,583** | **63,990** |
+| Desktop app (desktop package + packaging scripts) | 25 | 9,529 | — | 9,529 |
+| Desktop UI (vanilla JS + CSS + HTML, no build step) | 84 | — | 32,469 | 32,469 |
+| Legacy dashboard (host + legacy page assets) | 14 | 2,506 | 4,667 | 7,173 |
+| Orchestrator (`main.py`) | 1 | 857 | — | 857 |
+| **Total (excluding tests)** | **185** | **30,406** | **37,136** | **67,542** |
 
-Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 69 files / 12,422 lines.
+Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 76 files / 15,091 lines. The desktop UI also ships its icon assets and the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`), which the columns above do not count.
 
 ---
 
