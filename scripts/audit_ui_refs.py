@@ -186,6 +186,10 @@ def main() -> int:
     except Exception as exc:                                     # pragma: no cover
         problems.append(f"   IMPORT FAILED  {type(exc).__name__}: {exc}")
         print(f"4. modules import: FAILED ({exc})")
+        print(f"   interpreter: {sys.executable}")
+        if isinstance(exc, ModuleNotFoundError):
+            print("   hint: this audit imports the package — run it with the project venv, e.g.")
+            print("         .venv/Scripts/python.exe scripts/audit_ui_refs.py")
 
     syntax_bad = js_syntax_check()
     for item in syntax_bad:
