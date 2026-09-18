@@ -1,6 +1,16 @@
 # Resume here — ModFlow OrderFlow Analysis Suite
 
-> ## ▶ RE-ATTENDANCE (latest, 2026-09-18 — **§108: hotfix — the Help search's stale-results crash (help.js:476) fixed + pinned; nothing committed**)
+> ## ▶ RE-ATTENDANCE (latest, 2026-09-18 — **§109: PUSHED — fold-in + waves on ModdySwag/ModFlow-OrderFlow-Analysis-Suite (`91f337c`, CI fix `0bd9836`); CI GREEN both jobs; worktree clean; packaging still owed**)
+>
+> **State.** Full record: SESSION_HANDOFF **§109**. His word landed it: everything since `110c568` pushed to `moddy` (205 files, +33.5k) with **docs/GOLDEN_FEATURES.md**, a README Golden Features section and two 1920×1080 shots in `docs/screenshots/`; counts re-derived (tests 1400, code ~84k, API 180, help 81 topics). First CI run red on two CI-only failures — the P2-3 frame-yield checks (real-time flake, red since `110c568`) and the machine-dependent NT bridge test (`ok=True` needs a live NinjaTrader AddOns state) — fixed in `0bd9836` (fake clock; stubbed detect; sources now resolve under `src/`). CI run `35293195447` green on 3.11 + 3.12.
+>
+> **Gates.** pytest **1400 passed / 2 skipped**; AUDIT CLEAN; ruff clean; 33 node selftests / 0 failing; ofx 208/0 ×15 reruns.
+>
+> **Owed.** `dist/` · zip · SBOM · installer **NOT rebuilt** — Phase 6 on his word. Follow-ups: radar walls / big-trade zones, spent-state persistence, B5 migrations, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §109 closed (fold-in + waves PUSHED, CI green, worktree clean). Owed: packaging pass (Phase 6) on Moddy's word.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-18 — **§108: hotfix — the Help search's stale-results crash (help.js:476) fixed + pinned; nothing committed**)
 >
 > **State.** Full record: SESSION_HANDOFF **§108**. Symptom: `Cannot read properties of null (reading 'results')` at `help.js:476:43` in the error strip. Cause: clearing the search nulled `state.results` but the pane re-rendered only when a topic was open — leftover result buttons stayed clickable and the handler read the null set. Repro'd live, fixed (pane always replaces; handler guards), pinned (`test_help.py` 33/33), verified clean after. Pre-existing latent bug, surfaced by Phase 5's heavy Help use.
 >
