@@ -89,8 +89,12 @@ def test_a_signal_is_never_dropped_for_a_slow_client():
         for i in range(total):
             await manager.broadcast(Channel.SIGNAL, {"i": i})
         assert manager.delivery_stats()["dropped"] == 0, "no signal was trimmed"
-        # delivery is slower than production here, so wait for the drain rather than guess a sleep
-        deadline = asyncio.get_running_loop().time() + 5.0
+        # delivery is slower than production here, so wait for the drain rather than guess a sleep.
+        # The budget is a hang guard, not a pace: Windows timer granularity stretches each 1 ms
+        # write to the platform tick (~15.6 ms), so the full drain runs ~5 s on a loaded runner —
+        # the 3.11 job crossed a 5 s deadline once (2026-09-18). The assertion below is unchanged:
+        # every signal, in order, or the test fails.
+        deadline = asyncio.get_running_loop().time() + 30.0
         while len(slow.sent) < total and asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.02)
         assert [m["data"]["i"] for m in slow.sent] == list(range(total)), "every signal arrived, in order"

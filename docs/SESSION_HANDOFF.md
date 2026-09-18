@@ -5277,3 +5277,12 @@ Integration: the rail gained Journal + Calendar; every new view carries a Help t
 - **Cut.** `gh release create v0.1.0-beta --target main --prerelease` with the three dist artefacts and hand-written notes (natural voice: what the suite is, what this build adds, install/good-to-know, the sha256 of each asset, source commit `0123cc1`, the sign-off). URL: **https://github.com/ModdySwag/ModFlow-beta-builds/releases/tag/v0.1.0-beta** — published 2026-09-18T01:18:07Z.
 - **Verified from GitHub's side.** Asset `digest` fields read back == local sha256s (Setup `76f53ead…` 41,759,968 B; zip `f11450d7…` 40,830,501 B; SBOM `8c3c0683…` 448,822 B; all `state: uploaded`, not draft); the SBOM was **downloaded from the release and re-hashed** — match. Tag ref `v0.1.0-beta` → `4d6135ff…`.
 - **Deliberate.** No tag on the public source repo (the lane carries the release; the notes name the commit). **Owed:** invite the beta testers as **Read collaborators** on the lane — his call, no names on record.
+
+---
+
+**§112 — the third CI-only flake, fixed at the root: the websocket never-drop test's drain budget raced the Windows timer tick.**
+
+- **Symptom.** The docs-only commit `1112b5e` (code identical to the green `0123cc1`) went red on the **3.11 job only**: `test_websocket_backpressure.py::test_a_signal_is_never_dropped_for_a_slow_client` — “every signal arrived, in order”.
+- **Root cause (measured, not guessed).** The test drains 296 signals through a fake socket whose 1 ms writes are, on Windows, stretched to the platform timer tick (~15.6 ms): the drain measures **4.10 s** on this machine (`--durations`) against a **5 s** deadline — ~20% headroom, crossed on a loaded runner. The never-drop path itself was never implicated (`dropped == 0` held).
+- **Fix.** The budget is now a **30 s hang guard** with a comment explaining the tick; the assertion is untouched — every signal, in order, or the test fails. File green 4× locally (durations confirm the 4.1 s drain); full suite **1400/2**.
+- **Pattern note.** Third of the same class this session (P2-3 real-time yield checks → fake clock; the NT bridge test → machine-independent stub; this one → a budget that stopped racing the platform timer). All three were real-time or machine-state dependence in the TEST, never the code under test.

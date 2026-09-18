@@ -1,6 +1,16 @@
 # Resume here — ModFlow OrderFlow Analysis Suite
 
-> ## ▶ RE-ATTENDANCE (latest, 2026-09-18 — **§111: the release cut — v0.1.0-beta published (prerelease) in the private lane with zip + Setup + SBOM; digests verified**)
+> ## ▶ RE-ATTENDANCE (latest, 2026-09-18 — **§112: third CI flake fixed — the websocket never-drop drain budget raced the Windows timer tick (4.1 s measured vs a 5 s deadline); budget now a 30 s hang guard, assertion untouched**)
+>
+> **State.** Full record: SESSION_HANDOFF **§112**. `1112b5e` (docs-only) went red on 3.11 only; root cause measured: 296 fake writes × the 15.6 ms platform tick = a 4.1 s drain against a 5 s deadline. Fixed in `test_websocket_backpressure.py` (30 s hang-guard budget, same assertion); file green 4×; suite **1400/2**.
+>
+> **Gates.** pytest 1400 / 2 skipped; AUDIT CLEAN; ruff clean; 33/33 selftests.
+>
+> **Owed.** (carried) Invite beta testers as Read collaborators on the private lane; follow-ups: radar walls / big-trade zones, spent-state persistence, B5 migrations, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §112 closed (websocket drain-budget flake fixed at the root). Owed: tester invites; the standing follow-ups.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-18 — **§111: the release cut — v0.1.0-beta published (prerelease) in the private lane with zip + Setup + SBOM; digests verified**)
 >
 > **State.** Full record: SESSION_HANDOFF **§111**. `ModdySwag/ModFlow-beta-builds` seeded (README, commit `4d6135ff…`), release published: https://github.com/ModdySwag/ModFlow-beta-builds/releases/tag/v0.1.0-beta — Setup `76f53ead…` (41,759,968 B), zip `f11450d7…` (40,830,501 B), SBOM `8c3c0683…` (448,822 B); API digests == local sha256s; the SBOM was downloaded back and hash-verified. Notes name the source commit `0123cc1`.
 >
