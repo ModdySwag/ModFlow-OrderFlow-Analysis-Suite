@@ -132,6 +132,41 @@ function boot() {
     check('chip: created once, reused on the next call', F.chip(head, 'ofx') === el2 && head.children.length === 1);
 }
 
+/* ── T4/A5: the user's thresholds ───────────────────────────────── */
+
+{
+    const F = boot();
+    check('windows: the built-in table when the user set nothing',
+        F.window('depth') === 5000 && F.window('candles') === 60000);
+    const aged = F.stamp('aged', { lastMs: Date.now() - 8000, kind: 'depth' });
+    check('windows: under the built-in window an 8 s age is stale', F.pick(F.state(aged)) === 'stale');
+    F.setWindows({ depth_s: 30 });
+    check('windows: a user override in seconds wins over the table', F.window('depth') === 30000);
+    check('windows: unset kinds keep the table', F.window('candles') === 60000);
+    check('windows: an existing row re-judges immediately', F.pick(F.state(aged)) === 'fresh');
+    check('windows: a stamped window still beats the user (the payload is the truth)',
+        F.stamp('payload', { ageMs: 0, windowMs: 250 }).windowMs === 250);
+    F.setWindows({ depth_s: 0 });
+    check('windows: zero restores the built-in window', F.window('depth') === 5000);
+    F.setWindows({ depth_s: -5, quote_s: 'junk' });
+    check('windows: junk is ignored, never a crash',
+        F.window('depth') === 5000 && F.window('quote') === 60000);
+}
+
+/* ── T4/A16: the strip summary ──────────────────────────────────── */
+
+{
+    const F = boot();
+    F.stamp('live-a', { lastMs: Date.now() - 1000, kind: 'depth' });
+    F.stamp('live-b', { lastMs: Date.now() - 9000, kind: 'depth' });   // stale under the 5 s window
+    F.stamp('demo-c', { source: 'demo' });
+    F.stamp('unknown-d', {});
+    const s = F.summary();
+    check('summary: only live, aged panels are counted', s.live === 2);
+    check('summary: the stale list names the panel', s.stale.length === 1 && s.stale[0] === 'live-b');
+    check('summary: the oldest age is the strip number', s.oldest_ms >= 9000 && s.oldest_ms < 20000);
+}
+
 console.log('freshness selftest: ' + ok + ' ok, ' + failures.length + ' failed');
 for (const f of failures) console.log('  FAIL', f);
 process.exit(failures.length ? 1 : 0);

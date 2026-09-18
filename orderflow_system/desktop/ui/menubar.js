@@ -20,7 +20,7 @@
     const state = {
         bar: null, open: null, itemMap: null, params: null, sources: [], active: '',
         workspaces: {}, booted: false, view: 'overview',
-        layouts: {}, layoutMode: 'classic',
+        layouts: {}, layoutVersions: {}, layoutMode: 'classic',
     };
 
     function api(path, options) {
@@ -54,7 +54,9 @@
     const planned = (label, reason, accel) => ({ label, accel, disabled: true, reason });
 
     function viewItems() {
-        const items = [...document.querySelectorAll('.rail .nav-item')].map((btn, i) => ({
+        /* T4/A-corr: view items only — the Setup button is not a panel, and counting it put
+           "1" on the wizard and shifted every digit in this list by one. */
+        const items = [...document.querySelectorAll('.rail .nav-item[data-view]')].map((btn, i) => ({
             label: btn.textContent.trim().replace(/\s+/g, ' '),
             accel: i < 9 ? String(i + 1) : '',
             checked: btn.classList.contains('active'),
@@ -68,18 +70,126 @@
         return [{
             label: 'All panels…', accel: '/', run: () => { const b = el('menuBtn'); if (b) b.click(); },
         }, sep()].concat(items, [sep(),
+            { label: 'Windows & layouts…', run: () => { if (window.OFAPWINDOWS && OFAPWINDOWS.open) OFAPWINDOWS.open(); } },
             { label: 'Legend panel', checked: legendOpen(), run: toggleLegend },
-            { label: 'Rail', checked: !document.querySelector('.app.rail-hidden'), run: toggleRail },
-            { label: 'Status bar', checked: !document.querySelector('.app.status-hidden'), run: toggleStatus },
+            { label: 'Menu bar', accel: 'B', checked: !(window.OFAPCHROME && OFAPCHROME.hidden('menubar')), run: toggleMenubar },
+            { label: 'Rail', accel: 'R', checked: !(window.OFAPCHROME && OFAPCHROME.hidden('rail')), run: toggleRail },
+            { label: 'Status bar', checked: !(window.OFAPCHROME && OFAPCHROME.hidden('status')), run: toggleStatus },
             { label: 'Full screen (zen)', checked: document.querySelector('.app.zen'), run: toggleZen },
             sep(),
             planned('Reset rail order', 'phase 5 — the profile store owns layouts'),
-            planned('Reset all view settings', 'phase 2 — per-view Restore defaults'),
+            ...viewDefaultsItems(),
         ]);
     }
 
-    function legendOpen() {
-        const panel = el('ofxLegendPanel');
+    /* ── T6/A15: this view's settings — remember / restore / factory ────────────────
+
+    /* Which config paths a view's snapshot covers. Mirrors `config_store.VIEW_DEFAULT_MAP`;
+       `test_t6_menus.py` pins the two equal, so a snapshot can never name a path the store would
+       refuse to carry back. */
+    const VIEW_DEFAULTS_MAP = { chart: ['ui.chart'], logs: ['ui.logs'], heatmap: ['atlas.heatmap'],
+        tape: ['atlas.tape'], cvd: ['atlas.cvd'], profile: ['atlas.market_profile'],
+        ofx: ['ofx', 'atlas.ofx'] };
+
+    function pathGet(root, path) {
+        return path.split('.').reduce(function (n, k) {
+            return (n && typeof n === 'object') ? n[k] : undefined;
+        }, root);
+    }
+    function pathPatch(root, path, sub) {
+        const parts = path.split('.');
+        let node = root;
+        parts.forEach(function (part, i) {
+            if (i === parts.length - 1) { node[part] = sub; return; }
+            node = node[part] = (node[part] && typeof node[part] === 'object') ? node[part] : {};
+        });
+        return root;
+    }
+    /* `S` is ui.js's top-level binding, not window.S (see the T5 lesson in the skill). */
+    function cfgNow() {
+        try { return (typeof S !== 'undefined' && S && S.config) ? S.config : null; }
+        catch (e) { return null; }
+    }
+    function adoptConfig(cfg) {
+        try { S.config = cfg; } catch (e) { /* the next read retries */ }
+        if (window.OFAPFRESH && OFAPFRESH.setWindows) OFAPFRESH.setWindows(((cfg || {}).atlas || {}).freshness);
+        /* the canvases re-measure and repaint on their own polls; a relayout makes it immediate */
+        document.dispatchEvent(new CustomEvent('ofap:relayout'));
+    }
+    async function rememberView(view) {
+        const paths = VIEW_DEFAULTS_MAP[view] || [];
+        const cfg = cfgNow();
+        if (!cfg) { note('the settings have not loaded yet'); return; }
+        const snap = {};
+        paths.forEach(function (p) {
+            const sub = pathGet(cfg, p);
+            if (sub && typeof sub === 'object') snap[p] = JSON.parse(JSON.stringify(sub));
+        });
+        try {
+            const r = await api('/api/control/config', { method: 'POST', body: { ui: { view_defaults: { [view]: snap } } } });
+            adoptConfig(r.config);
+            note('remembered this view’s settings (' + Object.keys(snap).length + ' block'
+                + (Object.keys(snap).length === 1 ? '' : 's') + ')');
+        } catch (e) { note('the store refused: ' + e); }
+    }
+    async function restoreView(view, snap) {
+        const patch = {};
+        Object.keys(snap).forEach(function (p) { pathPatch(patch, p, snap[p]); });
+        try {
+            const r = await api('/api/control/config', { method: 'POST', body: patch });
+            adoptConfig(r.config);
+            note('restored the remembered settings for ' + view);
+        } catch (e) { note('the store refused: ' + e); }
+    }
+    async function factoryView(view) {
+        const paths = VIEW_DEFAULTS_MAP[view] || [];
+        try {
+            const d = await api('/api/control/config/defaults');
+            const def = (d && d.config) || null;
+            if (!def) { note('the defaults are unavailable'); return; }
+            const patch = {};
+            paths.forEach(function (p) {
+                const sub = pathGet(def, p);
+                if (sub && typeof sub === 'object') pathPatch(patch, p, sub);
+            });
+            const r = await api('/api/control/config', { method: 'POST', body: patch });
+            adoptConfig(r.config);
+            note('reset this view to factory — engine-side values apply at the next engine start');
+        } catch (e) { note('the store refused: ' + e); }
+    }
+
+    /* The View menu's tail: the active view's own settings trio, or an honest sentence when the
+       view keeps nothing of its own. */
+    function viewDefaultsItems() {
+        /* Resolve the view LIVE: `state.view` only tracks rail clicks, and a view reached by the
+           palette, the scanner or a script must not leave this menu talking about the last rail
+           click's panel. */
+        const activeEl = document.querySelector('.view.active[data-view]');
+        const view = (activeEl && activeEl.getAttribute('data-view')) || state.view;
+        const vmap = VIEW_DEFAULTS_MAP[view];
+        const out = [sep()];
+        if (!vmap) {
+            out.push({ label: 'This view keeps no settings of its own', disabled: true,
+                       reason: 'its panels read the shared Settings surface' });
+            return out;
+        }
+        const cfg = cfgNow();
+        const stored = (cfg && cfg.ui && cfg.ui.view_defaults && cfg.ui.view_defaults[view]) || null;
+        out.push({ header: 'This view — settings (' + view + ')' });
+        out.push({ label: 'Remember this view’s settings',
+                   hint: 'snapshot ' + vmap.join(' · ') + ' so you can come back to it after experimenting',
+                   run: () => rememberView(view) });
+        out.push(stored
+            ? { label: 'Restore the remembered settings', run: () => restoreView(view, stored) }
+            : { label: 'Restore the remembered settings', disabled: true,
+                reason: 'nothing remembered for this view yet' });
+        out.push({ label: 'Reset this view to factory',
+                   hint: 'back to the shipped values for ' + vmap.join(' · '),
+                   run: () => factoryView(view) });
+        return out;
+    }
+
+    function legendOpen() {        const panel = el('ofxLegendPanel');
         if (!panel) return false;
         return !panel.classList.contains('ofx-leg-collapsed');
     }
@@ -90,19 +200,23 @@
         if (btn) btn.click();
         if (state.view !== 'ofx' && window.showView) window.showView('ofx');
     }
+    /* §91: chrome.js owns the toggles (persistence + the B/R keys live there); these wrappers
+       keep the View menu's own behaviour and its running commentary. */
     function toggleRail() {
-        const app = document.querySelector('.app');
-        if (app) { app.classList.toggle('rail-hidden'); note('rail ' + (app.classList.contains('rail-hidden') ? 'hidden' : 'shown')); }
+        if (!window.OFAPCHROME) return;
+        note('rail ' + (OFAPCHROME.toggle('rail') ? 'hidden' : 'shown'));
+    }
+    function toggleMenubar() {
+        if (!window.OFAPCHROME) return;
+        const on = OFAPCHROME.toggle('menubar');
+        note(on ? 'menu bar hidden — press B to bring it back' : 'menu bar shown');
     }
     function toggleStatus() {
-        const app = document.querySelector('.app');
-        if (app) app.classList.toggle('status-hidden');
+        if (window.OFAPCHROME) OFAPCHROME.toggle('status');
     }
     function toggleZen() {
-        const app = document.querySelector('.app');
-        if (!app) return;
-        app.classList.toggle('zen');
-        note(app.classList.contains('zen') ? 'zen mode — chrome hidden (View ▸ Full screen)' : 'chrome restored');
+        if (!window.OFAPCHROME) return;
+        note(OFAPCHROME.zen() ? 'zen mode — chrome hidden (View ▸ Full screen)' : 'chrome restored');
     }
 
     function sourceItems() {
@@ -147,6 +261,19 @@
             const res = await api(path, { method: 'POST', body: {} });
             note(`${action}: ${res && (res.state || (res.ok ? 'ok' : 'refused'))}`);
         } catch (err) { note(`${action} failed: ${err}`); }
+    }
+    /* §92: the keyboard reaches the engine through here (keys.js binds Ctrl+Alt+S/X/R). */
+    window.OFAPENGINE = engine;
+
+    /* §87 — the Run menu's launcher. One literal route (audit_ui_refs matches literals against
+       the FastAPI routes); the server spawns the mode in its own console so it is visible and
+       Ctrl+C-able, and answers with the honest note about the shared history store. */
+    async function launchMode(mode) {
+        try {
+            const res = await api('/api/control/launch', { method: 'POST', body: { mode } });
+            note(res && res.ok ? (res.note || `${mode} starting`) 
+                               : `refused: ${(res && (res.error || res.note)) || 'unknown mode'}`);
+        } catch (err) { note(`${mode} launch failed: ${err}`); }
     }
 
     /* ── the Chart menu: the active view's registered variables ───────────── */
@@ -311,6 +438,7 @@
         try {
             const res = await api('/api/control/layouts');
             state.layouts = (res && res.items) || {};
+            state.layoutVersions = (res && res.versions) || {};
             state.layoutMode = (res && res.mode) || 'classic';
         } catch (err) { /* the menu reports what it has */ }
     }
@@ -347,6 +475,7 @@
         const mode = shell ? shell.mode() : state.layoutMode;
         const currentId = shell ? shell.stats().layoutId : '';
         const current = shell ? shell.layout() : null;
+        const locked = Boolean(shell && shell.locked && shell.locked());
         const screen = shell ? shell.screenKey() : '';
         const items = [
             { header: 'Workspace' },
@@ -379,6 +508,10 @@
               run: () => { shell.arrange(); note('tiled the tab across the board'); } },
             { label: 'Reset to the starter board', run: () => layoutAction(() => shell.resetBoard(),
                 (r) => 'board reset to the starter arrangement (' + r.widgets + ' widgets)') },
+
+            { label: locked ? 'Unlock the layout' : 'Lock the layout', checked: locked,
+              hint: 'a locked layout refuses move, resize, add and remove',
+              run: () => { if (shell && shell.setLocked) { const on = shell.setLocked(!locked); note('layout ' + (on ? 'locked' : 'unlocked')); } } },
             sep(),
             { label: 'Save for this screen (' + (screen || 'unknown') + ')',
               run: () => layoutAction(() => shell.saveForScreen(), (r) => 'saved for ' + r.screen_key) },
@@ -410,12 +543,153 @@
                 run: () => layoutAction(() => shell.activateLayout(id), (r) => 'loaded “' + r.name + '”'),
             });
         });
+        const versions = (state.layoutVersions && currentId && state.layoutVersions[currentId]) || [];
+        if (versions.length) {
+            items.push(sep(), { header: 'This layout — previous versions' });
+            versions.slice(0, 3).forEach((v) => {
+                const when = new Date(Number(v.at) || 0);
+                const stamp = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                items.push({
+                    label: 'Restore “' + v.name + '” — saved ' + stamp,
+                    run: () => layoutAction(() => shell.restoreVersion(currentId, Number(v.at) || 0),
+                                            (r) => 'restored “' + ((r && r.name) || v.name) + '”'),
+                });
+            });
+        }
         items.push(sep(), { label: ids.length + ' of 24 layouts', disabled: true,
                             reason: 'layouts live in your config file; the browser keeps no copy' });
         return items;
     }
 
+    /* §92 — the Keys menu: the shortcut helper. Built from the same registry the dispatcher and
+       the hotkey sheet read, so the menu cannot drift from what the keyboard actually does; a row
+       with a rectangle runs its action, a row without one names the scope it acts in. */
+    function copyKeys() {
+        if (!window.OFAPKEYS) return;
+        const text = OFAPKEYS.list().map((r) => (r.scope + '\t' + r.keys + '\t' + r.label)).join('\n');
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text)
+                .then(() => note('shortcut list copied (' + OFAPKEYS.list().length + ' rows)'))
+                .catch(() => note('the clipboard refused the copy'));
+        } else {
+            note('the clipboard is unavailable in this shell');
+        }
+    }
+
+    function keysItems() {
+        if (!window.OFAPKEYS) return [{ label: 'the shortcut map has not loaded', disabled: true }];
+        const rows = OFAPKEYS.list();
+        const armed = Boolean(OFAPKEYS.armed && OFAPKEYS.armed());
+        const out = [
+            { label: 'Shortcut sheet', accel: '?', run: () => document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true })) },
+            { label: 'Keyboard help topic', run: () => helpCentre('work.keys') },
+            { label: armed ? 'Disarm the order keys' : 'Arm the order keys', checked: armed,
+              hint: 'armed keys can place simulated orders: Alt+B buy · Alt+S sell · Alt+X flatten (paper only)',
+              run: () => { const on = OFAPKEYS.setArmed(!OFAPKEYS.armed()); note('order keys ' + (on ? 'armed — Alt+B / Alt+S / Alt+X are live' : 'disarmed')); } },
+            { label: 'Copy the shortcut list', run: () => copyKeys() },
+            sep(),
+        ];
+        let scope = '';
+        rows.forEach((row) => {
+            if (row.scope !== scope) {
+                scope = row.scope;
+                out.push({ header: scope });
+            }
+            if (row.dispatched) {
+                /* T6/A8 — context-valid menus: a row whose gate is false right now is shown
+                   disabled, with the why the binding itself carries — the menu teaches the
+                   model by omission instead of swallowing a click. */
+                if (!OFAPKEYS.canDispatch(row.id)) {
+                    out.push({ label: row.label, accel: row.keys, disabled: true,
+                               reason: row.why || 'not available right now — its context has to match' });
+                } else {
+                    out.push({ label: row.label, accel: row.keys, run: () => OFAPKEYS.run(row.id) });
+                }
+            } else {
+                out.push({ label: row.label, accel: row.keys, disabled: true,
+                           reason: `acts in ${scope} (the sheet lists its context)` });
+            }
+        });
+        return out;
+    }
+
+    /* The three ways this program runs, plus the optional add-ons — the top bar's switcher. */
+    function runItems() {
+        return [
+            { header: 'Run mode' },
+            { label: 'Desktop app — this window', checked: true,
+              hint: 'the native window: full UI on the loopback, engine and history store',
+              run: () => note('this window IS the desktop mode — the app is running here') },
+            { label: 'Headless server on port 8099',
+              hint: 'starts --headless --port 8099 in its own console — shares this profile, so stop it when the smoke test is done',
+              run: () => launchMode('headless') },
+            { label: 'CLI pipeline — feeds \u2192 detectors \u2192 Telegram',
+              hint: 'the console pipeline (orderflow_system.main) in its own window; source tree only',
+              run: () => launchMode('cli') },
+            sep(),
+            { header: 'Optional' },
+            { label: 'MT5 feed support — optional',
+              hint: 'MetaTrader 5 is never required: pick it as the source, or open Market Watch to mirror the running terminal',
+              run: () => { showView('marketwatch'); note('MT5 is optional — the board mirrors your running terminal when MT5 is chosen'); } },
+            { label: 'NinjaTrader 8 bridge — optional',
+              hint: 'the AddOn lane: source \u2192 NinjaScript Editor F5 \u2192 the trust prompt',
+              run: () => { showView('platforms'); note('NinjaTrader is optional — the Platforms view holds the bridge lane'); } },
+            { label: 'Dev tooling — uv \u00b7 pytest \u00b7 node selftests',
+              hint: 'the gates ship with the source tree',
+              run: () => note('uv run pytest \u00b7 node ui/*.selftest.js \u00b7 ruff — CONTRIBUTING.md lists the gates') },
+            sep(),
+            { label: 'Market watch — the source\u2019s whole board', run: () => showView('marketwatch') },
+        ];
+    }
+
     /* ── the menus ────────────────────────────────────────────────────────── */
+    /* ── R7: the Update menu — the running build, the newest release, one click to fetch.
+       Its label carries a bullet while a build is waiting, and `window.OFAPMENU.refresh()`
+       re-reads it when the updater's state changes (the bar is painted once, on boot). */
+    function updState() { return (window.OFAPUPDATES && window.OFAPUPDATES.state) || null; }
+
+    function updateLabel() {
+        var s = updState();
+        return (s && s.update_available) ? 'Update \u25cf' : 'Update';
+    }
+
+    function updateItems() {
+        var s = updState();
+        var latest = (s && s.latest) || null;
+        var current = (s && s.current) || {};
+        var items = [
+            { label: 'Running build', value: String(current.display || current.version || '?'),
+              disabled: true, reason: 'the build this window is running' },
+        ];
+        if (!s) {
+            items.push({ label: 'Status', value: 'not checked yet', disabled: true,
+                         reason: 'the updater has not answered yet \u2014 use Check now' });
+        } else if (s.checking) {
+            items.push({ label: 'Checking\u2026', disabled: true });
+        } else if (latest && s.update_available) {
+            items.push(
+                { label: 'Download ' + String(latest.version || ''), run: () => OFAPUPDATES.download() },
+                { label: 'Release notes\u2026', run: () => OFAPUPDATES.showNotes() },
+                { label: 'Skip this version', run: () => OFAPUPDATES.skip(String(latest.version || '')) });
+        } else if (latest && s.skipped) {
+            items.push({ label: 'Skipped', value: String(latest.version || ''), disabled: true,
+                         reason: 'you skipped this one \u2014 un-skip it in Settings \u25b8 Updates' });
+        } else if (latest) {
+            items.push({ label: 'Up to date', value: String(latest.version || ''), disabled: true,
+                         reason: 'the newest release is what this window runs' });
+        } else {
+            items.push({ label: 'No release information', disabled: true,
+                         reason: s.error || 'the repository has no releases yet' });
+        }
+        items.push(sep(),
+                   { label: 'Check now', run: () => OFAPUPDATES.refresh(true) },
+                   { label: 'Open updates folder', run: () => OFAPUPDATES.openFolder() },
+                   { label: 'Release page', run: () => OFAPUPDATES.openPage() },
+                   sep(),
+                   { label: 'Update settings\u2026', run: () => OFAPUPDATES.openSettings() });
+        return items;
+    }
+
     function menus() {
         return [
             { id: 'file', label: 'File', items: [
@@ -427,9 +701,9 @@
                 { label: 'Open exports folder', run: () => openFolder('exports') },
                 { label: 'Show log file', run: () => { openFolder('logs'); if (window.showView) showView('logs'); } },
                 sep(),
-                { label: 'Start engine', run: () => engine('start') },
-                { label: 'Stop engine', run: () => engine('stop') },
-                { label: 'Restart engine', accel: 'Ctrl+Alt+R', run: () => engine('restart') },
+                { label: 'Start engine', keyId: 'engine-start', run: () => engine('start') },
+                { label: 'Stop engine', keyId: 'engine-stop', run: () => engine('stop') },
+                { label: 'Restart engine', keyId: 'engine-restart', run: () => engine('restart') },
                 sep(),
                 planned('Import profile…', 'phase 3 — the profile store'),
                 planned('Export data…', 'phase 4 — export manager (the endpoint exists: /export/save)'),
@@ -445,6 +719,7 @@
                 { header: 'Data source' },
                 { label: 'Source', submenu: sourceItems() },
                 { label: 'Instruments…', run: () => showView('instruments') },
+                { label: 'Instrument look-up\u2026', run: () => { if (window.OFAPHINT) OFAPHINT.run('lookup'); else showView('ofx'); } },
                 { label: 'Feed health', run: () => { showView('instruments'); note('tick rate and latency live in the status bar and the Instruments view'); } },
                 sep(),
                 { header: 'Streams' },
@@ -469,6 +744,8 @@
                 planned('Autosave', 'phase 4'),
                 { label: 'Open profiles folder', disabled: true, reason: 'phase 3 — the folder is created by the store' },
             ] },
+            { id: 'run', label: 'Run', items: runItems() },
+            { id: 'keys', label: 'Keys', items: keysItems() },
             { id: 'tools', label: 'Tools', items: [
                 { label: 'Command palette', accel: 'Ctrl+K', run: openPalette },
                 { label: 'Hotkeys…', accel: '?', run: () => document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true })) },
@@ -481,6 +758,7 @@
                 planned('Performance…', 'phase 2 — refresh rate, depth resolution, safe mode'),
                 planned('Studies library', 'phase 2 — deep-link into the Studies view settings'),
             ] },
+            { id: 'update', label: updateLabel(), items: updateItems() },
             { id: 'help', label: 'Help', items: [
                 /* §79: the front door. Every item runs the app's own function; the About card at the
                    bottom is rendered from the live facts (`/api/control/help`), so the version and the
@@ -772,12 +1050,18 @@
             if (item.checked === true) cls.push('mb-checked');
             if (item.kind === 'bool' || item.kind === 'enum') cls.push('mb-knob');
             const title = item.disabled && item.reason ? item.reason : (item.hint || '');
+            /* T3: a row may name a binding id (keyId) instead of a hand-typed accelerator — the
+               legend then renders from the same registry the dispatcher honours, so a displayed
+               key cannot drift from a real one (the §92 File-menu lie is the precedent). */
+            const accelText = item.keyId && window.OFAPKEYS && typeof OFAPKEYS.accelOf === 'function'
+                ? OFAPKEYS.accelOf(item.keyId)
+                : (item.accel || '');
             const row = `<button class="${cls.join(' ')}" data-key="${key}" title="${escp(title)}"${item.disabled ? ' disabled' : ''}>`
                 + `<span class="mb-tick">${item.checked ? '✓' : ''}</span>`
                 + `<span class="mb-label">${escp(item.label)}</span>`
                 + `<span class="mb-value">${escp(item.value || '')}</span>`
                 + `${item.submenu ? '<span class="mb-arrow">›</span>' : ''}`
-                + `<span class="mb-accel">${escp(item.accel || '')}</span></button>`;
+                + `<span class="mb-accel">${escp(accelText)}</span></button>`;
             if (!item.submenu) return row;
             return `<div class="mb-subwrap">${row}<div class="mb-sub">${itemsHtml(item.submenu, key, map)}</div></div>`;
         }).join('');
@@ -843,8 +1127,26 @@
             /* The bar owns its own dropdown layer so a menu can never be clipped by the topbar. */
             state.bar.innerHTML = menus().map((m) => `<div class="mb-slot" data-slot="${m.id}">`
                 + `<button class="mb-title" data-menu="${m.id}">${escp(m.label)}</button>`
-                + `<div class="mb-menu" data-menu="${m.id}"></div></div>`).join('');
+                + `<div class="mb-menu" data-menu="${m.id}"></div></div>`).join('')
+                /* §92: the bar hides itself — a physical control, and the paired reveal button
+                   lives in the topbar's marked spot (visible only while the bar is hidden). */
+                + '<div class="mb-grow"></div>'
+                + '<button class="mb-hide" id="mbHide" title="Hide the top menu bar">hide</button>';
+            const hideBtn = state.bar.querySelector('#mbHide');
+            if (hideBtn) hideBtn.addEventListener('click', () => { if (window.OFAPCHROME) OFAPCHROME.toggle('menubar'); });
             bind();
+            /* R7: labels can change while the app runs (the Update title badges a waiting build),
+               so the titles can be re-read without a page reload. */
+            window.OFAPMENU = {
+                refresh() {
+                    if (!state.bar) return;
+                    menus().forEach((m) => {
+                        const btn = state.bar.querySelector(`.mb-title[data-menu="${m.id}"]`);
+                        if (btn && btn.textContent !== m.label) btn.textContent = m.label;
+                    });
+                },
+            };
+            if (window.OFAPKEYS && OFAPKEYS.annotate) OFAPKEYS.annotate();
             window.addEventListener('ofap:relayout', () => { closeAll(); });
         }
         const active = document.querySelector('.view.active');

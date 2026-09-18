@@ -83,3 +83,126 @@ def test_data_config_defaults_and_clamps():
     assert clamp_data_settings({"data": {"session_start_hour": 6, "retention_days": 7,
                                          "prune_interval_hours": 12}}) == (6, 7, 12)
     assert clamp_data_settings({"data": {"retention_days": 0}}) == (0, 0, 6)   # 0 is legal: keep all
+# ── §93 storage follow-ups: the stopped-engine read and a prune that survives a restart ──────
+
+
+def _build_db(path, batches):
+    """Write tick batches into a real database file, then close every handle."""
+    from orderflow_system.data.database import Database
+
+    async def run():
+        db = Database(str(path))
+        await db.connect()
+        for instrument, ticks in batches.items():
+            await db.insert_ticks_batch(instrument, ticks)
+        await db.close()
+
+    asyncio.run(run())
+
+
+def test_the_offline_snapshot_reads_the_file_with_no_engine(tmp_path):
+    """A stopped app still owns a file with a size, page accounting and a tick span."""
+    from orderflow_system.data.database import readonly_snapshot
+
+    path = tmp_path / "t.db"
+    _build_db(path, {
+        "BTCUSDT": [_tick(NOW_MS - 5_000), _tick(NOW_MS - 4_000)],
+        "ETHUSDT": [_tick(NOW_MS - 3_000)],
+    })
+
+    snap = readonly_snapshot(str(path))
+    assert snap["bytes"] > 0
+    assert snap["page_size"] == 4096 and snap["page_count"] > 0
+    assert snap["reclaimable_bytes"] == snap["freelist_pages"] * snap["page_size"]
+    assert [s["instrument"] for s in snap["spans"]] == ["BTCUSDT", "ETHUSDT"]
+    assert snap["ticks"] == {"oldest_ms": NOW_MS - 5_000, "newest_ms": NOW_MS - 3_000}
+
+    missing = readonly_snapshot(str(tmp_path / "nope.db"))
+    assert missing["bytes"] == 0 and missing["spans"] == [] and missing["ticks"]["oldest_ms"] == 0
+
+    foreign = tmp_path / "foreign.db"
+    foreign.write_bytes(b"not a database at all" * 100)
+    shrug = readonly_snapshot(str(foreign))
+    assert shrug["bytes"] > 0 and shrug["spans"] == [] and shrug["ticks"]["newest_ms"] == 0
+
+
+def test_the_storage_route_answers_with_the_engine_stopped(tmp_path, monkeypatch):
+    """The panel's data: real sizes, a real span, retention from the file, the last prune kept."""
+    from orderflow_system.desktop import api as api_mod
+    from orderflow_system.desktop import config_store
+    from orderflow_system.desktop import engine as engine_mod
+
+    monkeypatch.setattr(config_store, "config_dir", lambda: tmp_path)
+    _build_db(config_store.db_path(), {"BTCUSDT": [_tick(NOW_MS - 9_000), _tick(NOW_MS - 8_000)]})
+    config_store.save_last_prune({"at_ms": NOW_MS - 60_000, "retention_days": 7,
+                                  "prune_interval_hours": 6, "deleted": 12})
+
+    monkeypatch.setattr(engine_mod.engine, "_system", None, raising=False)
+    out = asyncio.run(api_mod.get_storage(refresh=1))
+
+    assert out["engine_running"] is False
+    assert out["bytes"] > 0 and out["tables"] == {}
+    assert out["ticks"]["newest_ms"] == NOW_MS - 8_000
+    assert out["retention"]["days"] == 7
+    assert out["last_prune"]["deleted"] == 12, "a restart must not erase the prune record"
+
+
+def test_the_prune_summary_round_trips(tmp_path, monkeypatch):
+    from orderflow_system.desktop import config_store
+
+    monkeypatch.setattr(config_store, "config_dir", lambda: tmp_path)
+    store = config_store
+    assert store.load_last_prune() is None, "no prune has run on a fresh profile"
+    store.save_last_prune({"at_ms": 123, "deleted": 7, "retention_days": 7})
+    assert store.storage_state_path().is_file()
+    assert store.load_last_prune()["deleted"] == 7
+def test_retention_covers_the_other_tables_too(tmp_path):
+    """Only `ticks` was pruned: candles, signals, profiles and the atlas event log grew forever."""
+    from orderflow_system.data.database import Database, readonly_snapshot  # noqa: F401
+
+    async def run():
+        db = Database(str(tmp_path / "t.db"))
+        await db.connect()
+        old, new = NOW_MS - 40 * DAY, NOW_MS - 1 * DAY
+        for ts in (old, new):
+            await db._db.execute(
+                "INSERT INTO candles (instrument, timestamp_ms, timeframe, open, high, low, close, "
+                "volume, buy_volume, sell_volume, delta, tick_count, footprint_json) "
+                "VALUES ('BTCUSDT', ?, '1m', 1, 1, 1, 1, 1, 1, 1, 1, 1, '{}')", (ts,))
+            await db._db.execute(
+                "INSERT INTO signals (instrument, timestamp_ms, signal_type, direction, strength) "
+                "VALUES ('BTCUSDT', ?, 'x', 'long', 1)", (ts,))
+        await db._db.execute(
+            "INSERT INTO volume_profiles (instrument, session_date, poc, vah, val, total_volume) "
+            "VALUES ('BTCUSDT', '2020-01-01', 1, 2, 0, 3)")
+        await db._db.commit()
+
+        out = await db.prune_other_tables(NOW_MS - 30 * DAY)
+        keep = await (await db._db.execute("SELECT COUNT(*) FROM candles")).fetchone()
+        await db.close()
+        return out, keep[0]
+
+    out, candles_left = asyncio.run(run())
+    assert out["candles"] == 1 and out["signals"] == 1 and out["volume_profiles"] == 1
+    assert out["atlas_events"] == -1, "a table this database does not own reports -1, never raises"
+    assert candles_left == 1, "the row inside the window must survive"
+
+
+def test_the_vacuum_conversion_refuses_without_free_space(tmp_path, monkeypatch):
+    """The conversion is a FULL vacuum; it must not start when the volume cannot hold a second
+    copy of the file (reported as 'no-space', retried by the next pass)."""
+    import shutil as _shutil
+    import types
+
+    from orderflow_system.data.database import Database
+
+    async def run():
+        db = Database(str(tmp_path / "t.db"))
+        await db.connect()
+        await db.insert_ticks_batch("BTCUSDT", [_tick(NOW_MS)])
+        mode = await db.ensure_incremental_autovacuum()
+        await db.close()
+        return mode
+
+    monkeypatch.setattr(_shutil, "disk_usage", lambda _p: types.SimpleNamespace(free=1))
+    assert asyncio.run(run()) == "no-space"

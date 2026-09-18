@@ -292,7 +292,7 @@
         frames: new Map(), host: null, grid: null, tabsEl: null, bar: null, noteEl: null, addEl: null,
         home: null, notice: '', error: '', created: false, addCount: 0, relayoutTimer: 0,
         gesture: null, maximised: '', preMax: new Map(), dragTab: '',
-        switches: 0, saves: 0, savedAt: 0, saveTimer: 0, dirtyAt: 0,
+        switches: 0, saves: 0, savedAt: 0, saveTimer: 0, dirtyAt: 0, locked: false,
     };
 
     /* ══ DOM helpers ════════════════════════════════════════════════════════════════════════════ */
@@ -309,6 +309,15 @@
         return Array.prototype.slice.call(document.querySelectorAll('section.view[data-view]'))
             .map(function (sec) { return sec.getAttribute('data-view'); })
             .filter(Boolean);
+    }
+
+    /* T4/A9: the widget title carries the live token — label · instrument. Refreshed in
+       paintBar(), so a terminal montage always says which instrument each panel holds. */
+    function titleToken(view) {
+        const base = titleOf(view);
+        const sel = document.getElementById('symbolSelect');
+        const sym = (sel && sel.value) ? String(sel.value) : '';
+        return sym ? base + ' · ' + sym : base;
     }
 
     function titleOf(view) {
@@ -451,7 +460,7 @@
         bar.title = 'Drag to move this widget';
         const title = document.createElement('span');
         title.className = 'wf-title';
-        title.textContent = titleOf(view);
+        title.textContent = titleToken(view);
         const tools = document.createElement('span');
         tools.className = 'wf-tools';
         tools.appendChild(buildLinkChip(view, frame));
@@ -594,6 +603,7 @@
     }
 
     function reorderTabs(id, toIndex) {
+        if (refuseLocked()) return false;
         const from = S.layout ? S.layout.tabs.map(function (tab) { return tab.id; }).indexOf(id) : -1;
         if (from < 0) return false;
         S.layout.tabs = math.reorder(S.layout.tabs, from, toIndex);
@@ -613,6 +623,7 @@
 
     function addTab() {
         if (!S.layout) return '';
+        if (refuseLocked()) return '';
         if (S.layout.tabs.length >= MAX_TABS) {
             S.notice = 'at most ' + MAX_TABS + ' tabs';
             paintBar();
@@ -628,6 +639,7 @@
     }
 
     function closeTab(id) {
+        if (refuseLocked()) return false;
         if (!S.layout || S.layout.tabs.length <= 1) {
             S.notice = 'the last tab stays — it holds the layout';
             paintBar();
@@ -680,8 +692,34 @@
 
     /* ══ moving and resizing: one gesture, two readings ══════════════════════════════════════════ */
 
+    /* T2 — the layout lock. Quantower's cheapest safety idea: one switch that holds the
+       arrangement still (no move, no resize, no add, no remove) while the panels keep working.
+       Persisted as ui.layout_lock so it means the same thing on the next start. */
+    function setLocked(value) {
+        S.locked = Boolean(value);
+        if (typeof api === 'function') {
+            void api('/api/control/config', { method: 'POST', body: { ui: { layout_lock: S.locked } } })
+                .catch(function () { /* the lock still holds this session */ });
+        }
+        S.notice = S.locked
+            ? 'layout locked — move, resize, add and remove are held; unlock in the Layout menu'
+            : 'layout unlocked';
+        paintBar();
+        paintStatus();
+        return S.locked;
+    }
+
+    function refuseLocked() {
+        if (!S.locked) return false;
+        S.notice = 'the layout is locked — unlock it in the Layout menu';
+        paintBar();
+        return true;
+    }
+
+
     function beginGesture(kind, ev, view) {
         if (!S.grid || !S.layout || !hasDom) return;
+        if (refuseLocked()) return;
         if (ev.button !== undefined && ev.button !== 0) return;
         if (ev.target && ev.target.closest && ev.target.closest('button')) return;   // a button is not a handle
         const widget = widgetFor(view);
@@ -811,6 +849,7 @@
         pop.dataset.linkPop = view;
         pop.appendChild(linkRow(view, 'sym', 'Symbol'));
         pop.appendChild(linkRow(view, 'tf', 'Timeframe'));
+        pop.appendChild(linkColorRow());
         const note = document.createElement('div');
         note.className = 'wf-links-note';
         pop.appendChild(note);
@@ -824,6 +863,32 @@
         });
         frame.appendChild(pop);
         return chip;
+    }
+
+    /* T11/B17: one button per group showing its own colour; clicking cycles it through the
+       palette. The colour always rides WITH the letter, so it never carries meaning alone. */
+    function linkColorRow() {
+        const row = document.createElement('div');
+        row.className = 'wf-links-row';
+        const head = document.createElement('span');
+        head.className = 'wf-links-k';
+        head.textContent = 'Colour';
+        row.appendChild(head);
+        ['A', 'B', 'C', 'D'].forEach(function (group) {
+            const opt = document.createElement('button');
+            opt.type = 'button';
+            opt.className = 'wf-opt';
+            opt.dataset.colorGroup = group;
+            opt.textContent = group;
+            opt.title = 'Cycle group ' + group + '’s colour — the letter always stays beside it';
+            opt.onclick = function (ev) {
+                if (ev && ev.stopPropagation) ev.stopPropagation();
+                const api = window.OFAPLINKS;
+                if (api && api.cycleColor) api.cycleColor(group);
+            };
+            row.appendChild(opt);
+        });
+        return row;
     }
 
     function linkRow(view, kind, label) {
@@ -858,7 +923,19 @@
         const spec = linkSpec(view);
         const chip = frame.querySelector('.wf-link');
         if (chip) {
-            chip.textContent = '⇄ ' + (spec.sym || '–') + '·' + (spec.tf || '–');
+            /* T11/B17: the group letters carry their group's colour; the letter itself always
+               stays, so colour never carries the meaning alone (the CVD pairing rule). */
+            const L = window.OFAPLINKS;
+            chip.textContent = '';
+            chip.appendChild(document.createTextNode('⇄ '));
+            [spec.sym, spec.tf].forEach(function (g, i) {
+                if (i) chip.appendChild(document.createTextNode('·'));
+                const b = document.createElement('b');
+                b.textContent = g || '–';
+                if (g && L && L.colorOf) { const c = L.colorOf(g); if (c) b.style.color = c; }
+                if (g) b.title = 'group ' + g;
+                chip.appendChild(b);
+            });
             chip.classList.toggle('on', !!(spec.sym || spec.tf));
         }
         const pop = frame.querySelector('.wf-links');
@@ -866,6 +943,13 @@
         pop.querySelectorAll('.wf-opt').forEach(function (opt) {
             const on = (spec[opt.dataset.kind] || '') === opt.dataset.group;
             opt.classList.toggle('on', on);
+        });
+        /* T11/B17: the colour row shows each group's own colour; the letter always stays beside it. */
+        pop.querySelectorAll('[data-color-group]').forEach(function (opt) {
+            const api = window.OFAPLINKS;
+            const c = api && api.colorOf ? api.colorOf(opt.dataset.colorGroup) : '';
+            opt.style.color = c || '';
+            opt.style.borderColor = c || '';
         });
         const note = pop.querySelector('.wf-links-note');
         if (note) {
@@ -1137,6 +1221,7 @@
             return false;
         }
         if (S.mode !== 'terminal' || !S.layout) return false;
+        if (refuseLocked()) return false;
         const name = String(view || '').trim().toLowerCase();
         if (!sectionFor(name)) { S.error = 'no such panel: ' + name; paintBar(); return false; }
         if (S.frames.has(name)) return focusView(name);
@@ -1165,6 +1250,7 @@
 
     function closeWidget(view) {
         if (S.mode !== 'terminal' || !S.layout) return false;
+        if (refuseLocked()) return false;
         const name = String(view || '').trim().toLowerCase();
         let removed = false;
         S.layout.tabs.forEach(function (tab) {
@@ -1339,6 +1425,15 @@
             S.notice = 'renamed to “' + clean + '”';
             paintBar();
             return { ok: true, id: S.layoutId, name: clean };
+        });
+    }
+
+    function restoreVersion(id, at) {
+        /* T2: a layout's previous version comes back from the store's own ring — the write path
+           is the same one every layout action uses, and the menu re-reads what the store kept. */
+        return route('POST', { restore_version: { id: id, at: at } }).then(function (res) {
+            if (!res || res.ok === false) throw new Error((res && res.error) || 'the store refused the restore');
+            return refreshLayouts().then(function () { return activateLayout(id); });
         });
     }
 
@@ -1529,6 +1624,8 @@
             if (node) node.textContent = text;
         };
         set('statusMode', S.mode === 'terminal' ? 'Terminal' : 'Classic');
+        const lockChip = document.getElementById('statusLock');
+        if (lockChip) lockChip.hidden = !S.locked;
         const tab = activeTab();
         set('statusTab', S.mode === 'terminal' && tab ? tab.name : '—');
         set('statusWidgets', String(S.mode === 'terminal' && S.layout ? math.countWidgets(S.layout) : 0));
@@ -1537,6 +1634,14 @@
            identically without it. */
         const bus = window.OFAPBUS;
         set('statusBus', bus && typeof bus.summary === 'function' ? bus.summary() : '—');
+
+        /* T4/A9: keep the widget titles current (instrument changes do not repaint the grid). */
+        if (S.frames && typeof S.frames.forEach === 'function') {
+            S.frames.forEach(function (frame, view) {
+                const el = frame && frame.querySelector ? frame.querySelector('.wf-title') : null;
+                if (el) el.textContent = titleToken(view);
+            });
+        }
         document.querySelectorAll('#modeSwitch .seg-btn').forEach(function (btn) {
             const on = btn.getAttribute('data-mode') === S.mode;
             btn.classList.toggle('on', on);
@@ -1654,6 +1759,14 @@
             paintBar();
             return Promise.resolve(stats());
         }
+        if (typeof api === 'function') {
+            void api('/api/control/config').then(function (cfg) {
+                const ui = (cfg && cfg.ui) || {};
+                S.locked = Boolean(ui.layout_lock);
+                paintStatus();
+                paintBar();
+            }).catch(function () { /* the lock defaults to off */ });
+        }
         return route('GET').then(function (res) {
             S.items = (res && res.items) || {};
             S.layoutId = (res && res.active) || '';
@@ -1678,6 +1791,17 @@
 
     if (hasDom) {
         installHook();
+        /* T11/B17: the links module owns the palette logic; the shell owns where link state is
+           written (the same division of labour as the membership itself), so a group's colour
+           survives a reload without links.js ever touching the network. */
+        document.addEventListener('ofap:link-colors', function () {
+            const L = window.OFAPLINKS;
+            if (!L || typeof api !== 'function') return;
+            const full = {};
+            L.GROUPS.forEach(function (g) { full[g] = L.colorOf(g); });
+            void api('/api/control/config', { method: 'POST', body: { ui: { link_colors: full } } });
+        });
+
         /* Terminal-mode keys: Escape reaches both jobs it has (leave the maximised widget, then
            drop the focus ring); F11 and Alt+1-9 are below. Ctrl+Alt+T (the way back) is in
            keys.js's map now, so it obeys the shared typing guard — it used to toggle mid-typing. */
@@ -1759,6 +1883,8 @@
         switchTo: switchTo,
         toggle: function () { return switchTo(S.mode === 'terminal' ? 'classic' : 'terminal'); },
         focusView: focusView,
+        locked: function () { return S.locked; },
+        setLocked: setLocked,
         setFocus: setFocus,
         openWidget: openWidget,
         closeWidget: closeWidget,
@@ -1774,6 +1900,7 @@
         saveAs: saveAs,
         renameLayout: renameLayout,
         duplicateLayout: duplicateLayout,
+        restoreVersion: restoreVersion,
         deleteLayout: deleteLayout,
         activateLayout: activateLayout,
         resolveLayoutKey: resolveLayoutKey,

@@ -260,6 +260,41 @@
                   say: (v) => 'a break ≥ ' + fmtNum(v, 1) + ' ticks beyond the level' },
             ],
         },
+        unfinished_business: {
+            label: 'Unfinished business',
+            base: 'an auction extreme that never finished',
+            params: [
+                { key: 'sides', label: 'Sides', kind: 'set', options: ['above', 'below'],
+                  say: (v) => (v.length >= 2 ? '' : (v[0] === 'above' ? 'unfinished highs only' : 'unfinished lows only')) },
+                { key: 'min_arms', label: 'Times left unfinished', unit: '×', min: 1, step: 1,
+                  say: (v) => 'left unfinished ≥ ' + Math.round(Number(v)) + '×' },
+            ],
+        },
+        node_zone: {
+            label: 'Node formed',
+            base: 'consecutive bars sharing one high-volume price',
+            params: [
+                { key: 'min_count', label: 'Consecutive bars', unit: 'bars', min: 2, step: 1,
+                  say: (v) => '≥ ' + Math.round(Number(v)) + ' consecutive bars at one price' },
+            ],
+        },
+        level_touch: {
+            label: 'Price returns to a level',
+            base: 'price back at the level the area profile marked',
+            params: [],
+        },
+        radar_level: {
+            label: 'Radar level',
+            base: 'a tracked level changing state',
+            params: [
+                { key: 'states', label: 'States', kind: 'set',
+                  options: ['armed', 'approaching', 'defended', 'confirmed', 'spent', 'failed'],
+                  say: (v) => {
+                      const list = Array.isArray(v) ? v : (v === '' || v == null ? [] : [v]);
+                      return list.length >= 6 ? '' : list.join('/') + ' only';
+                  } },
+            ],
+        },
     };
 
     /* The kind every rule the depth map creates carries in its id (heatmap-pro.js alertOnLevel).

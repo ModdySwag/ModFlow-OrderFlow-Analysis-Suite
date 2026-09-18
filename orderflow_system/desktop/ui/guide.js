@@ -572,6 +572,7 @@ const WIZ_STEPS = [
         render: () => {
             const src = GUIDE.cfg.data_source || 'bybit';
             const mt5 = (S.caps && S.caps.mt5) || {};
+            const nt = (S.caps && S.caps.ninjatrader) || {};
             return `
             <div class="field"><label>Where should market data come from?</label>
                 <label class="switch"><input type="radio" name="wizSrc" value="bybit" ${src === 'bybit' ? 'checked' : ''}>
@@ -584,6 +585,8 @@ const WIZ_STEPS = [
                     OKX — public feed, no key, crypto perpetuals only</label>
                 <label class="switch"><input type="radio" name="wizSrc" value="mt5" ${src === 'mt5' ? 'checked' : ''}>
                     MetaTrader 5 terminal — Windows only, needs a broker install${mt5.available === false ? ' (not detected here)' : ''}</label>
+                <label class="switch"><input type="radio" name="wizSrc" value="ninjatrader" ${src === 'ninjatrader' ? 'checked' : ''}>
+                    NinjaTrader 8 — futures via the bridge add-on this suite ships${nt.available ? ' (bridge running)' : ''}</label>
                 <label class="switch"><input type="radio" name="wizSrc" value="both" ${src === 'both' ? 'checked' : ''}>
                     Both</label></div>
             <div class="wiz-note">Whatever you pick here, the <b>instruments</b> stay as configured: the default
@@ -591,6 +594,12 @@ const WIZ_STEPS = [
             which holds the much larger venue catalogue.</div>
             <div class="wiz-note">The public feed needs no account, no key and no broker. MetaTrader 5 additionally
             requires that terminal to be installed and logged in — ${mt5.available === false ? `<span class="wiz-bad">not detected on this machine (${G_ESC(mt5.reason || 'unavailable')})</span>` : '<span class="wiz-ok">detected on this machine</span>'}.</div>
+            <div class="wiz-note"><b>NinjaTrader 8</b> streams your terminal\u2019s own futures instruments
+            (NQ, ES, MNQ\u2026) through the bridge add-on this suite ships as source ’ copy its .cs files into
+            <i>Documents\\NinjaTrader 8\\bin\\Custom\\AddOns</i>, press <i>F5</i> in the platform’s
+            own NinjaScript Editor and answer the trust prompt once
+            (the Platforms \u25b8 NinjaTrader card walks through it, with a live test). The platform is
+            free and demo accounts work — ${nt.available ? '<span class="wiz-ok">the bridge is answering on this machine</span>' : '<span class="dim">the bridge is not running here right now</span>'}.</div>
             <button class="btn small" id="wizTestNet">Test the public feed</button>
             <span class="dim" id="wizTestResult"></span>
             ${wizFooter({
@@ -1049,6 +1058,13 @@ const WIZ_STEPS = [
                 <tr><td>Alert channels</td><td>${dt.length ? G_ESC(dt.join(', ')) : 'in-app only' + no(' — add one any time in Settings')}</td></tr>
                 <tr><td>Market context</td><td>${ctxBits.length ? G_ESC(ctxBits.join(', ')) : 'off'}</td></tr>
             </table>
+            <p style="margin-top:10px">After setup, three places to look: the <b>Systems</b> card on Overview
+            shows every ingest path (engine, feed, MT5, NinjaTrader, Alpaca, history database, UI stream,
+            alerts) as live / ready / off / error — one glance for “is everything green”. The <b>Market
+            Watch</b> panel shows your source’s whole board, and mirrors your MetaTrader 5 terminal’s own
+            Market Watch when MT5 is the source. The top bar’s <b>Run</b> menu switches modes (this desktop
+            window · headless server on 8099 · CLI pipeline) and carries the optional MT5 and NinjaTrader
+            notes plus the dev gates.</p>
             <label class="switch" style="margin-top:10px"><input type="checkbox" id="wizStartNow" ${on.length ? 'checked' : ''}>
                 Start the engine as soon as setup finishes</label>
             ${wizFooter({
@@ -1537,6 +1553,49 @@ const HELP_TOPICS = {
             + 'which can take a moment.',
         test: 'mt5',
     },
+    ninjatrader: {
+        title: 'NinjaTrader 8 data source',
+        lead: 'NinjaTrader is a futures platform with its own data feeds. This program reads it through a '
+            + 'small read-only bridge add-on that ships with the app \u2014 install it once and the '
+            + 'terminal\u2019s own instruments (NQ, ES, MNQ\u2026) stream into every panel like any other '
+            + 'venue. The platform is free; demo accounts work.',
+        needs: ['<b>Windows</b>',
+                'NinjaTrader Desktop installed (free) \u2014 and its account, the login it asks for on every start',
+                'the <b>bridge add-on</b>, installed once (one copy, one platform option, one restart)'],
+        steps: [
+            { t: 'Install NinjaTrader and log in', d: 'Download it from ninjatrader.com \u2014 installing and '
+                + 'using it in simulation is free. Version 8.1+ presents a log-in window on every start and '
+                + 'exits if it is closed, so create the free account first; it is the login.' },
+            { t: 'Get data flowing in the platform', d: 'The <b>Simulated Data Feed</b> streams synthetic but '
+                + 'complete quotes, trades and depth \u2014 ideal to verify this whole path. A funded '
+                + 'NinjaTrader brokerage account adds complimentary real-time CME/EUREX Level I while funded; '
+                + 'Kinetick End-Of-Day is free.' },
+            { t: 'Install the bridge add-on (once)', d: 'Open the bridge folder (Platforms \u25b8 NinjaTrader '
+                + '\u25b8 Show the DLL folder); it holds the bridge source and the compiled '
+                + 'ModFlowBridge.dll. Copy the .cs files (ModFlowBridge.cs, ModFlowJson.cs, '
+                + 'ModFlowProbe.cs) into Documents\\NinjaTrader 8\\bin\\Custom\\AddOns '
+                + 'then press <i>F5</i> in NinjaTrader\u2019s own NinjaScript Editor (New \u2192 '
+                + 'NinjaScript Editor) and answer the trust prompt. The platform\u2019s Log tab '
+                + 'then shows the bridge listening on 127.0.0.1:8790.' },
+            { t: 'Test the bridge', d: 'The button below connects to the bridge inside NinjaTrader, subscribes '
+                + 'to one instrument and reports the NinjaTrader build, the live connection and what actually '
+                + 'streamed \u2014 quotes, trades, and level-2 depth if your feed carries it. Nothing is saved '
+                + 'by the test.' },
+            { t: 'Add instruments from the terminal\u2019s own list', d: 'Type NQ (or NQ1, or a full name like '
+                + 'MNQ 12-26) in the Instruments panel\u2019s look-up: it offers the front-month contract the '
+                + 'terminal itself would use, stamped with the terminal\u2019s name so the engine streams it '
+                + 'like any other venue.' },
+            { t: 'Pick NinjaTrader as the data source', d: 'In the setup assistant\u2019s Data source step (or '
+                + '\u2630 \u25b8 sources). Every panel then reads your terminal: tape, footprint, delta, '
+                + 'profiles, the ladder \u2014 all from the same engines as the built-in feeds.' },
+        ],
+        note: 'Honest limits: level-2 depth arrives only when your data subscription carries it \u2014 the '
+            + 'bridge card reports what actually arrived instead of promising a ladder. Order Flow+ ($59/mo '
+            + 'standalone, complimentary while funded, included with Lifetime) changes NinjaTrader\u2019s own '
+            + 'charts; this suite computes its own footprint/delta from the raw trades and depth the bridge '
+            + 'republishes and does not need it. The bridge is read-only and loopback-only.',
+        test: 'ninjatrader',
+    },
     alpaca: {
         title: 'Alpaca Markets — linking your account',
         lead: 'Alpaca is a US brokerage with an API. A paper-trading account is free, needs only an email '
@@ -1708,7 +1767,7 @@ function openHelp(id) {
                     <ul style="margin:6px 0 0 16px">${topic.needs.map((n) => `<li>${n}</li>`).join('')}</ul></div>` : ''}
                 ${steps}
                 ${topic.note ? `<div class="help-note">${topic.note}</div>` : ''}
-                ${topic.test === 'mt5' ? mt5TestPanel() : ''}
+                ${topic.test === 'mt5' ? mt5TestPanel() : topic.test === 'ninjatrader' ? ninjatraderTestPanel() : ''}
             </div>
         </div>`;
     document.body.appendChild(overlay);
@@ -1718,6 +1777,7 @@ function openHelp(id) {
         b.onclick = () => copyText(b.dataset.copy || '', b);
     });
     if (topic.test === 'mt5') wireMt5TestPanel(overlay);
+    if (topic.test === 'ninjatrader') wireNinjatraderTestPanel(overlay);
 }
 
 function copyText(text, btn) {
@@ -1800,6 +1860,68 @@ function mt5TestMessage(r) {
     const cmd = (r && r.command) ? `<div class="help-cmd"><code>${G_ESC(r.command)}</code>
         <button class="btn small help-copy" data-copy="${G_ESC(r.command)}">Copy</button></div>` : '';
     return `<span class="wiz-bad">Stopped at: ${G_ESC(stage)}.</span> ${G_ESC(msg)}${cmd}`;
+}
+
+/* ── the live NinjaTrader bridge test (used by the walkthrough and the wizard) ── */
+function ninjatraderTestPanel() {
+    const nt = ((GUIDE.cfg && GUIDE.cfg.platforms && GUIDE.cfg.platforms.ninjatrader)
+        || (S.config && S.config.platforms && S.config.platforms.ninjatrader) || {});
+    return `
+        <div class="help-test" id="ntTestPanel">
+            <div style="font-weight:600;margin-bottom:6px">Test the bridge now</div>
+            <div class="row" style="gap:8px;flex-wrap:wrap">
+                <input type="text" id="ntHost" style="flex:1;min-width:130px" placeholder="host"
+                    value="${G_ESC(nt.host || '127.0.0.1')}" title="The bridge binds loopback only; leave 127.0.0.1.">
+                <input type="text" id="ntPort" style="flex:0 0 84px" placeholder="port"
+                    value="${G_ESC(String(nt.port || 8790))}" title="The bridge's port \u2014 8790 unless the bridge was rebuilt with another.">
+                <input type="text" id="ntSymbol" style="flex:1;min-width:110px" placeholder="instrument"
+                    value="${G_ESC(nt.symbol || 'NQ')}" title="Any name your terminal lists \u2014 NQ, NQ1, ES, MNQ 12-26\u2026">
+                <button class="btn primary" id="ntTestBtn"
+                    title="Connect to the bridge inside NinjaTrader, subscribe, and report what arrived">Test the bridge</button>
+            </div>
+            <div class="r dim" id="ntTestResult">Checks in order: NinjaTrader running \u2192 bridge listening \u2192 hello \u2192 quotes/trades \u2192 depth (if your feed carries it).</div>
+        </div>`;
+}
+
+function wireNinjatraderTestPanel(root) {
+    const btn = root.querySelector('#ntTestBtn');
+    if (!btn) return;
+    btn.onclick = async () => {
+        const out = root.querySelector('#ntTestResult');
+        const payload = {
+            host: (root.querySelector('#ntHost') || {}).value || '127.0.0.1',
+            port: (root.querySelector('#ntPort') || {}).value || '8790',
+            symbol: (root.querySelector('#ntSymbol') || {}).value || 'NQ',
+        };
+        btn.disabled = true;
+        out.innerHTML = 'connecting\u2026';
+        try {
+            const r = await api('/api/control/platforms/bridge/ninjatrader/test', { method: 'POST', body: payload });
+            out.innerHTML = ninjatraderTestMessage(r);
+        } catch (e) {
+            out.innerHTML = `<span class="wiz-bad">request failed: ${G_ESC(String(e))}</span>`;
+        }
+        btn.disabled = false;
+    };
+}
+
+function ninjatraderTestMessage(r) {
+    if (r && r.ok) {
+        const b = r.bridge || {};
+        const counts = r.messages || {};
+        const got = [];
+        if (counts.quotes) got.push(counts.quotes + ' quotes');
+        if (counts.trades) got.push(counts.trades + ' trades');
+        if (counts.depth) got.push(counts.depth + ' depth updates');
+        return `<span class="wiz-ok">Connected.</span> bridge ${G_ESC(b.Addon || 'modflow-nt-bridge')} ${G_ESC(b.Version || '')}`
+            + (b.NT ? ` \u00b7 NinjaTrader ${G_ESC(b.NT)}` : '')
+            + (b.Connection ? ` \u00b7 connection ${G_ESC(b.Connection)} (${G_ESC(b.Status || '')})` : '')
+            + (got.length ? `<br>streaming: ${got.join(' \u00b7 ')}` : '')
+            + (r.depth ? `<br>${G_ESC(r.depth)}` : '')
+            + '<br>Nothing was saved by this test \u2014 the bridge card in Platforms writes the settings.';
+    }
+    const msg = (r && (r.error || r.detail)) || 'no detail returned';
+    return `<span class="wiz-bad">Not connected.</span> ${G_ESC(msg)}`;
 }
 
 /* ── the install-time alert: MT5 is available ───────────────────── */
@@ -2227,6 +2349,43 @@ function mountSetupButton() {
    Ten steps that take a desk user from "it streams" to "every capability is configured and proven".
    Each one says what it unlocks, what a professional sets here, and where to go deeper. Nothing in
    here can break the express path: it is only reachable when GUIDE.mode === 'pro'. */
+/* The playbook step (fold-in plan \u00a74 \u2192 U4): placed just before the wizard\u2019s own
+   ending, wherever the earlier splices have pushed \u201cReady\u201d to. It is a map, not a
+   form: the four surfaces the order-flow workflow lives on, and the topic that explains the
+   reading order. Nothing here changes configuration. */
+WIZ_STEPS.splice(Math.max(0, WIZ_STEPS.length - 1), 0, {
+    title: 'Reading the market (optional)',
+    render: () => `
+        <p>Setup done \u2014 the rest is reading. The program arranges itself around one workflow:
+        <b>profile first</b> (direction and levels), <b>then order flow</b> (a confirmation at a
+        level you chose), and <b>one test per level</b>.</p>
+        <div class="wiz-note">Everything below already works on the public feed. Nothing here is
+        required \u2014 it is where the reads live when you want them.</div>
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+            <button class="btn small" id="wizPbScanner"
+                title="The ranked table: every instrument, with the level radar column">Open the Scanner</button>
+            <button class="btn small" id="wizPbEngine"
+                title="Footprint, level reads and the area profile">Open the Engine</button>
+            <button class="btn small" data-helptopic="method.reading_order"
+                title="How the reads stack: profile, level, confirmation, one test">How to read it</button>
+            <button class="btn small" data-helptopic="method.radar"
+                title="Armed, approaching, held, spent \u2014 what the radar states mean">The level radar</button>
+        </div>`,
+    after: () => {
+        const s = document.getElementById('wizPbScanner');
+        if (s) s.onclick = () => {
+            if (typeof closeWizard === 'function') closeWizard();
+            if (window.showView) window.showView('scanner');
+        };
+        const e = document.getElementById('wizPbEngine');
+        if (e) e.onclick = () => {
+            if (typeof closeWizard === 'function') closeWizard();
+            if (window.showView) window.showView('ofx');
+        };
+    },
+    collect: () => { /* nothing collected: this step is a map, not a form */ },
+});
+
 const WIZ_PRO = [
     {
         title: 'Professional · Feed budget',

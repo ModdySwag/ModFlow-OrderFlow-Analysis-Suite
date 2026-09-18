@@ -49,3 +49,8 @@ def test_a_second_app_acquisition_in_process_is_allowed_once_held():
 
 def test_focus_is_a_quiet_no_op_without_a_matching_window():
     assert si._focus_existing(f"NoSuchWindowTitle-{uuid.uuid4().hex}") is False
+
+def test_the_already_running_notice_is_bounded():
+    """The notice must close itself — an unbounded modal call left a stuck windowless process
+    when the owner's window could not be found (caught live, mistaken for a duplicate)."""
+    assert isinstance(si.NOTICE_MS, int) and 0 < si.NOTICE_MS <= 15_000

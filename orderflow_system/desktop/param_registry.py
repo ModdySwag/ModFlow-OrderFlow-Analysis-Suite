@@ -102,7 +102,7 @@ PARAMS: tuple[Param, ...] = (
     # for whatever is chosen come from `desktop/ui/expression.js`, which the renderers also paint
     # from. Registered as enums so a Chart menu can never offer a value the store would clamp.
     P("expression.engine.mode", "Engine bar mode", "Expression", "ofx", kind="enum",
-      choices=("default", "delta", "split", "heat", "wick"),
+      choices=("default", "delta", "split", "heat", "wick", "candles"),
       meaning="How the Engine view expresses each bar: the footprint default, a delta-tinted body, "
               "a split candle, a heat-gradient body, or wick + footprint only."),
     P("expression.engine.palette", "Engine palette", "Expression", "ofx", kind="enum",
@@ -113,8 +113,70 @@ PARAMS: tuple[Param, ...] = (
       choices=("classic", "thermal"),
       meaning="Ramp behind the matrix. Magnitude reads from luminance, so both ramps stay readable "
               "without colour vision — a property the engine's selftest measures."),
+    P("ofx.heat_smooth", "Heat smoothing (Engine)", "Depth heat", "ofx", kind="enum",
+      choices=("auto", "manual", "none"),
+      meaning="T10/B3 — vertical smoothing of the Engine's depth heat: 'auto' engages when the "
+              "drawn rows compress below ~2.5 px (hysteresis releases at 4 px), 'manual' always "
+              "draws it, 'none' keeps the raw cells. Display-only."),
+    P("atlas.ofx.degrade", "Auto-candles at wide zooms", "Depth heat", "ofx", kind="bool",
+      meaning="T10/B13 — once a column compresses below the text threshold the footprint "
+              "switches to plain candles (display-only; off keeps the volume-profile fallback). "
+              "The hysteresis band is the text threshold plus half the label-fade ramp."),
+    # Level reads (fold-in plan §3): unfinished business + node persistence, both fed from
+    # closed bars and both drawn on the Engine view.
+    P("atlas.unfinished.enabled", "Unfinished business", "Level reads", "ofx", kind="bool",
+      meaning="Draw unfinished-auction magnets — a high that never finished on the bid, a low "
+              "that never finished on the ask — and alert when one forms; each clears when "
+              "price returns to the level."),
+    P("atlas.unfinished.max_open", "Unfinished levels kept", "Level reads", "ofx", minimum=1,
+      maximum=5000, step=1,
+      meaning="How many open magnets the tracker holds; the oldest roll out first."),
+    P("atlas.unfinished.merge_ticks", "Unfinished merge", "Level reads", "ofx", minimum=0.0,
+      maximum=10.0, step=0.5, unit="ticks",
+      meaning="A new magnet within this many ticks of an open one on the same side strengthens "
+              "it instead of drawing a second line."),
+    P("atlas.nodes.enabled", "Node persistence", "Level reads", "ofx", kind="bool",
+      meaning="Track runs of consecutive bars sharing one high-volume price (double/triple "
+              "nodes) and alert when a run forms — the stacked-HVN read."),
+    P("atlas.nodes.tol_ticks", "Node tolerance", "Level reads", "ofx", minimum=0.0, maximum=10.0,
+      step=0.5, unit="ticks",
+      meaning="How far a bar's POC may sit from the run's anchor price and still count as the "
+              "same node."),
+    # G1 (fold-in plan §4): the level radar — the lifecycle across every level source, ranked
+    # in the Scanner's Radar column.
+    P("atlas.radar.enabled", "Level radar", "Level radar", "scanner", kind="bool",
+      meaning="Track every level the app computes (nodes, unfinished magnets, virgin / HTF POCs, "
+              "area POCs, VWAP bands, stacked zones) as a lifecycle object — armed → approaching "
+              "→ defended / confirmed → spent / failed — shown in the Scanner's Radar column."),
+    P("atlas.radar.tol_ticks", "Radar test band", "Level radar", "scanner", minimum=0.1,
+      maximum=50.0, step=0.1, unit="ticks",
+      meaning="How close (in ticks) counts as testing the level — the band a touch has to hold."),
+    P("atlas.radar.approach_mult", "Radar approach", "Level radar", "scanner", minimum=1.0,
+      maximum=10.0, step=0.5,
+      meaning="Multiple of the test band that counts as approaching — inside it the level reads "
+              "approaching."),
+    P("atlas.radar.max_age_min", "Radar level age", "Level radar", "scanner", minimum=5,
+      maximum=1440, step=5, unit="min",
+      meaning="Tracked levels older than this drop off the radar (spent / failed keep their own "
+              "window)."),
+    P("atlas.radar.spent_keep_min", "Spent kept", "Level radar", "scanner", minimum=0, maximum=240,
+      step=5, unit="min",
+      meaning="How long spent / failed levels stay visible (dimmed) before they drop."),
+    P("atlas.radar.feed_signals", "Radar feeds signals", "Level radar", "scanner", kind="bool",
+      meaning="Offer every new radar level to the signals machine's WATCHING pathway — the "
+              "machine's net widens beyond profile qualifiers."),
+    # B2 — the heat scheme's dials (one set per surface; the ceiling above is shared).
+    P("ofx.heat_contrast", "Heat contrast", "Depth heat", "ofx", minimum=0.5, maximum=2.5, step=0.05,
+      meaning="Gamma over the depth ramp: above 1 darkens the middle so the big levels stand out, "
+              "below 1 lifts it so a thin book keeps its shape. 1 is the shipped look."),
+    P("ofx.heat_floor", "Heat floor (size)", "Depth heat", "ofx", minimum=0.0, maximum=1_000_000.0,
+      step=0.5, meaning="No colour below this resting size on the Engine's depth layer (0 = off)."),
+    P("ofx.heat_floor_pct", "Heat floor (share)", "Depth heat", "ofx", minimum=0.0, maximum=50.0,
+      step=1.0, unit="%",
+      meaning="…or: no colour below this bottom share of the book's own sizes (0 = off). The larger "
+              "of the two floors wins."),
     P("expression.chart.mode", "Chart bar mode", "Expression", "chart", kind="enum",
-      choices=("default", "delta", "split", "heat", "wick"),
+      choices=("default", "delta", "split", "heat", "wick", "candles"),
       meaning="How the Chart view expresses each bar. Split candles have no vendor equivalent and "
               "the Chart view says so in its legend rather than drawing something else."),
     P("expression.chart.palette", "Chart palette", "Expression", "chart", kind="enum",
@@ -127,8 +189,42 @@ PARAMS: tuple[Param, ...] = (
     P("atlas.heatmap.max_columns", "History columns", "Depth heat", "heatmap", minimum=60,
       maximum=4000, step=20, meaning="Hard cap on depth columns the backend keeps for replay."),
     P("atlas.heatmap.upper_cutoff_pct", "Colour saturation", "Depth heat", "heatmap", minimum=0.5,
-      maximum=25.0, step=0.5, unit="%", meaning="Top share of the visible book at which the ramp "
-                                               "reaches full colour (the exchange convention)."),
+      maximum=25.0, step=0.5, unit="%", applies="restart",
+      meaning="Top share of the visible book at which the ramp reaches full colour (the exchange "
+              "convention); the ceiling applies when the engine restarts (B2 verified the live hub "
+              "held the old scale until restart)."),
+    P("atlas.heatmap.upper_cutoff_abs", "Colour ceiling (size)", "Depth heat", "heatmap", minimum=0.0,
+      maximum=100_000_000.0, step=0.5, applies="restart",
+      meaning="…or an exact resting size at which the ramp reaches full colour (0 = use the share "
+              "above). A pinned ceiling applies when the engine restarts."),
+    P("atlas.heatmap.contrast", "Heatmap contrast", "Depth heat", "heatmap", minimum=0.5,
+      maximum=2.5, step=0.05,
+      meaning="Gamma over the Heatmap view's ramp — the same dial the Engine carries, per surface."),
+    P("atlas.heatmap.floor", "Heatmap floor (size)", "Depth heat", "heatmap", minimum=0.0,
+      maximum=1_000_000.0, step=0.5, meaning="No colour below this resting size on the Heatmap "
+                                             "(0 = off)."),
+    P("atlas.heatmap.floor_pct", "Heatmap floor (share)", "Depth heat", "heatmap", minimum=0.0,
+      maximum=50.0, step=1.0, unit="%",
+      meaning="…or: no colour below this bottom share of the map's own sizes (0 = off)."),
+    P("atlas.heatmap.smooth", "Heat smoothing (Heatmap)", "Depth heat", "heatmap", kind="enum",
+      choices=("auto", "manual", "none"),
+      meaning="T10/B3 — vertical smoothing of the Heatmap view's cells: 'auto' engages when the "
+              "rows compress below ~2.5 px (hysteresis releases at 4 px), 'manual' always draws "
+              "it, 'none' keeps the raw cells. Display-only."),
+    P("atlas.columns.metric", "Columns rail metric", "Depth heat", "heatmap", kind="enum",
+      choices=("traded", "resting"),
+      meaning="B4 — what each column of the Map's rail accumulates between resets: total traded size, "
+              "or the net change in resting size. Display-only; the accumulation lives in the page."),
+    P("atlas.columns.reset", "Columns rail reset", "Depth heat", "heatmap", kind="enum",
+      choices=("manual", "scheduled", "conditional"),
+      meaning="B4 — when a column's accumulation zeroes: manual (a button or double-click), scheduled "
+              "(a fixed period) or conditional (when the row crosses the threshold)."),
+    P("atlas.columns.threshold", "Columns rail threshold", "Depth heat", "heatmap", minimum=0.0,
+      maximum=1000000000.0, step=50.0,
+      meaning="B4 — the conditional reset threshold, in the accumulation's own units."),
+    P("atlas.columns.reset_s", "Columns rail period", "Depth heat", "heatmap", minimum=5.0,
+      maximum=600.0, step=5.0, unit="s",
+      meaning="B4 — the scheduled reset period for the columns rail."),
     P("atlas.heatmap.wall_quantile", "Wall threshold", "Depth heat", "heatmap", minimum=0.5,
       maximum=1.0, step=0.01, meaning="Quantile of resting size that counts as a wall."),
     P("atlas.heatmap.stack_pct", "Stack detection", "Depth heat", "heatmap", minimum=1.0,
@@ -276,6 +372,28 @@ PARAMS: tuple[Param, ...] = (
     # Scanner and risk
     P("atlas.scanner_window_s", "Scanner window", "Scanner", "scanner", minimum=60, maximum=86400,
       step=60, unit="s", meaning="Rolling window the cross-instrument ranking is computed over."),
+    # T4/A5 — the freshness thresholds: how long a panel’s samples may age before the chips and the
+    # status strip call it stale (seconds; 0 = the built-in window). Display-only — the store and
+    # the server keep their own windows (atlas/freshness.py).
+    P("atlas.freshness.depth_s", "Depth stale after", "Freshness", "settings", minimum=0, maximum=3600,
+      step=1, unit="s", meaning="0 uses the built-in window (5 s). The depth/book chips and the "
+                                "status strip judge against this."),
+    P("atlas.freshness.quote_s", "Quote stale after", "Freshness", "settings", minimum=0, maximum=3600,
+      step=1, unit="s", meaning="0 uses the built-in window (60 s) for quote-frequency panels."),
+    P("atlas.freshness.trades_s", "Trades stale after", "Freshness", "settings", minimum=0, maximum=3600,
+      step=1, unit="s", meaning="0 uses the built-in window (5 s). The tape’s own chip follows this."),
+    P("atlas.freshness.candles_s", "Candles stale after", "Freshness", "settings", minimum=0, maximum=3600,
+      step=1, unit="s", meaning="0 uses the built-in window (60 s). The chart’s chip follows this."),
+    P("atlas.heatmap.values_min_px", "Cell values from", "Depth heat", "heatmap", minimum=0, maximum=200,
+      step=2, unit="px", meaning="Draw each cell’s own size once a cell is at least this wide. "
+                                     "0 = off — the map stays the read and the HUD carries the numbers."),
+    P("atlas.ofx.fit_tolerance", "Auto-fit slack", "Footprint", "ofx", minimum=0, maximum=0.9,
+      step=0.05, meaning="How much room auto-fit keeps before it refits the price scale. Higher = "
+                              "a stiller scale; 0 = refit every payload (the old behaviour)."),
+    P("ui.heatmap_minimal", "Minimal mode", "Depth heat", "heatmap", kind="bool",
+      meaning="Hide the heatmap’s chrome (window/rows/overlays controls and the bar buttons) and "
+              "keep the map with all of its interactions. The heatmap’s own toolbar carries the "
+              "toggle; this registration is what lets that toggle persist through /params."),
     P("risk.signal_cooldown_seconds", "Signal cooldown", "Signals", "signals", minimum=0.0,
       maximum=3600.0, step=5.0, unit="s", meaning="Minimum time between two signals from one detector."),
     P("risk.min_composite_score", "Minimum score", "Signals", "signals", minimum=0.0, maximum=100.0,

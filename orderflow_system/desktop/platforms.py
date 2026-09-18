@@ -1,6 +1,6 @@
 """Third-party platform integrations — setup workflow, account links, plans, local detection, bridges.
 
-Two platforms live here, both optional, both free-first:
+Three platforms live here, all optional, all free-first:
 
   * **Sierra Chart** — read over its own DTC protocol server. The suite is the client; the server is
     theirs; nothing is installed into their software.
@@ -8,8 +8,13 @@ Two platforms live here, both optional, both free-first:
     loopback (`data/bookmap_addon/`, read by `data/bookmap_client.py`). Bookmap publishes no
     market-data-out API and no local server, so this is the only honest direction: *their* add-on API
     inside *their* process, our reader on the other end of a loopback socket.
+  * **NinjaTrader** — read over a small read-only add-on (`data/ninjatrader_bridge/`, read by
+    `data/ninjatrader_feed.py`) that republishes the platform's own quotes, trades and Level-2
+    depth on loopback. Same direction as Bookmap, for the same reason — and unlike the other two,
+    this stream is also an engine data source: instruments are added from the terminal's own list
+    and stream like any other venue.
 
-What matters for honesty in both halves:
+What matters for honesty in all three:
 
   * the free path is real and needs no payment — a Sierra trial with delayed data, or Bookmap Digital
     with an account (crypto, one instrument at a time);
@@ -23,6 +28,7 @@ What matters for honesty in both halves:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import sys
@@ -188,6 +194,163 @@ BOOKMAP_CAVEATS = [
     "Always check the linked page before paying.",
 ]
 
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# NinjaTrader
+# Read from ninjatrader.com/pricing and the support articles on this date. The PLATFORM is free
+# on every plan — what a plan changes is the per-contract commission; the data story is separate
+# again (Kinetick EOD free to everyone; real-time CME/EUREX Level I complimentary while a
+# NinjaTrader brokerage account is funded; Level II carries only if the data subscription does).
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+NINJATRADER_PRICES_AS_OF = "18 September 2026"
+NINJATRADER_HOST = "ninjatrader.com"
+NINJATRADER_HOME = "https://ninjatrader.com/"
+
+NINJATRADER_LINKS = [
+    {"id": "download", "label": "Download NinjaTrader Desktop", "url": NINJATRADER_HOME + "Platform",
+     "why": "the platform itself; installing it and using it in simulation is free"},
+    {"id": "register", "label": "Create the account (the login every launch asks for)",
+     "url": "https://account.ninjatrader.com/register",
+     "why": "NinjaTrader 8.1+ presents a log-in window on every start; closing it exits the platform"},
+    {"id": "dashboard", "label": "NinjaTrader Dashboard (plans, data, invoices)",
+     "url": "https://account.ninjatrader.com/welcome",
+     "why": "where the plan, the data subscriptions and Order Flow+ live"},
+    {"id": "pricing", "label": "Plans and pricing", "url": NINJATRADER_HOME + "pricing/",
+     "why": f"the source of the figures below, read {NINJATRADER_PRICES_AS_OF}"},
+    {"id": "datafeeds", "label": "Subscribing to market data (what can carry depth)",
+     "url": "https://support.ninjatrader.com/s/article/How-do-I-register-for-data-feeds-for-my-account",
+     "why": "Kinetick End-Of-Day is free; real-time CME/EUREX Level I is complimentary while funded"},
+    {"id": "orderflow", "label": "Order Flow+ — what it costs and when it is free",
+     "url": "https://support.ninjatrader.com/s/article/How-Can-I-Add-NinjaTraders-Order-Flow-Features-to-My-Account",
+     "why": "$59/month standalone; complimentary on a funded account; included with the Lifetime plan"},
+    {"id": "options", "label": "General settings (Tools ▸ Settings)",
+     "url": NINJATRADER_HOME + "support/helpguides/nt8/general_section.htm",
+     "why": "the platform's settings page \u2014 8.1.8 asks you to trust a newly "
+            "compiled add-on on first load"},
+    {"id": "install", "label": "Desktop download & installation guide",
+     "url": "https://support.ninjatrader.com/s/article/NinjaTrader-Desktop-Installation-Guide",
+     "why": "their own walk-through if you want it beside ours"},
+    {"id": "help", "label": "The platform's own help guide",
+     "url": NINJATRADER_HOME + "support/helpguides/nt8/welcome.htm",
+     "why": "platform questions this suite cannot answer"},
+    {"id": "forum", "label": "Community forum", "url": "https://discourse.ninjatrader.com/",
+     "why": "community-run (no longer staffed by official support)"},
+    {"id": "support", "label": "Official support", "url": "https://support.ninjatrader.com/",
+     "why": "account, data and entitlement questions"},
+]
+
+#: Free first. What a plan changes is the per-contract COMMISSION; the platform is free on all three.
+NINJATRADER_PLANS = [
+    {"id": "free", "name": "Free — platform + simulation", "price": "0", "period": "no monthly fee",
+     "kind": "free", "highlight": True,
+     "includes": ["the full desktop platform and unlimited simulated trading",
+                  "live trading at $0.39 micro / $1.29 standard per side",
+                  "a 14-day real-time market-data trial when you open an account",
+                  "Kinetick End-Of-Day data, free to everyone",
+                  "inactivity fee applies on this plan (one round turn a month waives it)"]},
+    {"id": "monthly", "name": "Monthly plan", "price": "99", "period": "USD/month", "kind": "base",
+     "includes": ["lower commissions: $0.29 micro / $0.99 standard per side",
+                  "everything the Free plan includes, at the lower rates"]},
+    {"id": "lifetime", "name": "Lifetime plan", "price": "1499", "period": "USD, one-time",
+     "kind": "integrated",
+     "includes": ["lowest commissions: $0.09 micro / $0.59 standard per side",
+                  "Order Flow+ included",
+                  "full real-time data eligibility once the account is funded",
+                  "the recurring plan fee waived for the life of the account"]},
+]
+
+NINJATRADER_PLAN_IDS = [plan["id"] for plan in NINJATRADER_PLANS]
+NINJATRADER_CAVEATS = [
+    "The platform itself is free on every plan — what a plan changes is the **per-contract "
+    "commission** (Free $0.39/$1.29 per side micro/standard; Monthly $99/mo → $0.29/$0.99; "
+    "Lifetime $1,499 once → $0.09/$0.59).",
+    "**Real-time CME & EUREX Level I data is complimentary while your NinjaTrader brokerage account "
+    "is funded**, on every plan; Kinetick End-Of-Day is free to everyone. Other real-time feeds "
+    "(Kinetick, CQG, Rithmic, dxFeed) are separate subscriptions, and **Level II depth is carried "
+    "only when the data subscription carries it** — this suite's bridge card reports what actually "
+    "arrived instead of promising a ladder.",
+    "**Order Flow+ is $59/month** standalone; it is complimentary while an account is funded and "
+    "included with the Lifetime plan. This suite does not need it — the footprint, delta and heat "
+    "engines compute from the raw trades and depth the bridge republishes; Order Flow+ only changes "
+    "what NinjaTrader's own charts show.",
+    "NinjaTrader 8.1+ asks you to **log in on every start** (your account, your credentials — this "
+    "suite never sees them). The bridge loads when the platform does.",
+    "Prices read from the vendor's pricing page and support articles on " + NINJATRADER_PRICES_AS_OF +
+    " — always check the linked page before paying.",
+]
+
+
+def _nt_plan(plan_id: str) -> dict[str, Any]:
+    for plan in NINJATRADER_PLANS:
+        if plan["id"] == plan_id:
+            return plan
+    return NINJATRADER_PLANS[0]
+
+
+def ninjatrader_workflow(plan_id: str = "free") -> dict[str, Any]:
+    """The setup steps for a NinjaTrader plan, free path first, and what the SUITE changes with it."""
+    plan = _nt_plan(plan_id)
+    paid = plan["kind"] != "free"
+    steps = [
+        {"n": 1, "title": "Install NinjaTrader Desktop",
+         "text": "Installing it is free, and the simulated trading on the free plan is unlimited. "
+                 "Nothing is paid at this step.",
+         "link": "download"},
+        {"n": 2, "title": "Create the account you will log in with",
+         "text": "Version 8.1+ presents a log-in window on every start and exits if it is closed. "
+                 "Use the same email you will keep; registration is free.",
+         "link": "register"},
+        {"n": 3, "title": "Start on the free path",
+         "text": "Connect the Simulated Data Feed (synthetic but complete: quotes, trades and depth "
+                 "— ideal to verify this whole path) or Kinetick End-Of-Day for free history. "
+                 "Real-time CME/EUREX Level I is complimentary once a brokerage account is funded.",
+         "link": "datafeeds"},
+        {"n": 4, "title": "Add the bridge add-on (once)",
+         "text": "Copy the bridge's three files (ModFlowBridge.cs, ModFlowJson.cs, ModFlowProbe.cs "
+                 "\u2014 this suite ships them, with the build script beside them \u2014 into "
+                 "Documents\\NinjaTrader 8\\bin\\Custom\\AddOns, then press "
+                 "F5 in NinjaTrader's own NinjaScript Editor (New \u25b8 NinjaScript Editor) "
+                 "and answer Yes to the trust prompt \u2014 NinjaTrader asks that about newly "
+                 "compiled add-ons once. The platform's Log tab then shows the bridge listening "
+                 "on 127.0.0.1:8790.",
+         "link": "options"},
+        {"n": 5, "title": "Point this suite at it",
+         "text": "The bridge card below is already set to 127.0.0.1:8790 — press Test connection. "
+                 "The answer names the NinjaTrader build, the live connection and your accounts.",
+         "link": ""},
+        {"n": 6, "title": "Load it into your workflow",
+         "text": "Pick NinjaTrader as the data source in the setup assistant (or the connections "
+                 "menu). Instruments are added from the terminal's own list — NQ, ES, MNQ and "
+                 "everything else your data subscription carries — and stream into the same engines "
+                 "as every other venue.",
+         "link": ""},
+    ]
+    if paid:
+        orderflow_note = ("and includes Order Flow+." if plan["id"] == "lifetime"
+                          else "— Order Flow+ stays a separate $59/month add-on (free while an "
+                               "account is funded).")
+        steps.insert(3, {"n": 4, "title": "Activate the plan you chose",
+                         "text": f"{plan['name']} at {plan['price']} {plan['period']}: activate it in "
+                                 "the Dashboard. It reduces per-contract commissions " + orderflow_note,
+                         "link": "dashboard"})
+        for i, step in enumerate(steps):
+            step["n"] = i + 1
+    return {
+        "plan": plan["id"],
+        "plan_kind": plan["kind"],
+        "steps": steps,
+        "suite_changes": [
+            f"Status bar shows 'NinjaTrader: {plan['id']}' with the bridge state.",
+            "Data-quality label follows the connection you run in the platform: the Simulated Data "
+            "Feed is labelled synthetic; a funded connection is labelled real-time; depth is "
+            "whatever actually arrived.",
+            "Instruments come from the terminal's own list — add NQ 12-26 (or just NQ / NQ1) from "
+            "the Instruments panel and it streams like any other venue.",
+            "The bridge is read-only and loopback-only: no orders, no account details, nothing "
+            "stored beyond host/port/plan.",
+            "The bridge stays optional: the built-in free feeds keep running either way.",
+        ],
+    }
+
 
 def _plan(plan_id: str) -> dict[str, Any]:
     for plan in PLANS:
@@ -338,7 +501,7 @@ def catalogue() -> dict[str, Any]:
                    "without installing anything into it",
             "free_tier": True,
             "bridge": "dtc",
-            "bridge_where": "in their software (Global Settings → Server Settings → DTC Protocol Server)",
+                        "bridge_where": "in their software (Global Settings → Server Settings → DTC Protocol Server)",
             "links": LINKS,
             "plans": PLANS,
             "prices_as_of": PRICES_AS_OF,
@@ -362,6 +525,29 @@ def catalogue() -> dict[str, Any]:
                               "add-ons ship with Global Plus",
                 "data": "market data is billed separately on every tier (crypto connections are free)",
             },
+        }, {
+            "id": "ninjatrader",
+            "name": "NinjaTrader",
+            "vendor_url": NINJATRADER_HOME,
+            "why": "futures data and depth from your own NinjaTrader 8 install — an engine data "
+                   "source, not just a viewer, through a small read-only add-on this suite ships",
+            "free_tier": True,
+            "bridge": "nt-addon",
+            "bridge_where": "in their software (bin\\Custom\\AddOns + the platform\u2019s "
+                            "own NinjaScript Editor \u25b8 F5; 8.1.8 asks you to "
+                            "trust new add-ons)",
+            "links": NINJATRADER_LINKS,
+            "plans": NINJATRADER_PLANS,
+            "prices_as_of": NINJATRADER_PRICES_AS_OF,
+            "caveats": NINJATRADER_CAVEATS,
+            "limits": {
+                "free_path": "simulation + Kinetick End-Of-Day need no payment",
+                "depth": "Level II arrives only if your data subscription carries it — the bridge "
+                         "card reports what actually arrived",
+                "orderflow_plus": "$59/mo standalone, complimentary while funded, included with "
+                                  "Lifetime (this suite does not need it)",
+                "login": "the platform asks you to log in on every start",
+            },
         }],
     }
 
@@ -370,6 +556,7 @@ def catalogue() -> dict[str, Any]:
 SIERRA_CANDIDATES = (r"C:\SierraChart", r"C:\Program Files\Sierra Chart",
                      r"C:\Program Files (x86)\SierraChart")
 BOOKMAP_CANDIDATES = (r"C:\Program Files\Bookmap", r"C:\Program Files (x86)\Bookmap")
+NINJATRADER_CANDIDATES = (r"C:\Program Files\NinjaTrader 8",)
 
 
 def _sierra_version(root: Path) -> str:
@@ -429,11 +616,37 @@ def _bookmap_api_modules() -> dict[str, Any]:
     return out
 
 
+def _ninjatrader_docs() -> Path:
+    """NinjaTrader's per-user data folder — add-ons and logs live under it."""
+    return Path.home() / "Documents" / "NinjaTrader 8"
+
+
+def _ninjatrader_version(log_dir: Path) -> str:
+    """The build number the platform writes into its own log: 'Session Break (Version 8.1.8.2)'.
+
+    Reads the newest few log files' heads only — never a workspace, a config or an account file.
+    """
+    try:
+        logs = sorted(log_dir.glob("log.*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return ""
+    for log in logs[:8]:
+        try:
+            head = log.read_text(encoding="utf-8", errors="replace")[:6000]
+        except OSError:
+            continue
+        match = re.search(r"Session Break \(Version ([0-9][0-9.]*)\)", head)
+        if match:
+            return match.group(1)
+    return ""
+
+
 def detect_installs() -> dict[str, Any]:
     """Where each platform is installed on this machine, if it is. Shallow on purpose: it checks for
     the executable, reads a build number, and lists API module filenames. Account files, licence keys,
     user config and logs are never opened."""
-    out: dict[str, Any] = {"sierra": {"found": False}, "bookmap": {"found": False}}
+    out: dict[str, Any] = {"sierra": {"found": False}, "bookmap": {"found": False},
+                           "ninjatrader": {"found": False}}
     for candidate in SIERRA_CANDIDATES:
         root = Path(candidate)
         if (root / "SierraChart.exe").is_file() or (root / "SierraChart_64.exe").is_file():
@@ -453,6 +666,21 @@ def detect_installs() -> dict[str, Any]:
             break
     else:
         out["bookmap"]["api_modules"] = _bookmap_api_modules()
+    docs = _ninjatrader_docs()
+    addons = docs / "bin" / "Custom" / "AddOns"
+    for candidate in NINJATRADER_CANDIDATES:
+        root = Path(candidate)
+        if (root / "bin" / "NinjaTrader.exe").is_file():
+            out["ninjatrader"] = {"found": True, "path": str(root),
+                                  "version": _ninjatrader_version(docs / "log"),
+                                  "docs": str(docs), "addons_folder": str(addons),
+                                  "addons_present": addons.is_dir(),
+                                  "bridge_installed": (addons / NINJATRADER_DLL_NAME).is_file()}
+            break
+    else:
+        out["ninjatrader"] = {"found": False, "docs": str(docs), "addons_folder": str(addons),
+                              "addons_present": addons.is_dir(),
+                              "bridge_installed": (addons / NINJATRADER_DLL_NAME).is_file()}
     return out
 
 
@@ -474,6 +702,18 @@ def bookmap_defaults() -> dict[str, Any]:
     return {"enabled": False, "host": "127.0.0.1", "port": 8791,
             "protocol": "bookmap-addon-jsonl", "symbol": "",
             "plan": "digital", "integrated": False, "addon_built": False}
+
+
+def ninjatrader_defaults() -> dict[str, Any]:
+    """The NinjaTrader bridge block: where the add-on listens and which plan is being run.
+
+    8790 is this suite's convention (the bridge binds it and writes the line to its own log and to
+    the platform's Log tab). No credentials exist here at all — the bridge has nothing to
+    authenticate: it is loopback only.
+    """
+    return {"enabled": False, "host": "127.0.0.1", "port": 8790,
+            "protocol": "modflow-nt-jsonl", "symbol": "",
+            "plan": "free", "integrated": False, "bridge_built": False}
 
 
 def suggested_symbols(symbols: Optional[list[str]] = None) -> list[str]:
@@ -592,11 +832,115 @@ def reveal_bridge_jar(folder: Optional[str] = None) -> dict[str, Any]:
             "note": "Pick " + BOOKMAP_JAR_NAME + " in Bookmap: Settings → Configure API plugins → Add…"}
 
 
+# ── the bridge DLL that ships WITH this app ─────────────────────────────────────────────────
+# Built once, here, and travels inside the install: a fresh user needs no .NET SDK, only the copy
+# plus NinjaTrader's own one-time option. The source and build script stay beside it for rebuilds
+# against another platform build, and the two facts that matter are compared for the user rather
+# than left to fail silently: is a copy installed, and is it the same build as this one.
+NINJATRADER_DLL_NAME = "ModFlowBridge.dll"
+NINJATRADER_SOURCE_NAMES = ("ModFlowBridge.cs", "ModFlowJson.cs", "ModFlowProbe.cs")
+NINJATRADER_ADDON_DIR = Path(__file__).resolve().parents[1] / "data" / "ninjatrader_bridge"
+
+
+def _sha256(path: Path) -> str:
+    """The file's sha256, streamed. Empty string when unreadable."""
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return ""
+
+
+def ninjatrader_bridge_state() -> dict[str, Any]:
+    """Everything the card needs to tell the truth about the shipped bridge: the build beside this
+    app, the bridge's presence in NinjaTrader's AddOns folder (source — the supported lane — or a
+    compiled copy), and whether the two builds match."""
+    dll = NINJATRADER_ADDON_DIR / NINJATRADER_DLL_NAME
+    sources = [NINJATRADER_ADDON_DIR / name for name in NINJATRADER_SOURCE_NAMES]
+    found = detect_installs().get("ninjatrader", {})
+    addons_folder = str(found.get("addons_folder") or "")
+    addons = Path(addons_folder) if addons_folder else None
+    installed = (addons / NINJATRADER_DLL_NAME) if addons is not None else None
+    installed_sources = ([p for p in (addons / name for name in NINJATRADER_SOURCE_NAMES) if p.is_file()]
+                         if addons is not None else [])
+    state: dict[str, Any] = {
+        "dll": {"path": str(dll), "folder": str(NINJATRADER_ADDON_DIR), "name": NINJATRADER_DLL_NAME,
+                "exists": dll.is_file(), "size": dll.stat().st_size if dll.is_file() else 0,
+                "sha256": _sha256(dll) if dll.is_file() else "", "shipped": True},
+        "sources": {"folder": str(NINJATRADER_ADDON_DIR), "names": list(NINJATRADER_SOURCE_NAMES),
+                    "exists": all(p.is_file() for p in sources),
+                    "complete": all(p.is_file() for p in sources)},
+        "installed_path": str(installed) if installed is not None else "",
+        "installed": {"exists": bool(installed is not None and installed.is_file()),
+                      "size": installed.stat().st_size if installed is not None and installed.is_file() else 0,
+                      "sha256": _sha256(installed) if installed is not None and installed.is_file() else ""},
+        "installed_sources": {"folder": addons_folder, "names": [p.name for p in installed_sources],
+                              "exists": bool(installed_sources),
+                              "complete": bool(addons is not None and len(installed_sources) == len(NINJATRADER_SOURCE_NAMES))},
+        "ninjatrader": {"found": bool(found.get("found")), "version": found.get("version", ""),
+                        "addons_folder": addons_folder},
+        "ok": None, "note": "",
+    }
+    if not state["dll"]["exists"] and not state["sources"]["complete"]:
+        state["ok"] = False
+        state["note"] = ("the bridge build is missing from this install \u2014 build it from the "
+                         "source folder with the .NET SDK (the bridge README has the one-line "
+                         "command).")
+    elif state["installed_sources"]["complete"]:
+        state["ok"] = True
+        state["note"] = ("the bridge source is in NinjaTrader's AddOns folder \u2014 compile it there "
+                         "once (NinjaScript Editor \u25b8 F5) and answer the platform's trust prompt. "
+                         "It then listens on 127.0.0.1:8790 at every start.")
+    elif state["installed"]["exists"] and state["installed"]["sha256"] == state["dll"]["sha256"]:
+        state["ok"] = True
+        state["note"] = ("the copy in NinjaTrader's AddOns folder matches this build \u2014 if the "
+                         "platform asks you to trust the add-on, answer Yes; it loads from there.")
+    elif state["installed"]["exists"]:
+        state["ok"] = False
+        state["note"] = ("the AddOns copy is a different build \u2014 copy this folder's files over "
+                         "it and recompile once in the NinjaScript Editor (F5).")
+    else:
+        state["ok"] = False
+        state["note"] = ("the bridge is not in NinjaTrader's AddOns folder yet: copy its .cs files "
+                         "there, then press F5 once in NinjaTrader's own NinjaScript Editor and "
+                         "answer the trust prompt.")
+    return state
+
+
+def reveal_bridge_dll(folder: Optional[str] = None) -> dict[str, Any]:
+    """Open the bridge folder in the file manager so the DLL can be copied into NinjaTrader.
+
+    Refuses anything outside this app's own add-on folder: this opens what the suite shipped.
+    """
+    home = NINJATRADER_ADDON_DIR.resolve()
+    target = Path(folder).resolve() if folder else home
+    if target != home and home not in target.parents:
+        return {"ok": False, "error": f"not this app's add-on folder: {target}"}
+    if not target.is_dir():
+        return {"ok": False, "error": f"no such folder: {target}"}
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(str(target))                          # noqa: S606 - opening our own folder
+        else:
+            webbrowser.open(target.as_uri())
+    except OSError as exc:                                      # pragma: no cover - platform specific
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    return {"ok": True, "folder": str(target),
+            "note": "Copy ModFlowBridge.cs, ModFlowJson.cs and ModFlowProbe.cs into "
+                    "Documents\\NinjaTrader 8\\bin\\Custom\\AddOns\\ (create it), then "
+                    "press F5 in NinjaTrader's own NinjaScript Editor (New \u25b8"
+                    "NinjaScript Editor) and answer Yes to the trust prompt."}
+
+
 # ── link safety: only the vendors' own https pages open from the UI ─────────────────────────
 ALLOWED_HOSTS = {
     VENDOR_HOST,
     BOOKMAP_HOST,
     BOOKMAP_CODE_HOST,          # one organisation only — see `_path_allowed`
+    NINJATRADER_HOST,           # ninjatrader.com and its support/account/discourse subdomains
 }
 
 

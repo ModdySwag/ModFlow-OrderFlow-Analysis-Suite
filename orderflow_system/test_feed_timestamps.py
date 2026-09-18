@@ -55,3 +55,24 @@ def test_t_present_is_used_verbatim_and_does_not_warn(caplog):
 def test_the_latch_starts_clear_on_a_fresh_feed():
     feed, _ = _feed()
     assert feed._ts_fallback_warned is False
+def test_orderbook_snapshots_are_stamped_with_the_envelope_clock():
+    """`data['u']` is an update *sequence id*, not a clock: a snapshot stamped with it reads as
+    1995, and every age computed from it is nonsense. The envelope `ts` is the real stamp."""
+    feed, _ = _feed()
+    envelope_ms = 1_789_670_000_123
+    msg = {"topic": "orderbook.50.BTCUSDT", "type": "snapshot", "ts": envelope_ms,
+           "data": {"u": 811730058005, "b": [["98000", "1"]], "a": [["98001", "2"]]}}
+    asyncio.run(feed._handle_orderbook(msg))
+    snap = feed.get_orderbook("BTCUSDT")
+    assert snap is not None and snap.timestamp_ms == envelope_ms
+
+
+def test_an_orderbook_frame_without_an_envelope_clock_falls_back_to_now():
+    feed, _ = _feed()
+    before = int(time.time() * 1000)
+    msg = {"topic": "orderbook.50.BTCUSDT", "type": "snapshot",
+           "data": {"u": 811730058006, "b": [["98000", "1"]], "a": [["98001", "2"]]}}
+    asyncio.run(feed._handle_orderbook(msg))
+    after = int(time.time() * 1000)
+    snap = feed.get_orderbook("BTCUSDT")
+    assert snap is not None and before <= snap.timestamp_ms <= after

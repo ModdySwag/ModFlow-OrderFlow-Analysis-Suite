@@ -219,19 +219,24 @@ async def _stream_batches(zip_path: Path, start_ms: int, end_ms: int, batch: int
 # ── the cache ────────────────────────────────────────────────────────────────
 
 def prune_cache(cache_dir: Path, *, keep_days: int = CACHE_KEEP_DAYS, now: Optional[float] = None) -> int:
-    """Delete cached zips older than `keep_days` (by mtime). Returns how many files went."""
+    """Delete cached archives older than `keep_days` (by mtime). Returns how many files went.
+
+    `*.part` half-downloads go with them: the `.part` → final rename only happens on success, so
+    a fetch that died mid-way leaves a file nothing else ever cleans.
+    """
     root = Path(cache_dir)
     if not root.is_dir():
         return 0
     horizon = (now if now is not None else time.time()) - keep_days * 86_400
     removed = 0
-    for path in sorted(root.rglob("*.zip")):
-        try:
-            if path.stat().st_mtime < horizon:
-                path.unlink()
-                removed += 1
-        except OSError:
-            continue
+    for pattern in ("*.zip", "*.part"):
+        for path in sorted(root.rglob(pattern)):
+            try:
+                if path.stat().st_mtime < horizon:
+                    path.unlink()
+                    removed += 1
+            except OSError:
+                continue
     return removed
 
 

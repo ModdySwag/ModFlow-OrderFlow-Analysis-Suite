@@ -8,6 +8,15 @@
     const SYM_FALLBACK = 'BTCUSDT';
     const POLL_MS = 2500;
     const view = { symbol: '', timer: 0, booted: false, poll: 0, lastError: '' };
+    /* §82: the look-up's last answer for the typed symbol — the chip, the panel and the
+       stage note all read this one object, so they can never disagree. */
+    let streamState = null;
+
+    function instrumentMod() { return window.OFAPINSTRUMENT || null; }
+    function esc(text) {
+        return String(text == null ? '' : text).replace(/[&<>"']/g, (c) => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
 
     function el(id) { return document.getElementById(id); }
     function apiGet(path, options) {
@@ -39,18 +48,30 @@
 
     async function load() {
         const s = sym();
-        const [fp, candles, delta, tape, heat] = await Promise.all([
-            apiGet(`/api/footprint/${s}`).catch(() => []),
-            apiGet(`/api/candles/${s}?timeframe=1m`).catch(() => []),
-            apiGet(`/api/delta/${s}`).catch(() => []),
-            apiGet(`/api/tape/${s}?count=200`).catch(() => []),
-            /* §56 measured: the JSON route parses+adapts a 29 k-cell snapshot in 0.8 ms and the
+        /* §82: a failed read is remembered, never swallowed. The footprint route answers 404
+           "Unknown symbol" for anything the engine does not stream, and the old blanket
+           `.catch(() => [])` turned that sentence into a blank stage with a note about depth
+           history "building" — a promise nothing would keep. The first error is what the
+           panel says when no bar came back. */
+        const fetchErrors = [];
+        const grab = (path, fallback) => apiGet(path).catch((err) => {
+            fetchErrors.push(`${path}: ${(err && err.message) ? err.message : err}`);
+            return fallback;
+        });
+        const [fp, candles, delta, tape, heat, reads] = await Promise.all([
+            grab(`/api/footprint/${s}`, []),
+            grab(`/api/candles/${s}?timeframe=1m`, []),
+            grab(`/api/delta/${s}`, []),
+            grab(`/api/tape/${s}?count=200`, []),            /* §56 measured: the JSON route parses+adapts a 29 k-cell snapshot in 0.8 ms and the
                typed /bin sibling in 0.7 ms — and the bin is BIGGER on sparse books (fixed 4 B per
                cell per section vs "0,"). The JSON route stays the view's path; the wire is built,
                tested and available, re-measure it when a snapshot's JSON text passes ~2 MB or an
                adapt pass passes ~8 ms. (What §56 actually fixed here was the axis contract — see
                adaptHeat's note.) */
-            apiGet(`/api/atlas/heatmap/${s}`).catch(() => ({})),
+            grab(`/api/atlas/heatmap/${s}`, {}),
+            /* §3 level reads: unfinished auctions + node runs. `null` (not []) so a symbol the
+               trackers have not seen draws nothing rather than an invented level. */
+            grab(`/api/atlas/levels/${s}`, null),
         ]);
         const bars = mergeBars(fp, candles, delta);
         const levelsByTime = new Map();
@@ -62,6 +83,7 @@
         if (adapted) adapted.version = heat && heat.version;
         OFX.state.symbol = s;
         OFX.setData({ bars, levelsByTime, prints: Array.isArray(tape) ? tape : [], heat: adapted || { rows: [], scale: 1 } });
+        OFX.setReads(reads || {});
         /* P1-10: the age of what this view drew — the newest merged bar's own clock; a demo fill
            (the server says 'demo') is labelled from the live map instead of aged. */
         if (window.OFAPFRESH) {
@@ -73,8 +95,20 @@
         /* The depth map carries liquidity forward between windows; ghost levels with no explanation
            are a lie of omission, so the flag rides on the state and the note below says it. */
         OFX.state.data.heatCarry = !!(heat && heat.carry_forward);
+        /* §82: one sentence about what this symbol IS outranks every "give it time" note — the
+           look-up's verdict (not enabled / not on this source / unknown), then a real failed
+           read, and only then the warming-up explanations. */
         const notes = [];
-        if (!adapted) notes.push(heat && heat.note ? heat.note : 'no depth history yet — it builds while the feed runs');
+        const instrument = instrumentMod();
+        const stateName = (streamState && instrument) ? instrument.state(streamState) : '';
+        const streamable = !stateName || stateName === 'live' || stateName === 'ready';
+        if (!streamable && instrument) {
+            notes.push(instrument.emptyNote(streamState));
+        } else if (!bars.length && fetchErrors.length) {
+            notes.push(fetchErrors[0]);
+        } else if (!adapted) {
+            notes.push(heat && heat.note ? heat.note : 'no depth history yet — it builds while the feed runs');
+        }
         if (OFX.state.data.heatCarry && adapted) {
             notes.push('ghost liquidity carried forward — levels that left the drawn window are still shown');
         }
@@ -102,6 +136,10 @@
                 lambda: Number(p.lambda_ms) || OFX.state.params.lambda,
                 textPx: Number(p.text_px) || OFX.state.params.textPx,
                 sweepC: Number(p.sweep_c) || OFX.state.params.sweepC,
+                /* B2: the heat dials ride the same block; an absent key is skipped by setParams'
+                   own guards, so an older config keeps the shipped look. */
+                heatContrast: p.heat_contrast, heatFloor: p.heat_floor, heatFloorPct: p.heat_floor_pct,
+                heatSmooth: p.heat_smooth,
                 /* P1-8: the depth ramp is a stored display parameter now — it used to live only in
                    browser storage, which config_store's own rule says is never the record. */
                 ramp: p.ramp || OFX.state.params.ramp,
@@ -114,6 +152,7 @@
         if (el('ofxMinBlock')) el('ofxMinBlock').value = String(OFX.state.params.minBlock);
         if (el('ofxVaPct')) el('ofxVaPct').value = String(OFX.state.params.vaPct);
         if (el('ofxRamp')) el('ofxRamp').value = String(OFX.state.params.ramp);
+        syncHeatControls();
     }
 
     /* ── P1-8: the bar expression, read and written through the config ───────────────────────
@@ -172,11 +211,120 @@
             sweep_c: OFX.state.params.sweepC,
             min_block: Number(el('ofxMinBlock') && el('ofxMinBlock').value) || 0,
             va_pct: Number(el('ofxVaPct') && el('ofxVaPct').value) || OFX.state.params.vaPct,
+            /* B2 fix: the ramp select saved a body WITHOUT `ramp`, so the stored value never left
+               the shipped default — the store has always accepted the key; nobody sent it. */
+            ramp: OFX.state.params.ramp,
         };
         OFX.setParams({ R: body.R, stack: body.stack, lambda: body.lambda_ms,
             minBlock: body.min_block, vaPct: body.va_pct });
         try { await apiGet('/api/control/ofx', { method: 'POST', body }); } catch (err) { /* params already applied */ }
         await load();
+    }
+
+    /* ── B2: the heat scheme, one write path for both surfaces ──────────────────────────────────
+       Every dial is a registered display variable, so it persists through /api/control/params —
+       the registry is the gate, and the answer echoes what the store ACCEPTED (clamped), which is
+       what the controls adopt. Nothing here touches the feed or the ingest: it is drawing only. */
+
+    const HEAT_PATHS = {
+        ofx: { contrast: 'ofx.heat_contrast', floor: 'ofx.heat_floor', floorPct: 'ofx.heat_floor_pct' },
+        heatmap: { contrast: 'atlas.heatmap.contrast', floor: 'atlas.heatmap.floor',
+            floorPct: 'atlas.heatmap.floor_pct' },
+    };
+
+    function heatCfg() {
+        return (typeof S !== 'undefined' && S && S.config) || null;
+    }
+
+    function heatNote(text) {
+        if (!text) return;
+        view.lastError = text;
+        paintStats();
+    }
+
+    function heatDials(surface) {
+        const cfg = heatCfg() || {};
+        const P = HEAT_PATHS[surface] || HEAT_PATHS.ofx;
+        const mod = window.OFAPRAMP;
+        const hm = (cfg.atlas && cfg.atlas.heatmap) || {};
+        const get = mod ? (path, fb) => mod.getIn(cfg, path, fb) : (path, fb) => fb;
+        const dials = {
+            ceiling_pct: Number(hm.upper_cutoff_pct) || 5.0,
+            ceiling_abs: Number(hm.upper_cutoff_abs) || 0,
+            floor: Number(get(P.floor, 0)) || 0,
+            floor_pct: Number(get(P.floorPct, 0)) || 0,
+            contrast: Number(get(P.contrast, 1)) || 1,
+        };
+        dials.scheme = mod ? mod.matchScheme(dials) : 'custom';
+        return dials;
+    }
+
+    async function writeHeatParam(path, value) {
+        const mod = window.OFAPRAMP;
+        if (!mod) return null;
+        return mod.writeParam(path, value, heatCfg(), heatNote);
+    }
+
+    async function writeHeatDial(path, rawValue) {
+        const applied = await writeHeatParam(path, Number(rawValue));
+        if (applied === null) { syncHeatControls(); return; }
+        if (path === HEAT_PATHS.ofx.contrast) OFX.setParams({ heatContrast: applied });
+        if (path === HEAT_PATHS.ofx.floor) OFX.setParams({ heatFloor: applied });
+        if (path === HEAT_PATHS.ofx.floorPct) OFX.setParams({ heatFloorPct: applied });
+        paintLegend();
+        syncHeatControls();
+    }
+
+    /* T10: enum/bool dials ride the same gate; the value passes through untouched (the store
+       coerces per the registry kind) and the accepted answer is adopted. */
+    async function writeHeatFlag(path, value) {
+        const applied = await writeHeatParam(path, value);
+        if (applied === null) { syncHeatControls(); return; }
+        if (path === 'ofx.heat_smooth') OFX.setParams({ heatSmooth: applied });
+        if (path === 'atlas.ofx.degrade') OFX.setParams({ degrade: applied !== false });
+        syncHeatControls();
+    }
+
+    async function applyHeatScheme(id, surface) {
+        const mod = window.OFAPRAMP;
+        const scheme = mod && mod.schemeById(id);
+        if (!scheme) { syncHeatControls(); return; }   // 'custom' chosen: nothing to write
+        const P = HEAT_PATHS[surface] || HEAT_PATHS.ofx;
+        /* The ceiling is shared — the backend resolves one scale for every surface — so a scheme
+           replaces a pinned absolute ceiling with its own share of the book. */
+        await writeHeatParam('atlas.heatmap.upper_cutoff_abs', 0);
+        await writeHeatParam('atlas.heatmap.upper_cutoff_pct', scheme.ceiling_pct);
+        await writeHeatParam(P.contrast, scheme.contrast);
+        await writeHeatParam(P.floor, scheme.floor);
+        await writeHeatParam(P.floorPct, scheme.floor_pct);
+        if (surface === 'ofx') {
+            await loadParams();
+            paintLegend();
+        }
+        syncHeatControls();
+        heatNote('scheme: ' + scheme.label + ' — ' + scheme.says);
+        document.dispatchEvent(new CustomEvent('ofap:heat-scheme', { detail: { from: surface } }));
+    }
+
+    async function broadcastHeat(fromSurface) {
+        const other = fromSurface === 'ofx' ? 'heatmap' : 'ofx';
+        const d = heatDials(fromSurface);
+        const O = HEAT_PATHS[other];
+        await writeHeatParam(O.contrast, d.contrast);
+        await writeHeatParam(O.floor, d.floor);
+        await writeHeatParam(O.floorPct, d.floor_pct);
+        syncHeatControls();
+        heatNote('heat scheme written to the Engine and the Heatmap view');
+        document.dispatchEvent(new CustomEvent('ofap:heat-scheme', { detail: { from: fromSurface } }));
+    }
+
+    function syncHeatControls() {
+        const d = heatDials('ofx');
+        if (el('ofxHeatScheme')) el('ofxHeatScheme').value = d.scheme;
+        if (el('ofxHeatContrast')) el('ofxHeatContrast').value = String(d.contrast);
+        if (el('ofxHeatFloor')) el('ofxHeatFloor').value = String(d.floor);
+        if (el('ofxHeatSmooth')) el('ofxHeatSmooth').value = String(OFX.state.params.heatSmooth || 'auto');
+        if (el('ofxDegrade')) el('ofxDegrade').checked = OFX.state.params.degrade !== false;
     }
 
     /* ── panels: stats, LOD badge, snap-to-live chip with sparkline ──────── */
@@ -231,8 +379,14 @@
         if (!spec) return '';
         const rgb = spec.rgb ? `rgba(${spec.rgb},${spec.alpha || '.9'})` : '';
         if (spec.type === 'ramp') {
+            /* B2: the swatch carries the live scheme — including the contrast dial — so the legend
+               describes the colours on the canvas, not the ones in the manual. */
+            const g = Number(OFX.state.params.heatContrast);
             const stops = [0, 0.25, 0.5, 0.75, 1]
-                .map((t) => { const c = OFX.math.heatColor01(t); return `rgb(${c[0]},${c[1]},${c[2]})`; });
+                .map((t) => {
+                    const c = OFX.math.heatColor01(OFX.math.rampT(t, Number.isFinite(g) ? g : 1));
+                    return `rgb(${c[0]},${c[1]},${c[2]})`;
+                });
             return `<i class="ofx-sw ofx-sw-ramp" style="background:linear-gradient(90deg,${stops.join(',')})"></i>`;
         }
         if (spec.type === 'split') {
@@ -338,11 +492,13 @@
                 + `${s.lod} · col ${s.colW}px · ${read} · levels ${s.levelCount} · avg ${s.avgLevelVolume}`;
         }
         if (el('ofxLod')) {
-            const exprNote = (s.expression.mode !== 'default' && s.lod === 'profile')
-                ? ' · bar expression not drawn at this LOD' : '';
+            const degraded = s.degraded === true;
+            const exprNote = degraded ? ' · candles (auto-degraded — zoom in for the matrix)'
+                : (s.expression.mode !== 'default' && s.lod === 'profile')
+                    ? ' · bar expression not drawn at this LOD' : '';
             el('ofxLod').textContent = (s.lod === 'profile'
-                ? 'LOD: volume profile (text suppressed)'
-                : 'LOD: footprint cells + text') + exprNote;
+                ? (degraded ? 'LOD: candles (auto-degraded)' : 'LOD: volume profile (text suppressed)')
+                : 'LOD: footprint cells + text') + (degraded ? '' : exprNote);
         }
         if (el('ofxDepthNote')) el('ofxDepthNote').textContent = view.lastError || '';
     }
@@ -599,6 +755,46 @@
             + '</span><span class="ofx-sel-v">' + value + '</span></div>';
     }
 
+    /* A3: the area profile's histogram — one bar per drawn price row, the value area shaded, the
+       POC solid, drawn from the same rows the strip's numbers come from. Colours resolve through
+       the engine's own table (OFX.math.rgba), so the picture cannot describe a colour the stage
+       does not use; the backing store carries the display scale, like every other canvas. */
+    function paintSelHist(canvas, prof) {
+        if (!canvas || !prof || !prof.rows.length) return;
+        const M = OFX.math;
+        if (!M || typeof M.rgba !== 'function') return;
+        const dpr = Math.max(1, Number(window.devicePixelRatio) || 1);
+        const w = Math.max(120, canvas.clientWidth || 220), h = 118;
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, w, h);
+        const rows = prof.rows;
+        const span = Math.max(1e-9, (prof.to - prof.from) || 1e-9);
+        const top = rows.reduce((m, r) => Math.max(m, r.volume), 0) || 1;
+        const band = h - 8;
+        for (const r of rows) {
+            const y = 4 + (1 - (r.price - prof.from) / span) * (band - 2);
+            const len = Math.max(1, Math.round((r.volume / top) * (w - 10)));
+            const isPoc = r.price === prof.poc;
+            ctx.fillStyle = M.rgba(isPoc ? 'poc' : 'vaEdge', isPoc ? '.95' : (r.inVA ? '.6' : '.28'));
+            ctx.fillRect(5, Math.round(y), len, Math.max(1, Math.round(band / rows.length) - 1));
+        }
+        ctx.strokeStyle = M.rgba('vaEdge', '.9');
+        ctx.setLineDash([3, 2]);
+        for (const edge of [prof.vah, prof.val]) {
+            if (edge == null) continue;
+            const y = Math.round(4 + (1 - (edge - prof.from) / span) * (band - 2)) + 0.5;
+            ctx.beginPath();
+            ctx.moveTo(2, y);
+            ctx.lineTo(w - 2, y);
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+    }
+
     function paintSelStrip(st) {
         const stage = el('ofxStage');
         if (!stage) return;
@@ -626,6 +822,10 @@
         const pr = (v) => (v == null ? '—' : v >= 1000 ? fmtP(v, 2) : v >= 1 ? fmtP(v, 3) : fmtP(v, 5));
         const vv = (v) => (v == null ? '—' : fmtV(v));
         const cls = (v) => (Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : '');
+        /* A3: the area profile's block — read from the same cache the stage's lines are drawn
+           from, so the strip and the picture cannot disagree. `null` means the window has no
+           depth rows (a degraded feed), and the block says so instead of showing zeros. */
+        const prof = (typeof OFX.areaProfile === 'function') ? OFX.areaProfile() : null;
         box.innerHTML = '<div class="ofx-sel-head">selection'
             + '<span class="ofx-sel-dim">' + st.bars + ' bars · ' + fmtT(st.t0) + '–' + fmtT(st.t1)
             + ' · ' + pr(st.p0) + '–' + pr(st.p1) + '</span>'
@@ -643,7 +843,23 @@
                 st.restingChange == null ? '' : cls(st.restingChange))
             + '</div>'
             + (why ? '<div class="ofx-sel-why">' + why + '</div>' : '')
+            + '<div class="ofx-sel-prof">'
+            + (prof
+                ? '<div class="ofx-sel-head2">area profile'
+                  + '<span class="ofx-sel-dim">' + prof.rows.length + ' rows · VA' + Math.round(prof.vaPct * 100) + '</span>'
+                  + '<button class="btn small" data-ofx-sel="watch">Watch this level</button></div>'
+                  + '<div class="ofx-sel-grid">'
+                  + selCell('POC', pr(prof.poc) + ' · ' + Math.round(prof.pocShare * 100) + '%')
+                  + selCell('VAH / VAL', pr(prof.vah) + ' / ' + pr(prof.val))
+                  + selCell('area volume', vv(prof.total))
+                  + selCell('row step', pr(prof.step))
+                  + '</div>'
+                  + '<canvas class="ofx-sel-hist"></canvas>'
+                : '<div class="ofx-sel-why">no depth rows in this window — the area profile reads the '
+                  + 'per-bar ladder, so it fills once the engine feeds levels</div>')
+            + '</div>'
             + '<div class="ofx-sel-note" id="ofxSelNote"></div>';
+        paintSelHist(box.querySelector('.ofx-sel-hist'), prof);
         /* A selection IS a price and a time window, so it rides on the shared cursor: every other
            panel can answer it without knowing this one exists. The price cursor itself is left
            alone — the selection is a band, not the pointer. */
@@ -688,6 +904,24 @@
         for (const p of st.printRows) {
             rows.push([String(p.time), iso(p.time), p.price, p.size, p.side]);
         }
+        /* A3: the area profile rides the same file — its rows and its three prices, so the export
+           answers the question the strip was asked. Absent when the window had no depth rows. */
+        const prof = (typeof OFX.areaProfile === 'function') ? OFX.areaProfile() : null;
+        if (prof) {
+            rows.push([]);
+            rows.push(['# area profile']);
+            rows.push(['# rows', String(prof.rows.length)]);
+            rows.push(['# va share', String(prof.vaPct)]);
+            rows.push(['# poc', String(prof.poc)]);
+            rows.push(['# vah', String(prof.vah)]);
+            rows.push(['# val', String(prof.val)]);
+            rows.push(['# area total', String(prof.total)]);
+            rows.push(['# row step', String(prof.step)]);
+            rows.push(['area_price', 'area_volume', 'in_va']);
+            for (const r of prof.rows) {
+                rows.push([String(r.price), String(r.volume), r.inVA ? '1' : '0']);
+            }
+        }
         const text = rows.map((r) => r.join(',')).join('\n') + '\n';
         const name = 'ofx-selection-' + sym + '-' + stamp + '.csv';
         if (note) note.textContent = 'saving…';
@@ -703,6 +937,280 @@
             }
         } catch (err) {
             if (note) note.textContent = 'export failed: ' + (err && err.message ? err.message : 'network');
+        }
+    }
+
+    /* ── A3: the area profile's hand-off — a POC becomes a watched level ──────────────────────
+       The rule is a `level_touch`: the engine fires when price comes back into the level's band
+       (outside-to-inside, once per approach). Tolerance defaults to two drawn row steps — the
+       same "two priced steps" default the heatmap's level alerts use — and the rule lands in the
+       same Rules card as every other, scope and sentence included. */
+    async function watchAreaLevel() {
+        const st = OFX.selectionStats();
+        const prof = (typeof OFX.areaProfile === 'function') ? OFX.areaProfile() : null;
+        const note = el('ofxSelNote');
+        if (!st || !prof) {
+            if (note) note.textContent = 'a watch needs a measured window with depth rows';
+            return null;
+        }
+        const sym = String(OFX.state.symbol || view.symbol || 'symbol').toUpperCase();
+        const tol = Number(((prof.step || 0.1) * 2).toFixed(6));
+        const rule = {
+            id: 'ap-' + sym + '-' + String(prof.poc).replace('.', '_') + '-' + Date.now().toString().slice(-6),
+            name: sym + ' area POC ' + prof.poc + ' · touch (±' + tol + ')',
+            kind: 'level_touch',
+            enabled: true,
+            params: { at_price: prof.poc, at_tol: tol },
+            cooldown_s: 60,
+            channels: ['ui'],
+        };
+        if (note) note.textContent = 'creating the watch…';
+        try {
+            const res = await fetch('/api/atlas/alert-rules', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(rule),
+            });
+            if (note) {
+                note.textContent = res.ok
+                    ? 'watching ' + prof.poc + ' — an alert fires when price returns (±' + tol + ') · Alerts view'
+                    : 'watch failed (' + res.status + ')';
+            }
+            return res.ok ? rule : null;
+        } catch (err) {
+            if (note) note.textContent = 'watch failed: ' + (err && err.message ? err.message : 'network');
+            return null;
+        }
+    }
+
+    /* ── §82: the instrument look-up ──────────────────────────────────────────
+       The symbol box writes a display symbol; this is what makes the write answerable.
+       `GET /api/control/instruments/resolve` says what the typed name IS (live / ready /
+       disabled / available / unsupported / unknown) with a reason and a closed action set,
+       and every action below is an app path that already exists: the symbol change (use),
+       the config write + restart (enable / add), the engine start, and the Instruments view.
+       Nothing here subscribes anything itself — the engine is the only thing that streams. */
+
+    async function resolveSymbol(symbol, opts) {
+        const options = opts || {};
+        const instrument = instrumentMod();
+        const query = String(symbol || sym() || '').trim();
+        if (!query || !instrument) { streamState = null; paintSymbolState(); return null; }
+        let payload = null;
+        try {
+            payload = await apiGet('/api/control/instruments/resolve?symbol=' + encodeURIComponent(query));
+        } catch (err) {
+            view.lastError = `instrument look-up failed: ${(err && err.message) ? err.message : err}`;
+            paintStats();
+            return null;
+        }
+        streamState = (payload && payload.ok !== false) ? payload : null;
+        paintSymbolState();
+        /* A panel that is open must not keep describing the previous answer (measured: after
+           "Add & restart" the chip said streaming while the panel still said "available"). */
+        const panel = el('ofxSymbolPanel');
+        if (panel && !panel.hidden) paintSymbolPanel();
+        paintStats();
+        const state = streamState ? instrument.state(streamState) : '';
+        if (options.openWhenStuck && state && state !== 'live' && state !== 'ready') openSymbolPanel();
+        return streamState;
+    }
+
+    function paintSymbolState() {
+        const chipEl = el('ofxSymbolState');
+        if (!chipEl) return;
+        const instrument = instrumentMod();
+        if (!instrument || !streamState) {
+            chipEl.textContent = '';
+            chipEl.className = 'ofx-sym-chip';
+            chipEl.title = '';
+            return;
+        }
+        const chip = instrument.chip(streamState);
+        chipEl.textContent = chip.text;
+        chipEl.className = 'ofx-sym-chip ' + chip.kind;
+        chipEl.title = instrument.title(streamState) || 'instrument look-up';
+        chipEl.setAttribute('data-state', chip.state);
+        /* §83: hovering or right-clicking the chip explains this exact state, with the button
+           that fixes it — re-read at show-time by hint.js, so it is never stale. */
+        chipEl.setAttribute('data-hint-title', chip.text || 'Instrument look-up');
+        chipEl.setAttribute('data-hint-body',
+            instrument.panelText(streamState) || 'Hover for what the server makes of this symbol.');
+        chipEl.setAttribute('data-hint-actions',
+            (chip.state === 'live' || chip.state === 'ready') ? 'engine instruments' : 'lookup instruments');
+    }
+
+    function setSymbolMsg(message, kind) {
+        const line = el('ofxSymMsg');
+        if (!line) return;
+        line.textContent = message || '';
+        line.className = 'ofx-sym-msg' + (kind ? ' ' + kind : '');
+    }
+
+    function openSymbolPanel() {
+        const panel = el('ofxSymbolPanel');
+        if (!panel) return;
+        paintSymbolPanel();
+        panel.hidden = false;
+    }
+
+    function closeSymbolPanel() {
+        const panel = el('ofxSymbolPanel');
+        if (panel) panel.hidden = true;
+    }
+
+    /* §85: the symbol section's quick picker. Options come from the config + the engine's own
+       status; picking one switches the view and — when the instrument is not covered yet — runs
+       the same enable/add/start path the look-up's buttons use, so a pick is "refresh and
+       enable", not a dead jump to a symbol the engine then refuses. */
+    async function refreshPicker() {
+        const sel = el('ofxSymPick');
+        const instrument = instrumentMod();
+        if (!sel || !instrument || typeof instrument.pickerRows !== 'function') return;
+        let cfg = {};
+        let status = {};
+        try { cfg = await apiGet('/api/control/config'); } catch (err) { /* nothing to list yet */ }
+        try { status = await apiGet('/api/control/engine/status'); } catch (err) { /* ditto */ }
+        const rows = instrument.pickerRows({ instruments: (cfg && cfg.instruments) || [],
+            streaming: (status && status.symbols) || [] });
+        const current = String(el('ofxSymbol') ? el('ofxSymbol').value : (view.symbol || '')).toUpperCase();
+        let html = '<option value="">pick…</option>';
+        let group = '';
+        rows.forEach((row) => {
+            if (row.group !== group) {
+                if (group) html += '</optgroup>';
+                html += `<optgroup label="${esc(row.group)}">`;
+                group = row.group;
+            }
+            html += `<option value="${esc(row.value)}"${row.value.toUpperCase() === current ? ' selected' : ''}>`
+                + `${esc(row.label)}</option>`;
+        });
+        if (group) html += '</optgroup>';
+        sel.innerHTML = html;
+    }
+
+    async function pickSymbol(symbol) {
+        const name = String(symbol || '').toUpperCase();
+        if (!name) return;
+        if (el('ofxSymbol')) el('ofxSymbol').value = name;
+        view.symbol = name;
+        await saveParams();
+        const payload = await resolveSymbol(name);
+        const state = payload ? String(payload.state || '') : '';
+        if (state === 'disabled') await runInstrumentAction('enable', payload);
+        else if (state === 'ready') await runInstrumentAction('start_engine', payload);
+        else if (state === 'available') await runInstrumentAction('add', payload);
+        await refreshPicker();
+    }
+
+    function paintSymbolPanel() {
+        const instrument = instrumentMod();
+        if (!instrument) return;
+        const payload = streamState || {};
+        if (el('ofxSymTitle')) el('ofxSymTitle').textContent = (instrument.chip(payload).text || 'instrument').trim();
+        if (el('ofxSymReason')) el('ofxSymReason').textContent = instrument.panelText(payload);
+        const actionsEl = el('ofxSymActions');
+        if (actionsEl) {
+            actionsEl.innerHTML = '';
+            instrument.actions(payload).forEach((spec) => {
+                const button = document.createElement('button');
+                button.className = 'btn small' + (spec.primary ? ' primary' : '');
+                button.textContent = spec.label;
+                button.addEventListener('click', () => void runInstrumentAction(spec.action, payload));
+                actionsEl.appendChild(button);
+            });
+        }
+        const rowsEl = el('ofxSymRows');
+        if (rowsEl) {
+            rowsEl.innerHTML = '';
+            instrument.rows(payload).forEach((row) => {
+                const item = document.createElement('div');
+                item.className = 'ofx-sym-row';
+                item.innerHTML = `<span class="sym">${esc(row.symbol)}</span>`
+                    + `<span class="meta">${esc(row.meta)}</span>`
+                    + `<span class="go">${row.streaming ? '● streaming' : (row.enabled ? 'enabled' : 'off')} ›</span>`;
+                item.addEventListener('click', () => {
+                    if (el('ofxSymbol')) el('ofxSymbol').value = row.symbol;
+                    view.symbol = row.symbol;
+                    void saveParams().then(() => resolveSymbol(row.symbol, { openWhenStuck: true }));
+                });
+                rowsEl.appendChild(item);
+            });
+        }
+    }
+
+    async function runInstrumentAction(action, payload) {
+        const instrument = instrumentMod();
+        const p = payload || streamState || {};
+        const symbol = String(p.symbol || p.query || '').trim().toUpperCase();
+        if (!instrument || !action) return;
+        if (action === 'use') {
+            if (el('ofxSymbol')) el('ofxSymbol').value = symbol;
+            view.symbol = symbol;
+            closeSymbolPanel();
+            await saveParams();
+            await resolveSymbol(symbol);
+            return;
+        }
+        if (action === 'open_instruments' || action === 'map_broker') {
+            if (typeof window.showView === 'function') window.showView('instruments');
+            return;
+        }
+        if (action === 'start_engine') {
+            setSymbolMsg('starting the engine…');
+            try {
+                const res = await apiGet('/api/control/engine/start', { method: 'POST', body: {} });
+                const ok = !(res && res.ok === false);
+                setSymbolMsg(ok ? 'engine started — waiting for data'
+                    : `engine refused: ${(res && res.error) || 'unknown'}`, ok ? 'ok' : 'bad');
+                await resolveSymbol(symbol || sym());
+            } catch (err) {
+                setSymbolMsg(`engine start failed: ${(err && err.message) ? err.message : err}`, 'bad');
+            }
+            return;
+        }
+        if (action === 'enable' || action === 'add') {
+            if (!symbol) { setSymbolMsg('type an instrument name first', 'bad'); return; }
+            const instrumentRow = p.instrument || {};
+            const body = { symbols: [symbol], source: p.source || '', enable: true };
+            /* A row that carries the broker's own name keeps it; a broker-only add maps the
+               typed name onto itself. */
+            if (p.source === 'mt5') body.mt5_symbols = { [symbol]: p.broker_name || instrumentRow.mt5_symbol || symbol };
+            if (p.source === 'alpaca') body.alpaca_symbols = { [symbol]: instrumentRow.alpaca_symbol || symbol };
+            setSymbolMsg(`${action === 'add' ? 'adding' : 'enabling'} ${symbol}…`);
+            try {
+                const res = await apiGet('/api/control/instruments/add', { method: 'POST', body });
+                if (!res || res.ok === false) {
+                    setSymbolMsg(`refused: ${(res && res.error) || 'unknown'}`, 'bad');
+                    return;
+                }
+                const skipped = res.skipped || [];
+                if (skipped.length) { setSymbolMsg(`refused: ${skipped[0].reason}`, 'bad'); return; }
+                /* A running engine built its pipelines at start: restart it so the instrument is
+                   actually subscribed — the same path the source switch uses. */
+                const status = await apiGet('/api/control/engine/status').catch(() => ({}));
+                if (status && status.running) {
+                    setSymbolMsg('restarting the engine…');
+                    const restarted = await apiGet('/api/control/engine/restart', { method: 'POST', body: {} });
+                    if (restarted && restarted.ok === false) {
+                        setSymbolMsg(`restart failed: ${restarted.error || 'unknown'}`, 'bad');
+                        return;
+                    }
+                }
+                setSymbolMsg(`${symbol} is on — the engine covers it now`, 'ok');
+                /* The view was showing whatever was typed; a broker name is not an app symbol,
+                   so the stage would keep asking for a symbol nothing streams (measured: the
+                   footprint 404 note stayed on screen after a successful add). Follow the row. */
+                if (symbol && symbol !== view.symbol) {
+                    if (el('ofxSymbol')) el('ofxSymbol').value = symbol;
+                    view.symbol = symbol;
+                    await saveParams();
+                }
+                await resolveSymbol(symbol);
+                await load();
+            } catch (err) {
+                setSymbolMsg(`failed: ${(err && err.message) ? err.message : err}`, 'bad');
+            }
         }
     }
 
@@ -741,8 +1249,27 @@
             const what = btn.getAttribute('data-ofx-sel');
             if (what === 'clear') OFX.clearSelection();
             else if (what === 'export') void exportSelection();
+            else if (what === 'watch') void watchAreaLevel();
         });
         if (el('ofxApply')) el('ofxApply').addEventListener('click', () => void saveParams());
+        /* §82: the look-up's controls — find answers, the chip re-opens the last answer, and the
+           panel's × closes it. */
+        const symbolInput = el('ofxSymbol');
+        if (el('ofxSymbolFind')) el('ofxSymbolFind').addEventListener('click', () => {
+            void resolveSymbol(symbolInput ? symbolInput.value : sym())
+                .then(() => openSymbolPanel());
+        });
+        if (el('ofxSymbolState')) el('ofxSymbolState').addEventListener('click', () => {
+            void resolveSymbol(symbolInput ? symbolInput.value : sym()).then(() => openSymbolPanel());
+        });
+        if (el('ofxSymClose')) el('ofxSymClose').addEventListener('click', () => closeSymbolPanel());
+        /* §85: the picker — focus re-reads the states (the config moves under it), a pick
+           switches + enables as needed. */
+        if (el('ofxSymPick')) {
+            el('ofxSymPick').addEventListener('focus', () => void refreshPicker());
+            el('ofxSymPick').addEventListener('change', () => void pickSymbol(el('ofxSymPick').value));
+        }
+        void refreshPicker();
         wireCursorLink();
         /* The spine's badge, beside the engine's own stats line: the engine is one of the panels that
            reads the shared cursor, so it carries the same tag as the rest. */
@@ -760,6 +1287,50 @@
                 void saveParams();
             });
         }
+        /* ── B2: the heat scheme, on the Engine's side ──────────────────────────────────────────
+           Scheme and dials write through the registry gate (/api/control/params — the same route
+           the Settings search uses), adopt the value the store accepted, and repaint. The scheme
+           select reads 'custom' whenever the dials match no preset. `apply globally` copies this
+           surface's dials to the other heat surfaces through the same gate. */
+        if (el('ofxHeatScheme')) {
+            el('ofxHeatScheme').addEventListener('change', () => {
+                void applyHeatScheme(el('ofxHeatScheme').value, 'ofx');
+            });
+        }
+        [['ofxHeatContrast', 'ofx.heat_contrast'], ['ofxHeatFloor', 'ofx.heat_floor']].forEach((pair) => {
+            if (!el(pair[0])) return;
+            el(pair[0]).addEventListener('change', () => void writeHeatDial(pair[1], el(pair[0]).value));
+        });
+        if (el('ofxHeatSmooth')) {
+            el('ofxHeatSmooth').addEventListener('change',
+                () => void writeHeatFlag('ofx.heat_smooth', el('ofxHeatSmooth').value));
+        }
+        if (el('ofxDegrade')) {
+            el('ofxDegrade').addEventListener('change',
+                () => void writeHeatFlag('atlas.ofx.degrade', el('ofxDegrade').checked));
+        }
+        if (el('ofxHeatGlobal')) {
+            el('ofxHeatGlobal').addEventListener('click', () => void broadcastHeat('ofx'));
+        }
+        document.addEventListener('ofap:heat-scheme', (ev) => {
+            if (ev && ev.detail && ev.detail.from === 'ofx') return;
+            /* The other surface wrote the shared paths; re-read the block rather than guess. */
+            void loadParams();
+            paintLegend();
+            heatNote('the heat scheme was applied to the Engine');
+        });
+        document.addEventListener('ofap:scopes', () => {
+            /* T12/B9: an instrument-scope block was applied — re-read rather than guess. */
+            void loadParams();
+            paintLegend();
+            heatNote('this instrument’s heat settings were applied');
+        });
+        /* T10/B13: the degrade switch lives in `atlas.ofx` (the renderer block the canvases
+           read, like fit_tolerance); adopt it at wiring time and paint the new controls. */
+        if (typeof S !== 'undefined' && S && S.config) {
+            OFX.setParams({ degrade: (((S.config.atlas || {}).ofx || {}).degrade) !== false });
+        }
+        syncHeatControls();
         /* Bars and palette: applied on change, then reconciled with the store's answer. */
         ['ofxMode', 'ofxPalette'].forEach((id) => {
             if (!el(id)) return;
@@ -776,7 +1347,9 @@
         });
         if (el('ofxSymbol')) el('ofxSymbol').addEventListener('change', () => {
             view.symbol = (el('ofxSymbol').value || SYM_FALLBACK).toUpperCase();
-            void saveParams();
+            /* §82: the change is answered, not just saved — a symbol nothing streams opens the
+               look-up with the reason and the action instead of leaving a blank stage. */
+            void saveParams().then(() => resolveSymbol(view.symbol, { openWhenStuck: true }));
         });
         if (el('ofxSnapLive')) el('ofxSnapLive').addEventListener('click', () => { OFX.snapToLive(); paintChip(); });
         if (el('ofxSnapFloat')) el('ofxSnapFloat').addEventListener('click', () => { OFX.snapToLive(); paintChip(); });
@@ -802,6 +1375,8 @@
             view.lastError = `feed error: ${err}`;
             paintStats();
         }
+        /* §82: the boot answer — non-blocking, so a slow broker lookup never delays first paint. */
+        void resolveSymbol(sym());
         /* The pause registry clears the interval on pause and calls this back on resume, so the
            callback has to rebuild the poll - registering a one-shot load here meant a single
            pause/resume stopped the Engine view's updates for the rest of the session. */
@@ -809,6 +1384,13 @@
             const id = setInterval(() => {
                 if (window.OFAPINTENT && OFAPINTENT.held('ofx')) return;   // never reload under the user's hands
                 if (document.hidden || window.OFAP_PAUSED) return;      // freeze-while-you-work
+                /* Hidden panels age by design (the freshness store's rule): a 2.5 s engine poll
+                   behind another view is five endpoints of pure waste, and the view reloads on
+                   the next tick after it is shown again. Terminal mode hosts the section in a
+                   frame, which shows it with display:flex rather than `.active` — the same pair
+                   scanner.js tests. */
+                const section = document.querySelector('.view[data-view="ofx"]');
+                if (!section || !(section.classList.contains('active') || section.style.display === 'flex')) return;
                 void load();
             }, POLL_MS);
             if (window.OFAPPause) window.OFAPPause.register(id, startPolling);
@@ -879,21 +1461,41 @@
     if (window.OFAPKEYS) {
         const stripBtn = (what) => document.querySelector('.view[data-view="ofx"] [data-ofx-sel="' + what + '"]');
         OFAPKEYS.bind({ id: 'zoom-time-in', keys: ['=', '+'], scope: 'Engine', priority: 6,
-            label: 'zoom time in', when: () => OFAPKEYS.inView('ofx'), run: () => OFX.zoomTime(1.12) });
+            label: 'zoom time in', when: () => OFAPKEYS.inView('ofx'), why: 'acts on the Engine panel', run: () => OFX.zoomTime(1.12) });
         OFAPKEYS.bind({ id: 'zoom-time-out', keys: ['-', '_'], scope: 'Engine', priority: 6,
-            label: 'zoom time out', when: () => OFAPKEYS.inView('ofx'), run: () => OFX.zoomTime(0.89) });
+            label: 'zoom time out', when: () => OFAPKEYS.inView('ofx'), why: 'acts on the Engine panel', run: () => OFX.zoomTime(0.89) });
         OFAPKEYS.bind({ id: 'zoom-price-in', keys: [']', '}'], scope: 'Engine', priority: 6,
-            label: 'zoom price in', when: () => OFAPKEYS.inView('ofx'), run: () => OFX.zoomPrice(1.09) });
+            label: 'zoom price in', when: () => OFAPKEYS.inView('ofx'), why: 'acts on the Engine panel', run: () => OFX.zoomPrice(1.09) });
         OFAPKEYS.bind({ id: 'zoom-price-out', keys: ['[', '{'], scope: 'Engine', priority: 6,
-            label: 'zoom price out', when: () => OFAPKEYS.inView('ofx'), run: () => OFX.zoomPrice(0.92) });
+            label: 'zoom price out', when: () => OFAPKEYS.inView('ofx'), why: 'acts on the Engine panel', run: () => OFX.zoomPrice(0.92) });
+        /* T10/B16: the reset-scales command — price back to auto, time back to live. */
+        OFAPKEYS.bind({ id: 'reset-scales', keys: ['ctrl+shift+r'], scope: 'Engine', priority: 6,
+            label: 'reset the price and time scales',
+            when: () => OFAPKEYS.inView('ofx'), why: 'acts on the Engine panel',
+            run: () => OFX.snapToLive() });
         OFAPKEYS.bind({ id: 'selection-clear', keys: ['x'], scope: 'Engine', priority: 6,
             label: 'clear the selection',
-            when: () => OFAPKEYS.inView('ofx') && OFX.selection() != null,
+            when: () => OFAPKEYS.inView('ofx') && OFX.selection() != null, why: 'box a region on the Engine first',
             run: () => { const b = stripBtn('clear'); if (b) b.click(); } });
         OFAPKEYS.bind({ id: 'export', keys: ['ctrl+e'], scope: 'Engine', priority: 6,
             label: 'export the selection as CSV',
-            when: () => OFAPKEYS.inView('ofx') && OFX.selection() != null,
+            when: () => OFAPKEYS.inView('ofx') && OFX.selection() != null, why: 'box a region on the Engine first',
             run: () => { const b = stripBtn('export'); if (b) b.click(); } });
+        /* T5/A12 — the canvas precision kit: the arrows nudge the stage one pixel, Shift ten.
+           Time and price are separate journeys, so each axis gets its own pair. Registered like
+           every other Engine key, so the Keys menu and the hover prompts can never drift. */
+        [['arrowleft', -1, 0, 'nudge the view back in time'],
+         ['shift+arrowleft', -10, 0, 'nudge the view back in time (10 px)'],
+         ['arrowright', 1, 0, 'nudge the view forward in time'],
+         ['shift+arrowright', 10, 0, 'nudge the view forward in time (10 px)'],
+         ['arrowup', 0, 1, 'nudge the view towards higher prices'],
+         ['shift+arrowup', 0, 10, 'nudge the view towards higher prices (10 px)'],
+         ['arrowdown', 0, -1, 'nudge the view towards lower prices'],
+         ['shift+arrowdown', 0, -10, 'nudge the view towards lower prices (10 px)']].forEach((row) => {
+            OFAPKEYS.bind({ id: 'engine-nudge-' + row[0].replace('shift+', 's-'), keys: [row[0]],
+                scope: 'Engine', priority: 6, label: row[3], why: 'acts on the Engine panel',
+                when: () => OFAPKEYS.inView('ofx'), run: () => OFX.nudge(row[1], row[2]) });
+        });
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchView);

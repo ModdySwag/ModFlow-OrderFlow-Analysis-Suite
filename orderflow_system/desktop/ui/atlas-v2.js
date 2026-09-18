@@ -348,12 +348,17 @@ function v2Poll() {
     }
     if (truthyView('alerts')) loadHistory();
 }
-ATLAS_V2.timer = setInterval(() => {
-    if (window.OFAPINTENT && OFAPINTENT.held('trackers')) {
-        return OFAPINTENT.deferKeyed('trackers', 'v2', v2Poll);
-    }
-    v2Poll();
-}, 4000);
+const startV2Poll = () => {
+    const id = setInterval(() => {
+        if (window.OFAPINTENT && OFAPINTENT.held('trackers')) {
+            return OFAPINTENT.deferKeyed('trackers', 'v2', v2Poll);
+        }
+        v2Poll();
+    }, 4000);
+    if (window.OFAPPause) window.OFAPPause.register(id, startV2Poll);
+    return id;
+};
+ATLAS_V2.timer = startV2Poll();
 
 const _histReload = $("#histReload");
 if (_histReload) _histReload.onclick = loadHistory;

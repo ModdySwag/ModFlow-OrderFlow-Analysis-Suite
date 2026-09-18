@@ -380,7 +380,30 @@ class EmailNotifier:
             logger.warning("atlas email send failed: %s", self.last_error)
             return False
 
-    def _smtp_send(self, subject: str, body: str) -> bool:
+    async def send_report(self, subject: str, body: str,
+                          attachments: Optional[list[tuple[str, bytes, str]]] = None) -> bool:
+        """Send a plain message with optional attachments (name, bytes, mime).
+
+        The storage report's path. Same SMTP transport as an alert — one implementation — and it
+        deliberately does not wait for ``start()``: a report is a one-shot send from a periodic
+        job, which is exactly when no alert channel was ever started.
+        """
+        if not self._configured():
+            self.last_error = "host / recipient missing"
+            return False
+        try:
+            ok = bool(await asyncio.to_thread(self._smtp_send, subject, body, attachments or []))
+            self.sent += 1 if ok else 0
+            self.failed += 0 if ok else 1
+            return ok
+        except Exception as exc:
+            self.failed += 1
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("email report failed: %s", self.last_error)
+            return False
+
+    def _smtp_send(self, subject: str, body: str,
+                   attachments: Optional[list[tuple[str, bytes, str]]] = None) -> bool:
         import smtplib
         from email.message import EmailMessage
 
@@ -389,6 +412,10 @@ class EmailNotifier:
         msg["From"] = self.from_addr
         msg["To"] = ", ".join(self.to_addrs)
         msg.set_content(body)
+        for name, blob, mime in attachments or []:
+            maintype, _, subtype = str(mime or "application/octet-stream").partition("/")
+            msg.add_attachment(bytes(blob), maintype=maintype or "application",
+                               subtype=subtype or "octet-stream", filename=str(name))
         if self.use_tls:
             with smtplib.SMTP(self.host, self.port, timeout=20) as smtp:
                 smtp.starttls()

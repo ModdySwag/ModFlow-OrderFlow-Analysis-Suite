@@ -218,12 +218,12 @@ def test_missing_host_or_port_is_a_config_error():
 # ══════════════════════════════════════════════════════════════════════════════════════════
 
 
-def test_the_catalogue_carries_both_platforms_sierra_first():
-    """The Platforms view indexes platforms[0] for its Sierra keys — Bookmap must arrive beside it,
-    never instead of it."""
+def test_the_catalogue_carries_all_platforms_sierra_first():
+    """The Platforms view indexes platforms[0] for its Sierra keys — Bookmap and NinjaTrader must
+    arrive beside it, never instead of it."""
     cat = platforms.catalogue()
     rows = cat["platforms"]
-    assert [row["id"] for row in rows] == ["sierra", "bookmap"]
+    assert [row["id"] for row in rows] == ["sierra", "bookmap", "ninjatrader"]
     assert rows[0]["plans"] == platforms.PLANS and rows[0]["links"] == platforms.LINKS
     for row in rows:
         assert row["name"] and row["why"] and row["free_tier"] is True
@@ -261,6 +261,10 @@ def test_the_link_allow_list_covers_both_vendors_and_one_code_host():
         "https://bookmap.com/portal/",
         "https://bookmap.com/knowledgebase/docs/API-Tutorial",
         "https://github.com/BookmapAPI/python-api",
+        "https://ninjatrader.com/pricing/",
+        "https://support.ninjatrader.com/s/article/How-do-I-register-for-data-feeds-for-my-account",
+        "https://account.ninjatrader.com/register",
+        "https://discourse.ninjatrader.com/",
     ]
     for url in ok_cases:
         assert platforms.validate_url(url)[0] is True, url
@@ -270,6 +274,7 @@ def test_the_link_allow_list_covers_both_vendors_and_one_code_host():
         "https://github.com/someone/else",                  # not the Bookmap org
         "https://raw.githubusercontent.com/BookmapAPI/x",   # not even Bookmap's org by another route
         "https://bookmap.com.evil.example/pricing",         # a lookalike host is not the vendor
+        "https://ninjatrader.com.evil.example/pricing",     # nor this one
         "file:///C:/Windows/System32/drivers/etc/hosts",
     ]
     for url in refused:
@@ -303,6 +308,96 @@ def test_bookmap_defaults_are_loopback_and_carry_no_credentials():
     assert block["enabled"] is False and block["plan"] == "digital"
     for forbidden in ("password", "username", "token", "api_key", "secret"):
         assert forbidden not in block, "there is nothing to authenticate: the add-on is loopback-only"
+
+
+# ── NinjaTrader: plans, workflow, defaults, the shipped DLL ────────────────────────────────
+
+
+def test_ninjatrader_tiers_are_the_published_plans():
+    caps = {plan["id"]: plan for plan in platforms.NINJATRADER_PLANS}
+    assert list(caps) == ["free", "monthly", "lifetime"]
+    assert caps["free"]["price"] == "0" and caps["free"]["kind"] == "free"
+    assert caps["monthly"]["price"] == "99" and caps["lifetime"]["price"] == "1499"
+    free_text = " ".join(caps["free"]["includes"])
+    assert "$0.39" in free_text and "$1.29" in free_text, "the free plan's commission is its real price"
+    assert "simulated" in free_text.lower()
+    lifetime_text = " ".join(caps["lifetime"]["includes"]).lower()
+    assert "order flow+" in lifetime_text, "Order Flow+ is included with Lifetime — quote it"
+
+
+def test_ninjatrader_caveats_state_the_limits_where_they_bite():
+    text = " ".join(platforms.NINJATRADER_CAVEATS)
+    lower = text.lower()
+    assert "funded" in lower and "level i" in lower, "the real-time entitlement is a fact of funding"
+    assert "level ii" in lower and "subscription" in lower, "depth is carried by the data plan"
+    assert "$59" in text, "the Order Flow+ price is quoted"
+    assert "log in" in lower, "the every-launch login is stated, not discovered"
+    assert platforms.NINJATRADER_PRICES_AS_OF in text
+
+
+def test_ninjatrader_workflow_is_free_first_and_ends_at_the_bridge_install():
+    free = platforms.ninjatrader_workflow()
+    assert free["plan"] == "free" and free["plan_kind"] == "free"
+    titles = " ".join(step["title"] for step in free["steps"]).lower()
+    assert "install" in titles and "account" in titles and "free path" in titles
+    assert "add-on" in titles and "point this suite" in titles
+    assert any(step["link"] == "options" for step in free["steps"])
+    assert all(1 <= step["n"] <= len(free["steps"]) for step in free["steps"])
+    joined = " ".join(step["text"] for step in free["steps"])
+    assert "NinjaScript Editor" in joined and "AddOns" in joined
+    assert platforms.ninjatrader_workflow("nonsense")["plan"] == "free", "an unknown plan falls back"
+
+    paid = platforms.ninjatrader_workflow("lifetime")
+    assert paid["plan_kind"] == "integrated"
+    activate = [step for step in paid["steps"] if "Activate" in step["title"]]
+    assert activate and "1499" in activate[0]["text"], "the one-time price rides on the paid path"
+    assert "Order Flow+" in activate[0]["text"]
+
+
+def test_ninjatrader_defaults_are_loopback_and_carry_no_credentials():
+    block = platforms.ninjatrader_defaults()
+    assert block["host"] == "127.0.0.1" and block["port"] == 8790
+    assert block["protocol"] == "modflow-nt-jsonl"
+    assert block["enabled"] is False and block["plan"] == "free"
+    for forbidden in ("password", "username", "token", "api_key", "secret"):
+        assert forbidden not in block, "there is nothing to authenticate: the bridge is loopback-only"
+
+
+def test_the_app_ships_a_built_bridge_dll():
+    state = platforms.ninjatrader_bridge_state()
+    assert state["dll"]["shipped"] is True and state["dll"]["exists"] is True, \
+        "the built DLL travels with the suite, like the Bookmap jar"
+    assert state["dll"]["size"] > 0 and len(state["dll"]["sha256"]) == 64
+    assert state["note"], "the state always says something a card can print"
+
+
+def test_the_bridge_state_compares_the_installed_copy(tmp_path, monkeypatch):
+    """Same bytes = ok; different bytes = 'a different build'; nothing installed = the copy steps."""
+    source = platforms.NINJATRADER_ADDON_DIR / platforms.NINJATRADER_DLL_NAME
+    assert source.is_file(), "this test needs the shipped DLL"
+
+    addons = tmp_path / "AddOns"
+    addons.mkdir()
+    monkeypatch.setattr(platforms, "detect_installs",
+                        lambda: {"ninjatrader": {"found": True, "version": "8.1.8.2",
+                                                 "addons_folder": str(addons)}})
+
+    missing = platforms.ninjatrader_bridge_state()
+    assert missing["ok"] is False and "AddOns folder yet" in missing["note"]
+
+    (addons / platforms.NINJATRADER_DLL_NAME).write_bytes(source.read_bytes())
+    matched = platforms.ninjatrader_bridge_state()
+    assert matched["ok"] is True and "matches this build" in matched["note"]
+
+    (addons / platforms.NINJATRADER_DLL_NAME).write_bytes(b"an older bridge")
+    stale = platforms.ninjatrader_bridge_state()
+    assert stale["ok"] is False and "different build" in stale["note"]
+
+
+def test_the_bridge_dll_missing_from_the_install_says_to_build_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(platforms, "NINJATRADER_ADDON_DIR", tmp_path)
+    state = platforms.ninjatrader_bridge_state()
+    assert state["ok"] is False and "build it from the source folder" in state["note"]
 
 
 # ── a mock of the add-on, written to the format in bookmap_addon/README.md ─────────────────
@@ -575,3 +670,87 @@ def test_the_free_path_now_ships_the_addon_instead_of_a_compiler():
     assert "no compiler needed" in step["text"], "a fresh user must not be told to build anything"
     assert "ofap-bridge.jar" in step["text"] and "Configure API plugins" in step["text"]
     assert "JDK" not in step["text"]
+def test_each_exchange_venue_answers_with_its_own_board():
+    """Picking OKX/Binance/Hyperliquid in the panel used to answer with Bybit's board."""
+    import json
+
+    from orderflow_system.desktop import marketwatch as mw
+
+    class _Resp:
+        def __init__(self, payload):
+            self._body = json.dumps(payload).encode("utf-8")
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def opener_for(payload):
+        def _open(_req, timeout=10):
+            return _Resp(payload)
+        return _open
+
+    mw._BOARD_CACHE.clear()
+    binance = mw._exchange_board("binance", opener=opener_for({"symbols": [
+        {"symbol": "BTCUSDT", "contractType": "PERPETUAL", "status": "TRADING", "quoteAsset": "USDT"},
+        {"symbol": "ETHUSDT", "contractType": "PERPETUAL", "status": "BREAK", "quoteAsset": "USDT"},
+        {"symbol": "BTCUSDT_260327", "contractType": "CURRENT_QUARTER", "status": "TRADING",
+         "quoteAsset": "USDT"},
+    ]}))
+    assert [r["symbol"] for r in binance] == ["BTCUSDT"], binance
+
+    okx = mw._exchange_board("okx", opener=opener_for({"data": [
+        {"instId": "BTC-USDT-SWAP", "state": "live", "ctType": "linear", "settleCcy": "USDT"},
+        {"instId": "BTC-USD-SWAP", "state": "live", "ctType": "inverse", "settleCcy": "BTC"},
+    ]}))
+    assert [r["symbol"] for r in okx] == ["BTCUSDT"], okx
+
+    hl = mw._exchange_board("hyperliquid", opener=opener_for({"universe": [
+        {"name": "BTC"}, {"name": "kPEPE"}, {"name": "MATIC", "isDelisted": True},
+    ]}))
+    assert [r["symbol"] for r in hl] == ["BTCUSDT", "KPEPEUSDT"], hl
+    assert all(r["quoted"] is False for r in hl), "a listing is not quotes"
+
+
+def test_the_board_is_served_per_venue_and_cached(monkeypatch):
+    """market_watch() answers with the requested venue's rows and one cached fetch."""
+    from orderflow_system.desktop import marketwatch as mw
+
+    mw._BOARD_CACHE.clear()
+    calls = {"n": 0}
+
+    def _board(venue, *, opener=None):
+        calls["n"] += 1
+        return [mw._board_row("BTCUSDT"), mw._board_row("ETHUSDT")]
+
+    monkeypatch.setattr(mw, "_exchange_board", _board)
+    first = mw.market_watch("okx", limit=10)
+    second = mw.market_watch("okx", limit=10)
+    assert first["source"] == "okx" and first["ok"] and first["note"].startswith("OKX")
+    assert [r["symbol"] for r in first["rows"]] == ["BTCUSDT", "ETHUSDT"]
+    assert second["rows"] == first["rows"]
+
+    bybit = mw.market_watch("bybit", limit=5)
+    assert bybit["source"] == "bybit"
+def test_the_systems_alerts_row_flags_a_public_ntfy_topic(monkeypatch):
+    """Alerts that leave the machine through a public ntfy.sh topic must say so on the board."""
+    from orderflow_system.desktop import config_store, engine as engine_mod
+
+    cfg = {"data_source": "bybit", "instruments": [],
+           "notify": {"ntfy": {"enabled": True, "server": "https://ntfy.sh",
+                               "topic": "orderflow-tape-abc123"}}}
+    monkeypatch.setattr(config_store, "load_config", lambda: cfg)
+    rows = engine_mod.systems_report()["rows"]
+    alerts = next(r for r in rows if r["id"] == "alerts")
+    assert "ntfy" in alerts["name"] and alerts["state"] == "live", alerts
+    assert "PUBLIC" in alerts["detail"] and "orderflow-tape-abc123" in alerts["detail"], alerts
+
+    # a private server is not flagged
+    cfg["notify"]["ntfy"]["server"] = "https://push.example.net"
+    rows = engine_mod.systems_report()["rows"]
+    alerts = next(r for r in rows if r["id"] == "alerts")
+    assert "PUBLIC" not in alerts["detail"], alerts

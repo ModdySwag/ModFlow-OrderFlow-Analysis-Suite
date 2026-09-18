@@ -116,5 +116,20 @@ check('a sweep with no members is not a crash', () => {
     assert(st.groups && st.groups.A && st.groups.A.members.length === 0);
 });
 
+check('colour: every group has a distinct fallback and the cycle wraps', () => {
+    const F = t.links.FALLBACK_COLORS;
+    assert.deepStrictEqual(Object.keys(F), ['A', 'B', 'C', 'D']);
+    assert.strictEqual(new Set(Object.values(F)).size, 4, 'four distinct colours');
+    assert.notStrictEqual(t.links.nextColor(F.A).toLowerCase(), String(F.A).toLowerCase(),
+        'the cycle steps off the current colour');
+    assert.strictEqual(t.links.nextColor('#c3a6ff'), '#6ec1ff', 'and wraps');
+    assert.strictEqual(new Set(t.links.COLOR_CYCLE).size, t.links.COLOR_CYCLE.length, 'cycle colours are distinct');
+});
+
+check('colour: colorOf falls back without config, and rejects unknown groups', () => {
+    assert.strictEqual(t.links.colorOf('A'), t.links.FALLBACK_COLORS.A);
+    assert.strictEqual(t.links.colorOf('z'), '', 'no group, no colour');
+});
+
 console.log('links selftest: ' + ok + ' ok, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

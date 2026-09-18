@@ -381,4 +381,9 @@ def test_the_frozen_build_ships_every_asset_root_the_shell_loads():
             assert base_rel in shipped, (
                 f"the shell loads assets from {prefix} ({base_rel}) but the frozen build does not "
                 "ship that directory (REQUIRED_DATA_RELS) — the packaged app 404s them silently")
-
+def test_the_engine_view_poll_only_runs_while_its_view_is_shown():
+    """Hidden panels age by design: the ofx engine poll (five endpoints per 2.5 s) used to keep
+    asking behind every other view. The gate must scope its lookup like every other panel."""
+    src = (UI / "ofx-view.js").read_text(encoding="utf-8")
+    assert '.view[data-view="ofx"]' in src, "the poll must scope its own section (not a bare data-view)"
+    assert "classList.contains('active')" in src, "the poll must check that the view is the shown one"

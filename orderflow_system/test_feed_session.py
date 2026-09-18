@@ -398,3 +398,34 @@ def test_bybit_reconnect_delay_carries_jitter_and_escalates(monkeypatch):
 
     assert slept == [pytest.approx(2.5), pytest.approx(5.0)], slept        # 2.0 × 1.25, then 4.0 × 1.25
     assert feed._reconnect_delay == 4.0, "the ladder did not escalate after a connect-and-die"
+def test_a_non_data_frame_does_not_reset_the_ladder():
+    """A handler that answers False (acks, pongs) is not proof the feed works: only market data
+    resets the ladder, so a venue that accepts, acks and then stalls keeps escalating."""
+    attempts = {"n": 0}
+
+    async def connect():
+        attempts["n"] += 1
+        return FakeConn(["ack-%d" % attempts["n"]], gap=0.005, fail_after=1, then_silent=False)
+
+    async def on_frame(_raw):
+        return False                          # a control frame, never data
+
+    async def main():
+        session = FeedSession(
+            "bybit", connect, on_frame,
+            policy=HeartbeatPolicy("client_ping", ping_every_s=10.0, silence_budget_s=1000.0),
+            backoff=ReconnectBackoff(base=0.05, factor=2.0, cap=0.4, jitter=0.0),
+            sleep=_instant, clock=VirtualClock(), heartbeat_tick_s=0.05,
+        )
+        task = asyncio.create_task(session.run())
+        for _ in range(4000):
+            await asyncio.sleep(0)
+            if attempts["n"] >= 2:
+                break
+        await session.stop()
+        await asyncio.wait_for(task, timeout=2)
+        return session
+
+    session = _run(main())
+    assert attempts["n"] >= 2, "the session never reconnected"
+    assert session._backoff.current > 0.05, "an ack frame must not reset the ladder"

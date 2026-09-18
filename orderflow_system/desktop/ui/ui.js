@@ -86,6 +86,7 @@ function showView(name) {
     ensurePanel(name);
     if (name === 'platforms' && typeof platformsInit === 'function') platformsInit();
     if (name === 'studies' && typeof studiesInit === 'function') studiesInit();
+    if (name === 'marketwatch') loadMarketWatch();
     if (name === 'chart') {
         ensureChart();
         loadChart();
@@ -124,6 +125,12 @@ async function boot() {
     renderInstruments();
     renderStatus();
     await refreshInstruments();
+    /* §86: the Systems board asks AFTER the boot burst has drained. Fired inside the burst it
+       sat queued for ~25 s behind the page's slow boot calls (measured live: the browser's
+       six-socket pool saturated, the request never started) — the board is a check, it must
+       not fight the app's own start-up for the wire. Every Overview visit re-checks it, and
+       the card carries its own Re-check. */
+    void renderSystems();
     connectWS();
     const deepLink = location.hash.slice(1);
     if (deepLink) showView(deepLink);
@@ -225,7 +232,11 @@ function renderStatus() {
     if (st.state === 'error' && st.error) toast(banner, st.error, 'err');
     else if (!st.running) toast(banner, 'Engine is idle. Press “Start engine” to connect the data feed — the panels below will fill as ticks arrive.', 'info');
     else if ((st.skipped || []).length) {
-        toast(banner, `Skipped instruments: ${st.skipped.map((s) => s.symbol).join(', ')} — ${st.skipped[0].reason}`, 'warn');
+        /* §83: the persistent skip banner carries the way out — the look-up button — instead of
+           ending at the reason. Falls back to the plain sentence if the module is absent. */
+        const notice = window.OFAPHINT ? OFAPHINT.skippedNotice(st) : null;
+        if (notice) OFAPHINT.paintNotice(notice, banner);
+        else toast(banner, `Skipped instruments: ${st.skipped.map((s) => s.symbol).join(', ')} — ${st.skipped[0].reason}`, 'warn');
     } else clearToast(banner);
 }
 
@@ -268,6 +279,45 @@ function liveState(key) {
 const STATUS_POLL_MS = 2000;
 let statusUnsubscribe = null;
 
+
+/* ── §86: the Systems board — "are the systems 100%?" ────────────────────────────
+   One call, one card: every ingest path (engine, feed source, the terminal/venue
+   integrations, the history store, the UI stream, alerts) plus the capabilities this
+   install has not set up yet. Read-only on the server; clicks route to the view that
+   owns the fix. */
+let sySeen = new Map();      // §90: last state per tile, so a change can announce itself once
+async function renderSystems() {
+    const grid = $("#systemsGrid");
+    const scoreEl = $("#systemsScore");
+    if (!grid || !window.OFAPSYSTEMS) return;
+    let report = null;
+    try { report = await api('/api/control/systems'); } catch (e) { report = null; }
+    if (!report || report.ok === false) {
+        if (scoreEl) scoreEl.textContent = 'backend not answering';
+        return;
+    }
+    const summary = OFAPSYSTEMS.summary(report);
+    if (scoreEl) scoreEl.textContent = summary.line
+        + (summary.attention ? ` · ${summary.attention} need attention` : '');
+    grid.innerHTML = OFAPSYSTEMS.tiles(report).map((t) => {
+        const moved = sySeen.has(t.name) && sySeen.get(t.name) !== t.state;
+        sySeen.set(t.name, t.state);
+        return `<div class="sy-tile${t.optional ? ' opt' : ''}${moved ? ' sy-flash' : ''}"${t.view ? ` data-view="${esc(t.view)}"` : ''} title="${esc(t.detail)}">`
+        + `<div class="sy-line"><span class="sy-name">${esc(t.name)}</span><div class="spacer"></div>`
+        + `<span class="tag ${t.kind}">${esc(t.text)}</span></div>`
+        + `<div class="sy-detail">${esc(t.detail)}</div></div>`;
+    }).join('');
+    grid.querySelectorAll('.sy-tile').forEach((el) => el.addEventListener('click', () => {
+        const v = el.getAttribute('data-view');
+        if (v && typeof window.showView === 'function') window.showView(v);
+    }));
+    const note = $("#systemsNote");
+    if (note) note.textContent = summary.attention
+        ? 'Click a tile to go to the view that fixes it; greyed tiles are capabilities this install has not set up.'
+        : 'Every expected system is live.';
+}
+if ($("#systemsRefresh")) $("#systemsRefresh").onclick = () => void renderSystems();
+
 async function pollStatus() {
     /* Paused, or the user's hands are on a surface: skip the paint entirely. */
     if (window.OFAP_PAUSED || (window.OFAPINTENT && OFAPINTENT.anyHeld())) return;
@@ -297,6 +347,13 @@ async function applyStatus(payload) {
     renderStatus();
     refreshLiveChip();
     renderOverviewTable();
+    /* §86: the Systems board's first paint rides a status tick — by then the boot burst has
+       drained (measured: fired inside the burst, its fetch queued ~25 s behind the page's own
+       boot calls). Retries each tick until it lands; visits and the Re-check keep it fresh. */
+    if (!S.sysPainted && !S.sysPending) {
+        S.sysPending = true;
+        renderSystems().then(() => { S.sysPainted = true; }).finally(() => { S.sysPending = false; });
+    }
     const first = (S.status.per_symbol || [])[0];
     if (first) {
         if (first.price) updatePriceKpis(first.price, null);
@@ -335,6 +392,12 @@ $("#btnStart").onclick = async () => {
         const cfg = await collectSettings();
         const r = await api('/api/control/engine/start', { method: 'POST', body: cfg });
         if (!r.ok) toast($("#ovBanner"), r.error || 'Start failed', 'err');
+        /* §83: an engine that skipped instruments says so, with the look-up one click away —
+           silence here is how "crypto only" used to be discovered days later. */
+        if (window.OFAPHINT && r && r.ok !== false) {
+            const notice = OFAPHINT.skippedNotice(r);
+            if (notice) OFAPHINT.paintNotice(notice, $('#ovBanner') || document.body);
+        }
     } catch (e) {
         toast($("#ovBanner"), String(e), 'err');
     }
@@ -403,11 +466,16 @@ function handleChannel(msg) {
                 OFAPAUDIO.onTick({ symbol: data.symbol || S.symbol, price: data.price,
                                    size: data.size, side: data.side });
             }
-            updatePriceKpis(data.price, data.side);
-            if (S.inst.tape && truthyView('tape')) S.inst.tape.addTrade({ time: Date.now(), price: data.price, size: data.size, side: data.side });
+            if (window.OFAPINTENT && OFAPINTENT.held('overview')) OFAPINTENT.deferKeyed('overview', 'snap', pollStatus);
+            else updatePriceKpis(data.price, data.side);
+            if (S.inst.tape && truthyView('tape')) {
+                if (window.OFAPINTENT && OFAPINTENT.held('tape')) OFAPINTENT.deferKeyed('tape', 'snap', loadTape);
+                else S.inst.tape.addTrade({ time: Date.now(), price: data.price, size: data.size, side: data.side });
+            }
             break;
         case 'candle':
             S.candleCount++;
+            if (window.OFAPINTENT && OFAPINTENT.held('chart')) { OFAPINTENT.deferKeyed('chart', 'snap', loadChart); break; }
             if (S.candleSeries) {
                 /* §56 carry-over: this used to repaint the newest bar with plain OHLC, so an
                    expression mode's colours dropped off the bar until the next full fetch. The
@@ -427,10 +495,12 @@ function handleChannel(msg) {
             }
             break;
         case 'delta':
+            if (window.OFAPINTENT && OFAPINTENT.held('chart')) { OFAPINTENT.deferKeyed('chart', 'snap', loadChart); break; }
             if (S.deltaSeries) S.deltaSeries.update({ time: data.time, value: data.value });
             updateDeltaKpi(data.value, data.bar_delta);
             break;
         case 'signal':
+            if (window.OFAPINTENT && OFAPINTENT.held('signals')) { OFAPINTENT.deferKeyed('signals', 'snap', loadSignals); break; }
             S.signals.unshift(data);
             S.signals = S.signals.slice(0, 60);
             $("#navSignalCount").textContent = S.signals.length;
@@ -438,10 +508,12 @@ function handleChannel(msg) {
             if (S.inst.signals) S.inst.signals.addSignal(data);
             break;
         case 'orderbook':
+            if (window.OFAPINTENT && OFAPINTENT.held('depth')) { OFAPINTENT.deferKeyed('depth', 'snap', loadOrderbook); break; }
             if (S.inst.book) S.inst.book.updatePrice(data.best_bid, 'buy');
             updateDepthKpis(data);
             break;
         case 'stats':
+            if (window.OFAPINTENT && OFAPINTENT.held('overview')) { OFAPINTENT.deferKeyed('overview', 'snap', pollStatus); break; }
             renderOverviewTable();
             break;
         case 'search':
@@ -475,25 +547,39 @@ const truthyView = (name) => {
 
 function updatePriceKpis(price, side) {
     const k = $("#kpiPrice");
-    k.querySelector('.kpi-value').textContent = fmt(price, price > 100 ? 2 : 4);
+    const digits = price > 100 ? 2 : 4;
+    const text = fmt(price, digits);
+    /* §90: a live price must look live — direction arrow, tint and flash via the shared layer. */
+    if (window.OFAPTICK) OFAPTICK.tick(k.querySelector('.kpi-value'), text, { arrow: true });
+    else k.querySelector('.kpi-value').textContent = text;
     k.querySelector('.kpi-sub').textContent = side ? side.toUpperCase() + ' print' : '';
     const c = $("#chPrice").querySelector('.kpi-value');
-    if (c) c.textContent = fmt(price, price > 100 ? 2 : 4);
+    if (c) { if (window.OFAPTICK) OFAPTICK.tick(c, text, { arrow: true }); else c.textContent = text; }
 }
 function updateDeltaKpi(cum, bar) {
     const k = $("#kpiDelta");
-    k.querySelector('.kpi-value').textContent = compact(cum);
+    const text = compact(cum);
+    if (window.OFAPTICK) OFAPTICK.tick(k.querySelector('.kpi-value'), text, { arrow: true });
+    else k.querySelector('.kpi-value').textContent = text;
     k.querySelector('.kpi-sub').textContent = `bar ${compact(bar)}`;
     k.classList.toggle('up', cum > 0); k.classList.toggle('down', cum < 0);
     const c = $("#chDelta").querySelector('.kpi-value');
-    if (c) c.textContent = compact(cum);
+    if (c) { if (window.OFAPTICK) OFAPTICK.tick(c, text, { arrow: true }); else c.textContent = text; }
 }
 function updateDepthKpis(d) {
-    $("#dpBid").querySelector('.kpi-value').textContent = fmt(d.best_bid, 4);
-    $("#dpAsk").querySelector('.kpi-value').textContent = fmt(d.best_ask, 4);
+    const bidText = fmt(d.best_bid, 4);
+    const askText = fmt(d.best_ask, 4);
+    if (window.OFAPTICK) {
+        OFAPTICK.tick($("#dpBid").querySelector('.kpi-value'), bidText, { arrow: true });
+        OFAPTICK.tick($("#dpAsk").querySelector('.kpi-value'), askText, { arrow: true });
+    } else {
+        $("#dpBid").querySelector('.kpi-value').textContent = bidText;
+        $("#dpAsk").querySelector('.kpi-value').textContent = askText;
+    }
     const imb = ((d.imbalance ?? 0) * 100);
     const k = $("#dpImb");
-    k.querySelector('.kpi-value').textContent = fmt(imb, 1) + '%';
+    if (window.OFAPTICK) OFAPTICK.tick(k.querySelector('.kpi-value'), fmt(imb, 1) + '%', { arrow: false });
+    else k.querySelector('.kpi-value').textContent = fmt(imb, 1) + '%';
     k.querySelector('.kpi-sub').textContent = imb > 5 ? 'bid heavy' : imb < -5 ? 'ask heavy' : 'balanced';
     k.classList.toggle('up', imb > 0); k.classList.toggle('down', imb < 0);
     if (S.inst.book) {
@@ -565,6 +651,8 @@ function renderOverviewSignals() {
             <div class="dim">${esc(s.narrative || s.thesis || s.reason || '')}</div>
         </div>`;
     }).join('');
+    /* §90: the newest card slides in — a detection should catch the eye, once, and settle. */
+    if (window.OFAPTICK && box.firstElementChild) OFAPTICK.arrival(box.firstElementChild);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -691,6 +779,8 @@ async function fetchVolumeProfile(sym) {
 }
 
 async function loadChart() {
+    if (window.OFAPINTENT && OFAPINTENT.held('chart')) { OFAPINTENT.deferKeyed('chart', 'snap', loadChart); return; }
+
     ensureChart();
     if (!S.chart || !S.symbol) return;
     $("#chartStatus").textContent = 'loading…';
@@ -710,7 +800,14 @@ async function loadChart() {
         if (window.OFAPFRESH) {
             const lastT = bars.length ? Number(bars[bars.length - 1].time) : 0;
             const step = bars.length > 1 ? Math.max(1, lastT - Number(bars[bars.length - 2].time)) : 60;
-            OFAPFRESH.stamp('chart', { lastMs: lastT ? (lastT + step) * 1000 : 0, kind: 'candles' });
+            /* Demo bars end at "now" by construction, so stamping them with a clock reads
+               "live · 0 s" on data the server flagged as demo. Say so instead — freshness.js
+               understands `source: 'demo'`, and the ofx panels already label their fallbacks. */
+            const demo = liveState('candles') === 'demo';
+            OFAPFRESH.stamp('chart', {
+                lastMs: demo ? 0 : (lastT ? (lastT + step) * 1000 : 0),
+                kind: 'candles', source: demo ? 'demo' : '',
+            });
         }
         /* Per-bar paints from the catalogue: the default mode hands back the same OHLC with the
            theme pair's colours (identical to the series' own options), so "default" moves no pixel. */
@@ -788,7 +885,8 @@ function renderChartKpis(vp, bias, bars) {
     const last = bars.length ? bars[bars.length - 1].close : null;
     $("#chPrice").querySelector('.kpi-value').textContent = fmt(last, last > 100 ? 2 : 4);
     if (vp) {
-        $("#chPoc").querySelector('.kpi-value').textContent = fmt(vp.poc, 2);
+        if (window.OFAPTICK) OFAPTICK.tick($("#chPoc").querySelector('.kpi-value'), fmt(vp.poc, 2));
+        else $("#chPoc").querySelector('.kpi-value').textContent = fmt(vp.poc, 2);
         $("#chPoc").querySelector('.kpi-sub').textContent = vp.shape ? `shape: ${vp.shape}` : '';
     }
     if (bias) {
@@ -811,9 +909,12 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 else bootChartExpression();
 /* The menu bar writes the same registry paths; arrive there through the store, like every panel. */
 document.addEventListener('ofap:expression', () => { void loadChartExpression(true); });
-$("#rangeSelect").onchange = (e) => { S.range = +e.target.value; loadChart(); };
-$("#ovMarkers").onchange = loadChart;
-$("#ovVP").onchange = () => loadChart();
+$("#rangeSelect").onchange = (e) => { S.range = +e.target.value; loadChart();
+    void saveUIState({ chart: { range: S.range } }); };
+$("#ovMarkers").onchange = () => { loadChart();
+    void saveUIState({ chart: { markers: $("#ovMarkers").checked } }); };
+$("#ovVP").onchange = () => { loadChart();
+    void saveUIState({ chart: { vp: $("#ovVP").checked } }); };
 
 /* ══════════════════════════════════════════════════════════════
    Order flow · depth · tape · signals · performance · micro
@@ -912,7 +1013,7 @@ function ensurePanel(name) {
             loadStrategy();
         },
         chart: () => { ensureChart(); loadChart(); },
-        overview: () => { renderOverviewTable(); renderOverviewSignals(); },
+        overview: () => { renderOverviewTable(); renderOverviewSignals(); renderSystems(); },
         heatmap: () => { loadHeatmap(); },
         trackers: () => { loadTrackers(); },
         cvd: () => { loadCvd(); },
@@ -937,6 +1038,8 @@ function ensurePanel(name) {
 let footprintSeq = 0;
 
 async function loadFootprint() {
+    if (window.OFAPINTENT && OFAPINTENT.held('orderflow')) { OFAPINTENT.deferKeyed('orderflow', 'snap', loadFootprint); return; }
+
     if (!S.inst.footprint || !S.symbol) return;
     const seq = ++footprintSeq;
     try {
@@ -958,8 +1061,13 @@ async function loadFootprint() {
     } else clearToast($("#ofBanner"));
     try {
         const vp = await fetchVolumeProfile(S.symbol);
-        $("#ofPoc").querySelector('.kpi-value').textContent = fmt(vp && vp.poc);
-        $("#ofVah").querySelector('.kpi-value').textContent = fmt(vp && vp.vah);
+        if (window.OFAPTICK) {
+            OFAPTICK.tick($("#ofPoc").querySelector('.kpi-value'), fmt(vp && vp.poc));
+            OFAPTICK.tick($("#ofVah").querySelector('.kpi-value'), fmt(vp && vp.vah));
+        } else {
+            $("#ofPoc").querySelector('.kpi-value').textContent = fmt(vp && vp.poc);
+            $("#ofVah").querySelector('.kpi-value').textContent = fmt(vp && vp.vah);
+        }
         $("#ofVal").querySelector('.kpi-value').textContent = fmt(vp && vp.val);
         $("#ofShape").querySelector('.kpi-value').textContent = (vp && vp.shape) || '--';
         $("#ofShape").querySelector('.kpi-sub').textContent = vp && vp.total_volume ? `vol ${compact(vp.total_volume)}` : '';
@@ -993,6 +1101,8 @@ $("#btnRebuildProfile").onclick = async () => {
 };
 
 async function loadOrderbook() {
+    if (window.OFAPINTENT && OFAPINTENT.held('depth')) { OFAPINTENT.deferKeyed('depth', 'snap', loadOrderbook); return; }
+
     if (!S.inst.book || !S.symbol) return;
     try {
         const data = await api(`/api/orderbook/${encodeURIComponent(S.symbol)}?levels=15`);
@@ -1002,6 +1112,8 @@ async function loadOrderbook() {
 }
 
 async function loadTape() {
+    if (window.OFAPINTENT && OFAPINTENT.held('tape')) { OFAPINTENT.deferKeyed('tape', 'snap', loadTape); return; }
+
     if (!S.inst.tape || !S.symbol) return;
     if (!panelIsLive('tape')) {
         toast($("#tapeBanner"),
@@ -1014,7 +1126,120 @@ async function loadTape() {
     } catch (e) { console.error(e); }
 }
 
+/* §87/§88 — the Market Watch view: the source's own board, live. Rows come straight from
+   /api/control/marketwatch; the table model is pure (ui/marketwatch.js) and pinned by its
+   selftest. The board re-reads on its own timer while the view is visible (~1.5 s), updates
+   cells in place (no flicker), tints a price green/red by its last move, and the badge shows
+   the data's age. Pause freezes the board exactly as it stands — a read that lands mid-pause is
+   dropped — and Resume snaps it current with one forced read. */
+const MW_POLL_MS = 1500;
+let mwBusy = false;
+let mwLastFetchOk = 0;
+let mwPrev = new Map();
+
+async function loadMarketWatch(force = false) {
+    if (!force && window.OFAPINTENT && OFAPINTENT.held('marketwatch')) {
+        /* Parked for study: queue one refresh for resume instead of fetching now. */
+        OFAPINTENT.deferKeyed('marketwatch', 'snap', () => loadMarketWatch(true));
+        return;
+    }
+    if (mwBusy) return;                             // one read in flight is enough
+    const body = $("#mwBody");
+    if (!body) return;
+    const sel = $("#mwSource");
+    const filt = $("#mwFilter");
+    mwBusy = true;
+    try {
+        const parts = ['limit=200'];
+        if (sel && sel.value) parts.push('source=' + encodeURIComponent(sel.value));
+        if (filt && filt.value.trim()) parts.push('filter=' + encodeURIComponent(filt.value.trim()));
+        const data = await api('/api/control/marketwatch?' + parts.join('&'));
+        if (!force && window.OFAPINTENT && OFAPINTENT.held('marketwatch')) return;   // a hold landed mid-flight
+        paintMarketWatch(data);
+        mwLastFetchOk = Date.now();
+        if (data && data.ok === false) toast($("#mwBanner"), data.note || 'the board is unavailable', 'warn');
+        else clearToast($("#mwBanner"));
+    } catch (e) { console.error('market watch:', e); }
+    finally { mwBusy = false; }
+}
+
+function paintMarketWatch(data) {
+    const body = $("#mwBody");
+    if (!body) return;
+    const rows = window.OFAPMW ? OFAPMW.rows(data) : [];
+    const names = rows.map((r) => r.symbol);
+    if (body.dataset.syms !== names.join(',')) {    // the set changed -> rebuild; else update in place
+        body.innerHTML = rows.map((r) => `<tr data-symbol="${esc(r.symbol)}">`
+            + `<td>${esc(r.symbol)}</td>`
+            + `<td style="text-align:right">${esc(r.bid)}</td>`
+            + `<td style="text-align:right">${esc(r.ask)}</td>`
+            + `<td style="text-align:right" class="${r.cls}">${r.arrow} ${esc(r.change)}</td></tr>`).join('');
+        body.dataset.syms = names.join(',');
+        mwPrev = new Map();
+    }
+    rows.forEach((r, i) => {
+        const tr = body.children[i];
+        if (!tr) return;
+        const prev = mwPrev.get(r.symbol);
+        mwCell(tr.children[1], r.bid, prev && prev.bid);
+        mwCell(tr.children[2], r.ask, prev && prev.ask);
+        const chg = tr.children[3];
+        if (chg) {
+            chg.className = r.cls;
+            const text = r.arrow + ' ' + r.change;
+            if (chg.textContent.trim() !== text) chg.textContent = text;
+        }
+        mwPrev.set(r.symbol, { bid: r.bid, ask: r.ask });
+    });
+    $("#mwCount").textContent = String((data && data.total != null) ? data.total : rows.length) + ' symbols';
+    $("#mwNote").textContent = (data && data.note) || '';
+}
+
+/* One price cell: tint by the last move and flash on every change (the reflow restarts the
+   animation when a move repeats in the same direction). */
+function mwCell(cell, text, prevText) {
+    if (!cell) return;
+    if (prevText != null && window.OFAPMW && OFAPMW.bidDir) {
+        const dir = OFAPMW.bidDir(prevText, text);
+        if (dir) {
+            cell.classList.remove('tick-up', 'tick-down');
+            void cell.offsetWidth;
+            cell.classList.add(dir === 'up' ? 'tick-up' : 'tick-down');
+        }
+    }
+    if (cell.textContent.trim() !== text) cell.textContent = text;
+}
+
+function mwBadgeTick() {
+    const el = $("#mwLive");
+    if (!el) return;
+    const age = mwLastFetchOk ? Math.round((Date.now() - mwLastFetchOk) / 1000) : null;
+    if (window.OFAPINTENT && OFAPINTENT.held('marketwatch')) {
+        el.textContent = 'paused' + (age != null ? ' · last read ' + age + ' s ago' : '');
+        el.classList.add('mw-paused');
+    } else {
+        el.textContent = age == null ? 'live' : 'live · ' + age + ' s';
+        el.classList.remove('mw-paused');
+    }
+}
+
+setInterval(() => {
+    if (truthyView('marketwatch')) loadMarketWatch();
+    mwBadgeTick();
+}, MW_POLL_MS);
+/* #mwPause is a shared user-hold button now (data-surf in the markup): intent.js owns its
+   click, its face and its queue — resume flushes one forced read, exactly as before. */
+$("#mwRefresh").onclick = () => loadMarketWatch(true);
+$("#mwSource").onchange = () => loadMarketWatch(true);
+let mwFilterTimer = null;
+$("#mwFilter").oninput = () => {
+    clearTimeout(mwFilterTimer);
+    mwFilterTimer = setTimeout(() => loadMarketWatch(true), 250);
+};
+
 async function loadSignals() {
+    if (window.OFAPINTENT && OFAPINTENT.held('signals')) { OFAPINTENT.deferKeyed('signals', 'snap', loadSignals); return; }
+
     if (!S.symbol) return;
     try {
         const data = await api(`/api/signals/${encodeURIComponent(S.symbol)}?limit=50`);
@@ -1128,8 +1353,91 @@ $("#btnEnableCrypto").onclick = () => {
             : true;
         if (on === undefined) tr.querySelector('[data-role="enabled"]').checked = true;
     });
+    queueInstrumentApply('', null);
 };
-$("#btnDisableAll").onclick = () => $$('#instTable tbody tr').forEach((tr) => (tr.querySelector('[data-role="enabled"]').checked = false));
+$("#btnDisableAll").onclick = () => {
+    $$('#instTable tbody tr').forEach((tr) => (tr.querySelector('[data-role="enabled"]').checked = false));
+    queueInstrumentApply('', null);
+};
+
+/* ── a toggle IS the change (§85) ──────────────────────────────────────────────
+   The table used to only paint: a row switched on here and looked at in the Engine view answered
+   "not enabled", because nothing saved until the Settings view's Save button was pressed
+   (measured live: the toggle painted on, config.json said enabled=false). A toggle now writes the
+   row itself — built from the config ON DISK, never this page's possibly-stale copy — refreshes
+   the table, and then applies it: a running engine restarts so the change takes effect, exactly
+   the path the Engine view's own "Enable & restart" uses. Toggles inside the debounce window ride
+   together into one write and one restart. */
+let instTimer = null;
+let instPending = null;
+let instApplying = false;
+
+function queueInstrumentApply(symbol, enabled) {
+    instPending = { symbol: symbol || '', enabled: enabled };
+    if (instTimer) clearTimeout(instTimer);
+    instTimer = setTimeout(() => void applyInstrumentChanges(), 450);
+}
+
+/* One write at a time: a second toggle while a save/restart is still in flight would otherwise
+   race its predecessor (measured: two quick flips interleaved, and only the newer write being
+   last kept the newer state). The follow-up runs on the pending state, so the newest flip lands
+   last, and its message is the one on the banner. */
+async function applyInstrumentChanges() {
+    if (instApplying) {
+        if (instTimer) clearTimeout(instTimer);
+        instTimer = setTimeout(() => void applyInstrumentChanges(), 250);
+        return;
+    }
+    instApplying = true;
+    try {
+        await applyInstrumentChangesNow();
+    } finally {
+        instApplying = false;
+        if (instPending) queueInstrumentApply(instPending.symbol, instPending.enabled);
+    }
+}
+
+async function applyInstrumentChangesNow() {
+    const pending = instPending || { symbol: '', enabled: null };
+    instPending = null;
+    if (instTimer) { clearTimeout(instTimer); instTimer = null; }
+    const banner = $("#instBanner");
+    try {
+        const fresh = await api('/api/control/config');
+        const dom = new Map(collectInstruments().map((row) => [row.symbol, row]));
+        const rows = (fresh.instruments || []).map((row) => {
+            const seen = dom.get(row.symbol);
+            return seen ? { ...row, enabled: seen.enabled, tick_size: seen.tick_size } : row;
+        });
+        const r = await api('/api/control/config', { method: 'POST', body: { instruments: rows } });
+        if (r && r.ok === false) { toast(banner, 'save refused: ' + (r.error || 'unknown'), 'err'); return; }
+        if (r && r.config) S.config = r.config;
+        try { S.caps = await api('/api/control/capabilities'); } catch (e) { /* keep current caps */ }
+        renderInstruments();
+        const what = pending.symbol || 'instruments';
+        const state = pending.enabled === true ? 'enabled' : (pending.enabled === false ? 'disabled' : 'updated');
+        const status = await api('/api/control/engine/status').catch(() => ({}));
+        if (status && status.running) {
+            toast(banner, `${what} ${state} — restarting the engine to apply…`, 'info');
+            const restarted = await api('/api/control/engine/restart', { method: 'POST', body: {} });
+            const bad = restarted && restarted.ok === false;
+            toast(banner, bad
+                ? `saved, but the engine restart failed: ${restarted.error || 'unknown'}`
+                : `${what} ${state} — the engine covers it now`, bad ? 'err' : 'info');
+        } else {
+            toast(banner, `${what} ${state} — saved. Start the engine to stream it.`, 'info');
+        }
+    } catch (e) {
+        toast(banner, 'instrument save failed: ' + e, 'err');
+    }
+}
+
+$("#instTable").addEventListener('change', (ev) => {
+    const box = ev.target && ev.target.closest ? ev.target.closest('[data-role="enabled"]') : null;
+    if (!box) return;
+    const tr = box.closest('tr');
+    queueInstrumentApply(tr ? tr.dataset.symbol : '', !!box.checked);
+});
 
 /* ══════════════════════════════════════════════════════════════
    Settings
@@ -1151,10 +1459,32 @@ function renderSettings() {
     $("#setLogLevel").value = c.logging.level;
     $("#setTgToken").value = c.telegram.bot_token || '';
     $("#setTgChat").value = c.telegram.chat_id || '';
+    /* §83: the Telegram master switch had no reader and no writer — the box was painted, never
+       restored, never collected and never saved, so routing order-flow alerts to Telegram could
+       not be switched on from the UI at all. It is a stored setting; show it and save it. */
+    if ($("#setTgEnabled")) $("#setTgEnabled").checked = !!c.telegram.enabled;
+    /* §83: view state the user sets by hand (chart range/markers/VP, log filter) is restored from
+       the config now — a restart used to put every one of them back to factory. */
+    const chartUI = (c.ui && c.ui.chart) || {};
+    const rangeSel = $("#rangeSelect");
+    if (rangeSel && chartUI.range) {
+        const wanted = String(chartUI.range);
+        if (Array.from(rangeSel.options).some((o) => o.value === wanted)) {
+            rangeSel.value = wanted;
+            S.range = Number(chartUI.range);
+        }
+    }
+    if ($("#ovMarkers")) $("#ovMarkers").checked = chartUI.markers !== false;
+    if ($("#ovVP")) $("#ovVP").checked = chartUI.vp !== false;
+    const logsUI = (c.ui && c.ui.logs) || {};
+    if ($("#logAuto")) $("#logAuto").checked = logsUI.auto !== false;
+    if ($("#logLevel")) $("#logLevel").value = logsUI.level || '';
     const tg = $("#tgPill");
     const on = !!(c.telegram.bot_token && c.telegram.chat_id);
     tg.className = 'pill ' + (on ? 'running' : '');
-    $("#tgPillText").textContent = on ? 'configured' : 'not configured';
+    $("#tgPillText").textContent = on
+        ? (c.telegram.enabled ? 'configured' : 'configured — switch off')
+        : 'not configured';
     const mt5 = S.caps && S.caps.mt5;
     $("#sourceHint").textContent = mt5 && !mt5.available ? `MT5 unavailable here — ${mt5.reason}` : 'MT5 bridge ready';
     renderThresholds();
@@ -1190,16 +1520,41 @@ function collectThresholds() {
 
 async function collectSettings() {
     collectThresholds();
-    const cfg = JSON.parse(JSON.stringify(S.config));
+    /* §83: start from what is ON DISK, not from the copy this page loaded — a save built on a
+       stale snapshot rolled back anything written since boot (a drawing, a layout, a newly added
+       instrument). The form owns the fields it collects; everything else is whatever is stored. */
+    let base = S.config;
+    try { base = await api('/api/control/config'); } catch (e) { /* offline: the page's copy */ }
+    const cfg = JSON.parse(JSON.stringify(base));
     cfg.data_source = $("#setSource").value;
     cfg.risk.signal_cooldown_seconds = parseFloat($("#setCooldown").value) || 30;
     cfg.risk.min_composite_score = parseFloat($("#setScore").value) || 40;
     cfg.logging.level = $("#setLogLevel").value;
     cfg.telegram.bot_token = $("#setTgToken").value.trim();
     cfg.telegram.chat_id = $("#setTgChat").value.trim();
+    cfg.telegram.enabled = !!($("#setTgEnabled") || {}).checked;
     cfg.instruments = collectInstruments();
+    cfg.ui = cfg.ui || {};
+    cfg.ui.chart = {
+        range: parseInt(($("#rangeSelect") || {}).value, 10) || 0,
+        markers: !!($("#ovMarkers") || {}).checked,
+        vp: !!($("#ovVP") || {}).checked,
+    };
+    cfg.ui.logs = {
+        auto: !!($("#logAuto") || {}).checked,
+        level: (($("#logLevel") || {}).value || ''),
+    };
     if (typeof collectAtlasSettings === 'function') collectAtlasSettings(cfg);
     return cfg;
+}
+
+/* §83: a view-state change is written through the same merge path the settings form uses —
+   a small patch, never a whole-config replace from a possibly stale page copy. */
+async function saveUIState(patch) {
+    try {
+        const r = await api('/api/control/config', { method: 'POST', body: { ui: patch } });
+        S.config = r.config;
+    } catch (e) { /* the view keeps working; the next change retries */ }
 }
 
 async function saveSettings(restart = false) {
@@ -1209,6 +1564,7 @@ async function saveSettings(restart = false) {
         const cfg = await collectSettings();
         const r = await api('/api/control/config', { method: 'POST', body: cfg });
         S.config = r.config;
+        if (window.OFAPFRESH && OFAPFRESH.setWindows) OFAPFRESH.setWindows((r.config.atlas || {}).freshness);
         renderInstruments(); renderSettings();
         out.textContent = `saved → ${r.config_path}`;
         if (restart) await api('/api/control/engine/restart', { method: 'POST', body: S.config });
@@ -1221,6 +1577,7 @@ $("#btnSaveRestart").onclick = () => saveSettings(true);
 $("#btnReloadSettings").onclick = async () => {
     const d = await api('/api/control/bootstrap');
     S.config = d.config; S.caps = d.capabilities; S.status = d.status;
+    if (window.OFAPFRESH && OFAPFRESH.setWindows) OFAPFRESH.setWindows((d.config.atlas || {}).freshness);
     renderSettings(); renderInstruments(); renderStatus();
 };
 $("#btnResetSettings").onclick = async () => {
@@ -1260,6 +1617,22 @@ async function loadStorage() {
         const keep = d.retention && d.retention.days > 0 ? `${d.retention.days} d` : 'forever';
         const prune = d.last_prune && d.last_prune.deleted != null
             ? ` · last prune −${Number(d.last_prune.deleted).toLocaleString()} rows` : '';
+        /* The stopped-engine read answers from the file itself, so the newest-tick age and the
+           reclaimable bytes are real with the engine off too — and the prune note survives a
+           restart now (it is read back from the store, not only from the engine's memory). */
+        const ageText = (ms) => {
+            const s = Math.max(0, Math.round(ms / 1000));
+            if (s < 90) return `${s} s`;
+            if (s < 5400) return `${Math.round(s / 60)} min`;
+            return `${(s / 3600).toFixed(1)} h`;
+        };
+        const newest = d.ticks && d.ticks.newest_ms
+            ? `newest tick ${ageText(Date.now() - d.ticks.newest_ms)} ago` : '';
+        const reclaim = d.reclaimable_bytes > 0
+            ? `reclaimable ${human(d.reclaimable_bytes)} — the next vacuum frees it` : '';
+        const pruneLine = d.last_prune && d.last_prune.at_ms
+            ? `last prune ${ageText(Date.now() - d.last_prune.at_ms)} ago · −${Number(d.last_prune.deleted || 0).toLocaleString()} rows`
+            : 'no prune has run yet';
         el.textContent = `storage: ${human(d.bytes + (d.wal_bytes || 0))}`
             + (rows != null ? ` · ${(rows / 1e6).toFixed(1)} M ticks` : '')
             + ` · keep ${keep}` + prune;
@@ -1267,7 +1640,10 @@ async function loadStorage() {
             `db: ${d.db_path}`,
             `file ${human(d.bytes)} · wal ${human(d.wal_bytes || 0)}`,
             rows != null ? `ticks ${rows.toLocaleString()}` : (d.engine_running ? '' : 'row counts need the engine running'),
+            newest,
+            reclaim,
             `retention ${keep} · prune every ${d.retention ? d.retention.prune_interval_hours : '?'} h`,
+            pruneLine,
             d.retention ? `session starts ${String(d.retention.session_start_hour).padStart(2, '0')}:00 UTC` : '',
         ].filter(Boolean).join('\n');
     } catch (e) { /* the line is a bonus; the logs matter more */ }
@@ -1287,7 +1663,9 @@ async function loadLogs() {
         if (stick) box.scrollTop = box.scrollHeight;
     } catch (e) { /* ignore */ }
 }
-$("#logLevel").onchange = loadLogs;
+$("#logLevel").onchange = () => { loadLogs();
+    void saveUIState({ logs: { level: $("#logLevel").value } }); };
+$("#logAuto").onchange = () => { void saveUIState({ logs: { auto: $("#logAuto").checked } }); };
 $("#btnLogClear").onclick = async () => { await api('/api/control/logs/clear', { method: 'POST' }); loadLogs(); };
 
 /* ══════════════════════════════════════════════════════════════

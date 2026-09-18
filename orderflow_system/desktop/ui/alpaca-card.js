@@ -304,10 +304,9 @@ async function alpFeedSave() {
     if (!sel) return;
     const feed = sel.value;
     try {
-        const cfg = JSON.parse(JSON.stringify(S.config || {}));
-        cfg.alpaca = cfg.alpaca || {};
-        cfg.alpaca.feed = feed;
-        const r = await api('/api/control/config', { method: 'POST', body: cfg });
+        /* §83: patch the stored field — re-posting the page's whole config could roll back
+           anything written since boot (the same class as the keys that "did not save"). */
+        const r = await api('/api/control/config', { method: 'POST', body: { alpaca: { feed: feed } } });
         S.config = r.config;
         const boot = await api('/api/control/bootstrap');
         S.caps = boot.capabilities || S.caps;

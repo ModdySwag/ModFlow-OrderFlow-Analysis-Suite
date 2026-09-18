@@ -98,6 +98,15 @@
     }
 
     function tick(channel) {
+        /* A frozen board must stop asking. pause.js clears the timers handed to it, and a bus
+           channel's timer was never one of them — so the channel reads the freeze itself (the P
+           key, the chip and the intent arbiter all land on the same flag). Guarded for the
+           headless selftest, where there is no window at all. */
+        if (typeof window !== 'undefined' && window.OFAPPause && window.OFAPPause.isPaused
+            && window.OFAPPause.isPaused()) {
+            channel.skipped += 1;
+            return;
+        }
         if (channel.inFlight) {                       // a slow server must not queue requests up
             channel.skipped += 1;
             state.counters.coalesced += 1;

@@ -56,6 +56,8 @@ class MarketScanner:
             "absorption_side": None, "absorption_score": None,
             "depth_executions": 0, "depth_refills": 0,
             "vwap": None, "ticks_from_vwap": None, "vwap_side": None,
+            "radar_armed": 0, "radar_approaching": 0, "radar_held": 0,
+            "radar_score": 0.0, "radar_note": "",
             "score": 0.0,
         }
 
@@ -82,6 +84,18 @@ class MarketScanner:
             row["imbalances"] = len(imb.get("levels") or imb.get("rows") or [])
         except Exception:
             pass
+
+        radar = getattr(feats, "radar", None)
+        if radar is not None:
+            try:
+                rs = radar.summary()
+                row["radar_armed"] = rs.get("armed", 0)
+                row["radar_approaching"] = rs.get("approaching", 0)
+                row["radar_held"] = rs.get("defended", 0) + rs.get("confirmed", 0)
+                row["radar_score"] = rs.get("score", 0.0)
+                row["radar_note"] = rs.get("note", "")
+            except Exception:
+                pass
 
         try:
             p = feats.intent.pressure()
@@ -160,7 +174,8 @@ class MarketScanner:
 
         reverse = sort in ("volume", "delta", "delta_pct", "prints_per_s", "big_trades", "score",
                            "depth_executions", "depth_refills", "absorption_score", "imbalances",
-                           "sweeps", "stop_runs", "liquidations", "icebergs", "prints")
+                           "sweeps", "stop_runs", "liquidations", "icebergs", "prints",
+                           "radar_score", "radar_armed", "radar_approaching", "radar_held")
         def sort_key(r: dict[str, Any]):
             value = r.get(sort)
             if value is None:

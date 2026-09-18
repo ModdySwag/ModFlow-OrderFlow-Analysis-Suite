@@ -400,9 +400,9 @@ class HyperliquidFeed:
             msg = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             logger.warning("Hyperliquid: invalid JSON (%s)", str(raw)[:120])
-            return
+            return False
         if not isinstance(msg, dict):
-            return
+            return False
         channel = msg.get("channel")
         if channel == "trades":
             await self._handle_trades(msg.get("data"))
@@ -410,12 +410,13 @@ class HyperliquidFeed:
             data = msg.get("data")
             await self._handle_book(data if isinstance(data, dict) else {})
         elif channel in ("subscriptionResponse", "pong"):
-            return                                 # acks, and the answer to the session's JSON ping
+            return False                           # acks, and the answer to the session's JSON ping
         elif not self._unknown_channel_warned:
             # One warning per connection, then silence: an unhandled channel is worth knowing about
             # once, but a venue that starts pushing something new must not become a log flood.
             self._unknown_channel_warned = True
             logger.warning("Hyperliquid: unexpected channel %r — ignoring it from now on", channel)
+            return False
 
     async def _handle_trades(self, payload: Any) -> None:
         for item in _trade_items(payload):

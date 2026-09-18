@@ -90,6 +90,7 @@ class DataSource(Enum):
     HYPERLIQUID = "hyperliquid" # Hyperliquid perpetuals (free WebSocket: trades + whole-book snapshots)
     OKX = "okx"                  # OKX USDT swaps (free WebSocket: trades + 400-level book)
     MT5 = "mt5"                  # MetaTrader 5 terminal (real broker data)
+    NINJATRADER = "ninjatrader"  # NinjaTrader 8 desktop via the shipped read-only bridge (Windows)
     BOTH = "both"                # Exchange + MT5 simultaneously
     ALPACA = "alpaca"            # Alpaca Markets: US equities/ETFs/options/crypto
     ALL = "all"                  # Every configured source at once
@@ -242,6 +243,19 @@ class MT5Config:
     poll_interval_ms: int = 100               # Tick polling interval (ms)
     enable_book: bool = True                  # Enable DOM/Market Depth data
     download_history_days: int = 3            # Days of historical M1 bars to download (3d = ~4320 candles, covers 1W range at 1H TF)
+
+
+@dataclass
+class NinjaTraderConfig:
+    """NinjaTrader 8 bridge settings (runtime values, set from config.json).
+
+    The bridge add-on inside NinjaTrader is the server; these are only where it listens and the
+    app-side symbol map (app symbol → the name handed to the bridge; ``NQ`` / ``NQ1`` both resolve
+    to the front-month contract on the platform's side).
+    """
+    host: str = "127.0.0.1"
+    port: int = 8790
+    symbols: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -783,6 +797,7 @@ FOOTPRINT_MIN_PRINT_SIZE: float = 0.0
 #   DataSource.BOTH        → Run the exchange and MT5 feeds simultaneously
 #   DataSource.ALPACA      → Use Alpaca Markets (US equities, ETFs, options, crypto)
 #   DataSource.ALL         → Run every configured source at once
+#   DataSource.NINJATRADER → NinjaTrader 8 desktop through the shipped read-only bridge (Windows)
 DATA_SOURCE = DataSource.MT5
 
 # ── MT5 Configuration ──
@@ -791,6 +806,11 @@ DATA_SOURCE = DataSource.MT5
 #   NAS100: "USTEC", "NAS100", "US100", "USTEC.cash", "USTECH100", "#NAS100"
 #   Gold:   "XAUUSD", "GOLD", "XAUUSD.cash"
 MT5 = MT5Config()
+
+# ── NinjaTrader Configuration ──
+# Loopback only: the bridge add-on runs inside NinjaTrader and listens on 127.0.0.1.
+# The symbol map is app symbol → the name handed to the bridge (see ninjatrader_symbol rows).
+NINJATRADER = NinjaTraderConfig()
 
 # ── Alpaca Configuration ──
 # API keys live in the user config file (config.json → "alpaca"), never in source:

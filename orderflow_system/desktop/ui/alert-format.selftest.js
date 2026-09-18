@@ -29,6 +29,7 @@ const ENGINE_KINDS = [
     'big_trade', 'block_trade', 'sweep', 'stop_run', 'iceberg', 'speed_spike', 'cvd_divergence',
     'heat_pull', 'heat_stack', 'wall', 'wall_age', 'stacked_imbalance', 'intent_pressure',
     'pulled_size', 'trapped_traders', 'vwap_cross', 'depth_execution', 'depth_refill',
+    'unfinished_business', 'node_zone', 'level_touch', 'radar_level',
 ];
 
 check('the module exposes its whole surface', () => {

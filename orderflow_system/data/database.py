@@ -254,8 +254,18 @@ class Database:
                 out[key] = os.path.getsize(db_file + suffix)
             except OSError:
                 out[key] = 0
+        out.update({"page_size": 0, "page_count": 0, "freelist_pages": 0, "reclaimable_bytes": 0})
         if not self._db:
             return out
+        try:                       # O(1) page accounting, so the panel can quote what a vacuum frees
+            for pragma, key in (("page_size", "page_size"), ("page_count", "page_count"),
+                                ("freelist_count", "freelist_pages")):
+                cur = await self._db.execute(f"PRAGMA {pragma}")
+                row = await cur.fetchone()
+                out[key] = int(row[0]) if row else 0
+            out["reclaimable_bytes"] = out["freelist_pages"] * out["page_size"]
+        except Exception:                              # noqa: BLE001 — accounting is a bonus
+            pass
         for table in ("ticks", "candles", "volume_profiles", "signals", "trade_journal"):
             try:
                 cur = await self._db.execute(f"SELECT COUNT(*) FROM {table}")
@@ -274,8 +284,12 @@ class Database:
     async def ensure_incremental_autovacuum(self) -> str:
         """Make the DB reclaimable: `PRAGMA incremental_vacuum` is a NO-OP until the file is
         converted once with a full VACUUM (`auto_vacuum=INCREMENTAL`). Returns 'already',
-        'converted' or 'failed' — reported, never faked; a locked DB just retries next
-        interval."""
+        'converted', 'no-space' or 'failed' — reported, never faked; a locked DB just retries
+        next interval.
+
+        The conversion is the one FULL vacuum this store ever runs, so it refuses to start when
+        the volume cannot hold a second copy of the file (that is the temp space a full VACUUM
+        needs); the next retention pass tries again."""
         if not self._db:
             return "failed"
         try:
@@ -283,6 +297,19 @@ class Database:
             row = await cur.fetchone()
             if row and int(row[0]) == 2:
                 return "already"
+            import os as _os
+            import shutil as _shutil
+
+            try:
+                size = _os.path.getsize(str(self.db_path)) if _os.path.exists(str(self.db_path)) else 0
+                free = _shutil.disk_usage(str(self.db_path)).free
+                if size and free < size * 1.1:
+                    logger.warning(
+                        "auto-vacuum conversion deferred: needs ~%.1f GB free, %.1f GB available",
+                        size * 1.1 / 1e9, free / 1e9)
+                    return "no-space"
+            except OSError:                            # an unreadable path is not a reason to try
+                pass
             await self._db.commit()
             await self._db.execute("PRAGMA auto_vacuum=INCREMENTAL")
             await self._db.execute("VACUUM")
@@ -308,6 +335,36 @@ class Database:
             await self._db.commit()
         except Exception as exc:                           # noqa: BLE001
             logger.warning("incremental vacuum failed: %s", exc)
+
+    async def prune_other_tables(self, cutoff_ms: int) -> dict[str, int]:
+        """Trim the tables the tick pass does not own, on the same retention window.
+
+        Retention is a promise about the STORE, not about one table: candles, signals, volume
+        profiles and the atlas event log grew forever while only `ticks` was pruned (measured on
+        this machine: 11 consecutive passes reported "deleted 0 tick rows" and left everything
+        else untouched). A missing table (an older file) reports -1 instead of raising.
+        """
+        out: dict[str, int] = {}
+        for table, column in (("candles", "timestamp_ms"), ("signals", "timestamp_ms"),
+                              ("atlas_events", "ts_ms")):
+            try:
+                cur = await self._db.execute(
+                    f"DELETE FROM {table} WHERE {column} < ?", (int(cutoff_ms),))
+                out[table] = int(cur.rowcount or 0)
+            except Exception:                          # noqa: BLE001 — a missing table is not fatal
+                out[table] = -1
+        try:
+            # volume_profiles keeps a TEXT session date (YYYY-MM-DD, UTC — session_window's label)
+            import datetime as _dt
+
+            floor = _dt.datetime.fromtimestamp(int(cutoff_ms) / 1000.0,
+                                               tz=_dt.timezone.utc).strftime("%Y-%m-%d")
+            cur = await self._db.execute("DELETE FROM volume_profiles WHERE session_date < ?", (floor,))
+            out["volume_profiles"] = int(cur.rowcount or 0)
+        except Exception:                              # noqa: BLE001
+            out["volume_profiles"] = -1
+        await self._db.commit()
+        return out
 
     async def insert_candle(self, instrument: str, timeframe: str, candle: Candle):
         fp_json = json.dumps({
@@ -470,3 +527,63 @@ class Database:
              pnl_ticks, rr_ratio, signals_json, notes),
         )
         await self._db.commit()
+def readonly_snapshot(db_path: str) -> dict:
+    """File sizes, page accounting and the tick span of a database nobody has open.
+
+    The engine owns the live handle; with it stopped the storage route could only show the file
+    size (a stopped handle answers ``tables == {}`` — `test_retention.py` pins that). The Logs
+    panel's storage line is exactly where a user looks when the app feels heavy, so this reads
+    the file READ-ONLY instead: ``PRAGMA page_count`` / ``freelist_count`` are O(1), which makes
+    the reclaimable bytes real, and the per-instrument tick span rides the
+    ``(instrument, timestamp_ms)`` index (measured on the owner's 8 M-row database: 0.7 s, a
+    covering-index scan — never a table scan). A missing or foreign file answers zeros for the
+    parts it cannot read rather than raising; the caller caches the result.
+    """
+    import os as _os
+    import sqlite3
+    from pathlib import Path as _Path
+
+    out: dict = {
+        "db_path": str(db_path), "bytes": 0, "wal_bytes": 0,
+        "page_size": 0, "page_count": 0, "freelist_pages": 0, "reclaimable_bytes": 0,
+        "ticks": {"oldest_ms": 0, "newest_ms": 0},
+        "spans": [],
+    }
+    for suffix, key in (("", "bytes"), ("-wal", "wal_bytes")):
+        try:
+            out[key] = _os.path.getsize(str(db_path) + suffix)
+        except OSError:
+            out[key] = 0
+    if not out["bytes"]:
+        return out
+
+    con = None
+    try:
+        con = sqlite3.connect(_Path(str(db_path)).resolve().as_uri() + "?mode=ro",
+                              uri=True, timeout=2.0)
+        cur = con.cursor()
+        out["page_size"] = int(cur.execute("PRAGMA page_size").fetchone()[0] or 0)
+        out["page_count"] = int(cur.execute("PRAGMA page_count").fetchone()[0] or 0)
+        out["freelist_pages"] = int(cur.execute("PRAGMA freelist_count").fetchone()[0] or 0)
+        out["reclaimable_bytes"] = out["freelist_pages"] * out["page_size"]
+        rows = cur.execute(
+            "SELECT instrument, MIN(timestamp_ms), MAX(timestamp_ms) "
+            "FROM ticks GROUP BY instrument"
+        ).fetchall()
+        out["spans"] = [
+            {"instrument": str(r[0]), "oldest_ms": int(r[1] or 0), "newest_ms": int(r[2] or 0)}
+            for r in rows
+        ]
+        oldest = [s["oldest_ms"] for s in out["spans"] if s["oldest_ms"]]
+        newest = [s["newest_ms"] for s in out["spans"] if s["newest_ms"]]
+        if oldest and newest:
+            out["ticks"] = {"oldest_ms": min(oldest), "newest_ms": max(newest)}
+    except Exception:                    # a foreign or half-written file: report what was read
+        logger.debug("readonly storage snapshot stopped early for %s", db_path, exc_info=True)
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
+    return out

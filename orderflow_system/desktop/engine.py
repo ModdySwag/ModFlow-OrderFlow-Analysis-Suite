@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import socket
 import sys
 import time
 from typing import Any, Optional
@@ -44,6 +45,20 @@ def bybit_capable(spec: dict[str, Any]) -> bool:
     return bool(spec.get("bybit_symbol")) or spec.get("symbol") in BYBIT_SUPPORTED
 
 
+def _crypto_class(spec: dict[str, Any]) -> bool:
+    """True when the row is a crypto instrument — the only class the exchange venues trade.
+
+    The offline test used to be `symbol.endswith("USDT")`, which quietly claimed NAS100USDT (an
+    index CFD) and XAUUSDT (gold) for Binance/OKX/Hyperliquid: /datasources promised instruments
+    the venue does not list, and the engine had no gate of its own to catch it. Rows with no
+    asset_class (hand-built dicts, older configs) fall back to the shipped support list.
+    """
+    asset_class = str(spec.get("asset_class") or "").strip().lower()
+    if asset_class:
+        return asset_class == "crypto"
+    return str(spec.get("symbol") or "").upper() in BYBIT_SUPPORTED
+
+
 def binance_capable(spec: dict[str, Any]) -> bool:
     """Can the Binance USDⓈ-M feed serve this instrument?
 
@@ -53,8 +68,7 @@ def binance_capable(spec: dict[str, Any]) -> bool:
     """
     if spec.get("binance_symbol"):
         return True
-    symbol = str(spec.get("symbol") or "").upper()
-    return symbol in BYBIT_SUPPORTED or symbol.endswith("USDT")
+    return _crypto_class(spec)
 
 
 def hyperliquid_capable(spec: dict[str, Any]) -> bool:
@@ -67,8 +81,7 @@ def hyperliquid_capable(spec: dict[str, Any]) -> bool:
     """
     if spec.get("hyperliquid_symbol"):
         return True
-    symbol = str(spec.get("symbol") or "").upper()
-    return symbol in BYBIT_SUPPORTED or symbol.endswith("USDT")
+    return _crypto_class(spec)
 
 
 def okx_capable(spec: dict[str, Any]) -> bool:
@@ -81,8 +94,123 @@ def okx_capable(spec: dict[str, Any]) -> bool:
     """
     if spec.get("okx_symbol"):
         return True
-    symbol = str(spec.get("symbol") or "").upper()
-    return symbol in BYBIT_SUPPORTED or symbol.endswith("USDT")
+    return _crypto_class(spec)
+
+
+#: The futures roots NinjaTrader ships with — the offline rule for the look-up (a row added from
+#: the terminal's own list proves itself with `ninjatrader_symbol`). NQ1 / NQ1! style names strip
+#: to their root here; the bridge resolves the front month.
+NINJATRADER_ROOTS = {
+    "NQ", "MNQ", "ES", "MES", "YM", "MYM", "RTY", "M2K", "CL", "MCL", "GC", "MGC",
+    "SI", "SIL", "NG", "HG", "6E", "6B", "6J", "6A", "6C", "6S", "ZB", "ZN", "ZF",
+}
+
+
+def ninjatrader_capable(spec: dict[str, Any]) -> bool:
+    """Can the NinjaTrader bridge serve this instrument?
+
+    Prefers the config: a row added from the terminal carries a `ninjatrader_symbol` the bridge
+    itself resolved (front month included), which is stronger evidence than the roots this repo
+    happens to ship.
+    """
+    if str(spec.get("ninjatrader_symbol") or "").strip():
+        return True
+    root = str(spec.get("symbol") or "").upper().removesuffix("1").removesuffix("!")
+    return root in NINJATRADER_ROOTS
+
+
+def ninjatrader_status(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Is the bridge answering on this machine? A TCP connect, nothing more."""
+    payload = payload or {}
+    host = str(payload.get("host") or getattr(settings.NINJATRADER, "host", "127.0.0.1") or "127.0.0.1")
+    try:
+        port = int(payload.get("port") or getattr(settings.NINJATRADER, "port", 8790) or 8790)
+    except (TypeError, ValueError):
+        port = 8790
+    info: dict[str, Any] = {"available": False, "reason": "", "host": host, "port": port}
+    try:
+        with socket.create_connection((host, port), timeout=0.8):
+            info["available"] = True
+            info["reason"] = "NinjaTrader bridge answering"
+    except OSError as exc:
+        info["reason"] = (f"no bridge at {host}:{port} ({type(exc).__name__}) — start NinjaTrader "
+                          f"(bridge compiled in the platform's own NinjaScript Editor — its Log tab shows it listening)")
+    return info
+
+
+_NT_INSTRUMENTS_CACHE: dict[str, Any] = {"at": 0.0, "rows": []}
+
+
+def ninjatrader_symbol_names(max_age_s: float = 120.0) -> list[dict[str, Any]]:
+    """The terminal's own instrument list, cached.
+
+    A real terminal lists thousands of masters, so this is never fetched per keystroke (the same
+    rule the MT5 broker list follows). Empty list when the bridge is down — the caller says so.
+    """
+    now = time.time()
+    if _NT_INSTRUMENTS_CACHE.get("rows") and now - float(_NT_INSTRUMENTS_CACHE.get("at") or 0.0) < max_age_s:
+        return list(_NT_INSTRUMENTS_CACHE["rows"])
+    from orderflow_system.data.ninjatrader_feed import ninjatrader_instruments
+
+    rows = ninjatrader_instruments(getattr(settings.NINJATRADER, "host", "127.0.0.1"),
+                                   getattr(settings.NINJATRADER, "port", 8790))
+    if rows:
+        _NT_INSTRUMENTS_CACHE["at"] = now
+        _NT_INSTRUMENTS_CACHE["rows"] = rows
+    return rows
+
+
+def ninjatrader_validate(symbols: list[str]) -> dict[str, Any]:
+    """Ask the bridge which of these names its terminal carries (one round trip, cached list).
+
+    A requested name matches by exact full name first (`NQ 12-26`), then by master root
+    (`NQ` / `NQ1` → `NQ 12-26`); the tick size comes from the terminal's own database.
+    """
+    status = ninjatrader_status()
+    if not status["available"]:
+        return {"ok": False, "available": False, "reason": status["reason"], "symbols": {}}
+    rows = ninjatrader_symbol_names()
+    if not rows:
+        return {"ok": False, "available": True,
+                "reason": "the bridge answered but listed no instruments", "symbols": {}}
+    out: dict[str, Any] = {}
+    for raw in symbols:
+        want = str(raw or "").strip().upper()
+        if not want:
+            continue
+        base = want.removesuffix("!").removesuffix("1")
+        hit = next((row for row in rows
+                    if str(row.get("Name") or "").upper() == want
+                    or str(row.get("Root") or "").upper() == base), None)
+        out[str(raw)] = {"listed": hit is not None,
+                         "tick_size": (hit or {}).get("TickSize") or None,
+                         "ninjatrader": (hit or {}).get("Name") or ""}
+    return {"ok": True, "available": True, "symbols": out}
+
+
+def venue_stamp_for(spec: dict[str, Any], source: str) -> Optional[str]:
+    """Which venue stamp lets the engine build a profile for a symbol the matrix does not know (§82).
+
+    A stamp is evidence — the venue's own listing (or the user's broker mapping) confirmed the
+    name — so a typo can never become an instrument. Returns the venue name, or None when the
+    row carries nothing the ACTIVE source can use.
+    """
+    src = str(source or "").lower()
+    if src in ("bybit", "both") and bybit_capable(spec):
+        return "bybit"
+    if src == "binance" and str(spec.get("binance_symbol") or "").strip():
+        return "binance"
+    if src == "hyperliquid" and str(spec.get("hyperliquid_symbol") or "").strip():
+        return "hyperliquid"
+    if src == "okx" and str(spec.get("okx_symbol") or "").strip():
+        return "okx"
+    if src in ("mt5", "both") and str(spec.get("mt5_symbol") or "").strip():
+        return "mt5"
+    if src == "ninjatrader" and str(spec.get("ninjatrader_symbol") or "").strip():
+        return "ninjatrader"
+    if src in ("alpaca", "all") and str(spec.get("alpaca_symbol") or "").strip():
+        return "alpaca"
+    return None
 
 
 _BASE_CONFIGS: dict[str, InstrumentConfig] = {}
@@ -231,6 +359,183 @@ def mt5_probe(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# ── §82: broker symbol discovery ─────────────────────────────────────────────────────
+#
+# The wizard maps broker names by hand, which asks the user to already know the name
+# ("USTEC or US100 or NAS100?"). Discovery answers the other direction: list what THIS
+# terminal's broker actually offers, so a typed market name can find its contract — and
+# an NQ1!-style look-up ends with the real symbol instead of silence.
+
+_MT5_SYMBOLS_CACHE: dict[str, Any] = {"key": None, "at": 0.0, "names": []}
+MT5_SYMBOLS_TTL_S = 120.0
+
+
+def _mt5_key(payload: dict[str, Any] | None) -> tuple:
+    payload = payload or {}
+    try:
+        login = int(payload.get("login") or 0)
+    except (TypeError, ValueError):
+        login = 0
+    return (str(payload.get("path") or "").strip(), str(payload.get("server") or "").strip(), login)
+
+
+def _mt5_begin(payload: dict[str, Any] | None) -> tuple[Any, Optional[str]]:
+    """Import + initialize the terminal with the given settings: (mt5, None) or (None, why)."""
+    if sys.platform != "win32":
+        return None, f"MetaTrader5 publishes Windows wheels only (this machine is {sys.platform})"
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        return None, "the MetaTrader5 package is not installed in this environment"
+    payload = payload or {}
+    kwargs: dict[str, Any] = {}
+    for key in ("path", "server", "password"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            kwargs[key] = value
+    try:
+        login = int(payload.get("login") or 0)
+    except (TypeError, ValueError):
+        login = 0
+    if login:
+        kwargs["login"] = login
+    try:
+        ok = bool(mt5.initialize(**kwargs))
+    except Exception as exc:                      # a bad path/lib raises rather than returning False
+        return None, f"initialize() raised: {exc}"
+    if not ok:
+        code, msg = 0, ""
+        try:
+            code, msg = mt5.last_error()
+        except Exception:
+            pass
+        return None, f"the terminal did not accept the connection (code {code}: {msg})"
+    return mt5, None
+
+
+def mt5_symbol_names(payload: dict[str, Any] | None = None, *, refresh: bool = False) -> dict[str, Any]:
+    """Every symbol the connected broker lists, cached for MT5_SYMBOLS_TTL_S.
+
+    Honest when there is no terminal: ``ok: False`` + a reason, never an empty list that
+    reads as "your broker has nothing".
+    """
+    cache = _MT5_SYMBOLS_CACHE
+    key = _mt5_key(payload)
+    fresh = cache.get("key") == key and (time.time() - float(cache.get("at") or 0.0)) < MT5_SYMBOLS_TTL_S
+    if fresh and cache.get("names") and not refresh:
+        return {"ok": True, "available": True, "cached": True,
+                "names": list(cache["names"]), "total": len(cache["names"])}
+    mt5, why = _mt5_begin(payload)
+    if mt5 is None:
+        return {"ok": False, "available": False, "cached": False, "names": [], "total": 0,
+                "reason": why or "MT5 is not available"}
+    try:
+        listed = mt5.symbols_get()
+    finally:
+        try:
+            mt5.shutdown()
+        except Exception:
+            pass
+    names = sorted({str(getattr(s, "name", "") or "") for s in (listed or []) if getattr(s, "name", "")})
+    cache.update({"key": key, "at": time.time(), "names": names})
+    return {"ok": True, "available": True, "cached": False, "names": names, "total": len(names)}
+
+
+def mt5_symbols(payload: dict[str, Any] | None = None, query: str = "",
+                limit: int = 40, names: Optional[list[str]] = None) -> dict[str, Any]:
+    """Broker symbol rows for the look-up: matches for ``query`` (or exactly ``names``), each
+    with the venue's own tick size and description where the terminal can report them.
+
+    Ranking is exact → prefix → substring over the broker's list, case-insensitively; the
+    caller's ``names`` bypass ranking (used to validate a specific contract at add time).
+    """
+    found = mt5_symbol_names(payload)
+    if not found.get("ok"):
+        return {"ok": False, "available": False, "reason": found.get("reason") or "MT5 is not available",
+                "total": 0, "symbols": []}
+    listed: list[str] = list(found["names"])
+    if names:
+        wanted = [str(n).strip() for n in names if str(n).strip()]
+        upper = {n.upper(): n for n in listed}
+        picked = [upper.get(w.upper(), w) for w in wanted]
+    else:
+        q = str(query or "").strip().upper()
+        if not q:
+            picked = []
+        else:
+            exact = [n for n in listed if n.upper() == q]
+            prefix = [n for n in listed if n.upper().startswith(q) and n not in exact]
+            contains = [n for n in listed if q in n.upper() and n not in exact and n not in prefix]
+            picked = exact + prefix + contains
+    picked = picked[:max(1, int(limit))]
+    if not picked:
+        return {"ok": True, "available": True, "total": len(listed), "symbols": []}
+    mt5, why = _mt5_begin(payload)
+    rows: list[dict[str, Any]] = []
+    if mt5 is None:
+        # No terminal right now: the names are still real (they came from the cache), so the
+        # rows carry names with unknown ticks rather than disappearing.
+        return {"ok": True, "available": False, "reason": why, "total": len(listed),
+                "symbols": [{"name": n, "tick_size": None, "digits": None, "description": ""} for n in picked]}
+    try:
+        for name in picked:
+            info = None
+            try:
+                info = mt5.symbol_info(name)
+            except Exception:
+                info = None
+            rows.append({
+                "name": name,
+                "listed": info is not None,
+                "tick_size": float(getattr(info, "trade_tick_size", 0.0) or 0.0) if info is not None else None,
+                "digits": int(getattr(info, "digits", 0) or 0) if info is not None else None,
+                "description": str(getattr(info, "description", "") or "") if info is not None else "",
+            })
+    finally:
+        try:
+            mt5.shutdown()
+        except Exception:
+            pass
+    return {"ok": True, "available": True, "total": len(listed), "symbols": rows}
+
+
+def mt5_validate_symbols(names: list[str], payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Check specific broker names at add time: {name: {listed, tick_size, description}}.
+
+    Separate from ``mt5_symbols`` on purpose: an add must not guess a tick size, so it reads
+    ``symbol_info`` for exactly the names it is about to write into the config.
+    """
+    found = mt5_symbol_names(payload)
+    if not found.get("ok"):
+        return {"ok": False, "available": False, "reason": found.get("reason") or "MT5 is not available",
+                "symbols": {}}
+    mt5, why = _mt5_begin(payload)
+    if mt5 is None:
+        return {"ok": False, "available": False, "reason": why or "MT5 is not available", "symbols": {}}
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        for name in list(names)[:25]:
+            key = str(name).strip()
+            if not key:
+                continue
+            try:
+                info = mt5.symbol_info(key)
+            except Exception:
+                info = None
+            out[key] = {
+                "listed": info is not None,
+                "tick_size": float(getattr(info, "trade_tick_size", 0.0) or 0.0) if info is not None else None,
+                "digits": int(getattr(info, "digits", 0) or 0) if info is not None else None,
+                "description": str(getattr(info, "description", "") or "") if info is not None else "",
+            }
+    finally:
+        try:
+            mt5.shutdown()
+        except Exception:
+            pass
+    return {"ok": True, "available": True, "symbols": out}
+
+
 def bybit_validate(symbols: list[str]) -> dict[str, bool]:
     """Ask Bybit which of these symbols exist as linear perpetuals."""
     import json
@@ -337,6 +642,7 @@ def capabilities(symbols: Optional[list[str]] = None) -> dict[str, Any]:
     return {
         "platform": sys.platform,
         "mt5": mt5_status(),
+        "ninjatrader": ninjatrader_status(),
         "bybit_symbols": {s: (s in BYBIT_SUPPORTED) for s in symbols},
         "alpaca": alpaca_capability_block(cfg, report),
         "config_dir": str(config_store.config_dir()),
@@ -346,6 +652,194 @@ def capabilities(symbols: Optional[list[str]] = None) -> dict[str, Any]:
 # ──────────────────────────────────────────────────────────────
 # Config → repo dataclasses
 # ──────────────────────────────────────────────────────────────
+
+
+def _database_state() -> dict[str, str]:
+    """The engine store's own health: writable, locked (a second instance), or not yet created.
+
+    A write-lock probe, not a read: reads pass through even while another writer holds the
+    database (that is exactly how the engine ended up "running" with *database is locked* on
+    screen). Two short attempts keep a busy-but-healthy store from tripping the row.
+    """
+    import sqlite3
+
+    path = config_store.config_dir() / "orderflow_data.db"
+    if not path.is_file():
+        return {"state": "ready", "detail": "created on the first engine start"}
+    last = ""
+    for attempt in range(2):
+        try:
+            con = sqlite3.connect(str(path), timeout=0.4)
+            try:
+                con.execute("BEGIN IMMEDIATE")
+                con.rollback()
+            finally:
+                con.close()
+            size_mb = path.stat().st_size / (1024 * 1024)
+            return {"state": "live", "detail": f"writable · {size_mb:.1f} MB"}
+        except sqlite3.OperationalError as exc:
+            last = str(exc)
+            if attempt == 0:
+                time.sleep(0.15)
+        except Exception as exc:                       # pragma: no cover — never break the board
+            last = f"{type(exc).__name__}: {exc}"
+            break
+    return {"state": "error",
+            "detail": f"locked ({last}) — close any second app instance using the same config folder"}
+
+
+_SYSTEMS_SOURCES = {
+    "bybit": "Bybit (exchange, public WebSocket)",
+    "binance": "Binance USDⓈ-M (exchange, public WebSocket)",
+    "hyperliquid": "Hyperliquid (exchange, public WebSocket)",
+    "okx": "OKX swaps (exchange, public WebSocket)",
+}
+
+
+def systems_report() -> dict[str, Any]:
+    """The Systems board (§86): every ingest path this install can use, its honest state, and —
+    kept apart — the capabilities that are not set up yet.
+
+    A row is a fact the program already knows or can check in a moment: no promises, and the
+    states are a closed set the UI paints only — live | ready | off | error.
+    """
+    cfg = config_store.load_config()
+    st = engine.status()
+    src = str(cfg.get("data_source") or "bybit").lower()
+    running = bool(st.get("running"))
+    error = str(st.get("error") or "")
+    per_symbol = [r for r in (st.get("per_symbol") or []) if isinstance(r, dict)]
+    tick_sum = sum(int(r.get("ticks") or 0) for r in per_symbol)
+
+    rows: list[dict[str, Any]] = []
+
+    def add(row_id, name, state, detail, view="", kind="ingest"):
+        rows.append({"id": row_id, "name": name, "state": state, "detail": detail,
+                     "view": view, "kind": kind})
+
+    add("engine", "Engine",
+        "live" if running else ("error" if error else "off"),
+        (f"streaming {len(st.get('symbols') or [])} instruments · {tick_sum:,} ticks · "
+         f"up {int(st.get('uptime_s') or 0)}s") if running else (error or "stopped — press Start engine"),
+        "ofx", "core")
+
+    source_label = _SYSTEMS_SOURCES.get(src, {"mt5": "MetaTrader 5 (broker terminal)",
+                                              "ninjatrader": "NinjaTrader 8 (bridge)",
+                                              "alpaca": "Alpaca Markets",
+                                              "both": "Exchange + MT5", "all": "All configured sources"}.get(src, src))
+    add("source", f"Feed — {source_label}",
+        "live" if running else ("error" if error else "ready"),
+        (f"feeding the engine now · {len(st.get('symbols') or [])} instruments") if running
+        else "selected — start the engine to connect",
+        "settings", "ingest")
+
+    mt5 = mt5_status()
+    if src in ("mt5", "both", "all"):
+        mt5_state = "live" if running else ("ready" if mt5.get("available") else "off")
+    else:
+        mt5_state = "ready" if mt5.get("available") else "off"
+    add("mt5", "MetaTrader 5", mt5_state,
+        mt5.get("reason") or (("feeding the engine now" if running else
+                              "bridge importable — choose MT5 as the source")
+                              if src in ("mt5", "both", "all")
+                              else "bridge importable — choose MT5 as the source"),
+        "settings", "ingest")
+
+    nt = ninjatrader_status()
+    nt_state = "live" if (running and src == "ninjatrader") else ("ready" if nt.get("available") else "off")
+    add("ninjatrader", "NinjaTrader 8 (bridge)", nt_state,
+        ("feeding the engine now" if (running and src == "ninjatrader")
+         else (f"bridge answering at {nt.get('host')}:{nt.get('port')} — choose NinjaTrader as the source"
+               if nt.get("available") else str(nt.get("reason") or ""))),
+        "instruments", "ingest")
+
+    alp = alpaca_capability_block(cfg)
+    alp_state = "live" if (running and src == "alpaca") else ("ready" if alp.get("linked") else "off")
+    add("alpaca", "Alpaca Markets", alp_state,
+        ("feeding the engine now" if (running and src == "alpaca")
+         else ("keys saved" + (" · paper" if alp.get("paper") else " · live") if alp.get("linked")
+               else "no API keys yet — Data ▸ Alpaca")),
+        "alpaca", "ingest")
+
+    db = _database_state()
+    add("database", "History database", db["state"], db["detail"], "logs", "core")
+
+    ws = int(st.get("ws_clients") or 0)
+    add("ws", "UI stream (WebSocket)", "live" if ws > 0 else "off",
+        f"{ws} client(s) attached" if ws else "no client attached to this backend",
+        "", "link")
+
+    tg = dict(cfg.get("telegram") or {})
+    tg_ready = bool(tg.get("bot_token") and tg.get("chat_id"))
+    tg_on = bool(tg_ready and tg.get("enabled"))
+    ntf = dict((cfg.get("notify") or {}).get("ntfy") or {})
+    ntf_topic = str(ntf.get("topic") or "").strip()
+    ntf_on = bool(ntf.get("enabled")) and bool(ntf_topic)
+    ntf_server = str(ntf.get("server") or "https://ntfy.sh").strip().rstrip("/")
+    channels = [name for name, on in (("Telegram", tg_on), ("ntfy", ntf_on)) if on]
+    if channels:
+        detail = "sending to " + " + ".join(channels)
+        if ntf_on and ntf_server == "https://ntfy.sh":
+            # No account, no key — and no secrecy either: anyone who knows the topic can subscribe.
+            detail += (f" · the ntfy.sh topic “{ntf_topic}” is PUBLIC — anyone who knows it can "
+                       f"read your alerts")
+        add("alerts", "Alerts — " + " + ".join(channels), "live", detail, "settings", "module")
+    else:
+        add("alerts", "Alerts — Telegram",
+            "ready" if tg_ready else "off",
+            "configured — switch on in Settings" if tg_ready else "not configured — Settings ▸ Telegram",
+            "settings", "module")
+
+    # R6: storage is a system too — these are the numbers the user manages it by, on the board
+    # where the rest of the machine already reports in.
+    try:
+        from orderflow_system.desktop import storage as storage_mod
+
+        st_settings = storage_mod.clamp_storage_settings(cfg)
+        st_dir = config_store.config_dir()
+        st_target = storage_mod.resolved_target(st_settings, st_dir)
+        st_usage = storage_mod.usage_snapshot(config_store.db_path(), config_dir=st_dir,
+                                              target=st_target)
+        st_backups = storage_mod.list_backups(st_target)
+        rt_days = int((cfg.get("data") or {}).get("retention_days", 0) or 0)
+        newest = (st_backups[0].get("created_at") or st_backups[0].get("name")) if st_backups else "none yet"
+        budget = int(st_settings.get("max_db_mb") or 0)
+        over = bool(budget) and (st_usage["db_bytes"] + st_usage["wal_bytes"]) > budget * 1_000_000
+        add("storage", "Storage — backups & usage",
+            "live" if st_settings["auto_backup"] and not over else ("ready" if not over else "off"),
+            f"{st_usage['total_bytes'] / 1e6:,.0f} MB on disk "
+            f"(db {(st_usage['db_bytes'] + st_usage['wal_bytes']) / 1e6:,.1f} MB) · retention {rt_days} d "
+            f"· {len(st_backups)} backup(s), newest {newest}"
+            + (f" · OVER the {budget} MB budget" if over else ""),
+            "settings", "module")
+    except Exception as exc:                          # noqa: BLE001 - a board row is not worth a failure
+        add("storage", "Storage — backups & usage", "off", f"unreadable: {exc}", "settings", "module")
+
+    optional: list[dict[str, Any]] = []
+    try:
+        from orderflow_system.desktop import platforms as platform_mod
+
+        installs = platform_mod.detect_installs()
+        plat_cfg = dict(cfg.get("platforms") or {})
+        for pid, label in (("bookmap", "Bookmap bridge"), ("sierra", "Sierra Chart (DTC)")):
+            found = bool((installs.get(pid) or {}).get("found"))
+            configured = bool((plat_cfg.get(pid) or {}).get("enabled"))
+            optional.append({
+                "id": pid, "name": label, "kind": "addon", "view": "instruments",
+                "state": "ready" if (found and configured) else "off",
+                "detail": (f"installed · {'configured' if configured else 'add the bridge in Platforms'}"
+                           if found else "not installed on this machine — a capability this program can use"),
+                "optional": True,
+            })
+    except Exception as exc:                            # pragma: no cover — never break the board
+        optional.append({"id": "platforms", "name": "Platform bridges", "state": "off",
+                         "detail": f"detection failed: {exc}", "view": "", "kind": "addon", "optional": True})
+
+    live = sum(1 for r in rows if r["state"] == "live")
+    total = len(rows)
+    return {"ok": True, "rows": rows, "optional": optional, "live": live, "total": total,
+            "percent": int(round(100 * live / total)) if total else 0,
+            "source": src, "uphill": [r["id"] for r in rows if r["state"] in ("off", "error")]}
 
 def _apply_overrides(ic: InstrumentConfig, spec: dict[str, Any]) -> None:
     """Copy the GUI's per-pattern thresholds onto a repo InstrumentConfig."""
@@ -373,6 +867,17 @@ def _apply_overrides(ic: InstrumentConfig, spec: dict[str, Any]) -> None:
         logger.warning("Bad threshold override for %s — using defaults (%s)", spec.get("symbol"), exc)
 
 
+#: The single-venue exchange sources with their offline gates. Before this table the engine had
+#: NO gate for them — select_instruments filtered Bybit, Alpaca, MT5 and NinjaTrader, then handed
+#: Binance/OKX/Hyperliquid whatever was enabled, where a non-crypto symbol became a subscription
+#: to a contract the venue does not list.
+_EXCHANGE_GATES: dict[str, tuple[Any, str]] = {
+    "binance": (binance_capable, "Binance USDⓈ-M futures"),
+    "okx": (okx_capable, "OKX USDT swaps"),
+    "hyperliquid": (hyperliquid_capable, "Hyperliquid perpetuals"),
+}
+
+
 def select_instruments(cfg: dict[str, Any]) -> tuple[list[InstrumentConfig], list[dict[str, str]]]:
     """Return (instrument configs, skipped) for the chosen data source."""
     source = cfg.get("data_source", "bybit")
@@ -387,9 +892,11 @@ def select_instruments(cfg: dict[str, Any]) -> tuple[list[InstrumentConfig], lis
         # every later one (a reset in the GUI only took effect after a restart).
         base = copy.deepcopy(base_configs().get(symbol))
         if base is None:
-            if source in ("bybit", "both") and bybit_capable(spec):
-                # Not in the shipped matrix (the wizard can add any venue perpetual):
-                # build its profile from the venue's tick instead of refusing it.
+            # Not in the shipped matrix: the wizard — and, since §82, the Engine panel's own
+            # instrument look-up — can add any instrument a venue confirmed. The row carries
+            # that venue's stamp (bybit_symbol, mt5_symbol, alpaca_symbol, …); without one a
+            # typo must still die here. The profile comes from the venue's tick.
+            if venue_stamp_for(spec, source):
                 base = settings.config_for_symbol(symbol, spec.get("tick_size"))
             else:
                 skipped.append({"symbol": symbol, "reason": "unknown instrument"})
@@ -403,14 +910,24 @@ def select_instruments(cfg: dict[str, Any]) -> tuple[list[InstrumentConfig], lis
                 })
                 continue
 
-        if source in ("alpaca", "all") and symbol not in settings.ALPACA.symbols:
-            if source == "alpaca":
-                skipped.append({
-                    "symbol": symbol,
-                    "reason": ("Alpaca serves US equities/ETFs/options and crypto pairs — "
-                               "give this instrument an Alpaca symbol in the Alpaca view"),
-                })
-                continue
+        exchange = _EXCHANGE_GATES.get(source)
+        if exchange is not None and not exchange[0](spec):
+            skipped.append({
+                "symbol": symbol,
+                "reason": f"{exchange[1]} carry crypto instruments only — switch to MT5 "
+                          f"(Windows) for this instrument",
+            })
+            continue
+
+        if source == "alpaca" and symbol not in settings.ALPACA.symbols:
+            # Only the Alpaca-only source refuses here: under `all` an unmapped symbol simply does
+            # not join the Alpaca leg — it still streams from the venue that carries it.
+            skipped.append({
+                "symbol": symbol,
+                "reason": ("Alpaca serves US equities/ETFs/options and crypto pairs — "
+                           "give this instrument an Alpaca symbol in the Alpaca view"),
+            })
+            continue
 
         if source in ("mt5", "both") and sys.platform != "win32" and source == "mt5":
             skipped.append({
@@ -419,9 +936,74 @@ def select_instruments(cfg: dict[str, Any]) -> tuple[list[InstrumentConfig], lis
             })
             continue
 
+        if source == "ninjatrader" and not ninjatrader_capable(spec):
+            skipped.append({
+                "symbol": symbol,
+                "reason": ("add this instrument from your NinjaTrader terminal (Instruments panel → "
+                           "NinjaTrader) — the bridge lists exactly what your data feed carries"),
+            })
+            continue
+
         _apply_overrides(base, spec)
         out.append(base)
     return out, skipped
+
+
+def partition_instruments(cfg: dict[str, Any], symbols: list[str], *,
+                          legs: tuple[str, ...] = ("bybit", "alpaca", "mt5", "ninjatrader"),
+                          ) -> dict[str, list[str]]:
+    """One instrument, one venue: which leg of `both`/`all` carries which enabled symbol.
+
+    `both` and `all` used to hand EVERY enabled symbol to EVERY leg they started: a symbol with
+    an exchange listing and a broker mapping streamed from two venues into one pipeline (doubled
+    ticks, volume and delta), and a crypto symbol with no broker mapping went to the exchange
+    anyway. The rule is the one a trader would state, and it is aware of the legs this run
+    actually starts (`legs` — `both` is bybit+mt5, `all` is all four):
+
+    * an explicit venue stamp wins, NinjaTrader then Alpaca then MT5 — but only for a venue this
+      run starts, and NEVER for a crypto row: Alpaca's crypto lane carries quotes and bars but no
+      trades and no book, so order flow for a crypto instrument belongs to the exchange. A stock
+      mapped to both Alpaca and a broker stays with Alpaca, its own venue;
+    * a crypto row the exchange can carry belongs to the exchange (a broker mapping only takes it
+      if the row says so explicitly);
+    * anything else belongs to MT5 — the only other venue for indices, metals and FX — and the
+      broker's own symbol resolution reports what it cannot serve.
+
+    Measured live: an earlier stamp-first version sent BTCUSDT/ETHUSDT/SOLUSDT (all carrying the
+    wizard's Alpaca crypto mappings) to the Alpaca leg of a `both` run — a leg `both` does not
+    start — so the board streamed nothing at all. Pure; pinned by test_source_switch.
+    """
+    want = set(legs)
+    wanted = {str(s).upper() for s in symbols}
+    out: dict[str, list[str]] = {"bybit": [], "mt5": [], "alpaca": [], "ninjatrader": []}
+    for spec in (cfg.get("instruments") or []):
+        symbol = str(spec.get("symbol") or "")
+        if not spec.get("enabled") or symbol.upper() not in wanted:
+            continue
+        crypto = _crypto_class(spec)
+        venue = ""
+        for stamp, name in (("ninjatrader_symbol", "ninjatrader"),
+                            ("alpaca_symbol", "alpaca"),
+                            ("mt5_symbol", "mt5")):
+            if not spec.get(stamp) or name not in want:
+                continue
+            if name == "alpaca" and crypto:
+                continue
+            venue = name
+            break
+        if not venue and crypto and "bybit" in want:
+            venue = "bybit"
+        if not venue and not crypto and "mt5" in want:
+            venue = "mt5"
+        if not venue and "alpaca" in want and spec.get("alpaca_symbol"):
+            venue = "alpaca"
+        if not venue and "bybit" in want and crypto:
+            venue = "bybit"
+        if not venue and "mt5" in want:
+            venue = "mt5"
+        if venue:
+            out[venue].append(symbol)
+    return out
 
 
 def clamp_data_settings(cfg: dict[str, Any]) -> tuple[int, int, int]:
@@ -494,6 +1076,17 @@ def apply_settings(cfg: dict[str, Any]) -> None:
     }
     settings.MT5.symbols = {
         i["symbol"]: (i.get("mt5_symbol") or i["symbol"])
+        for i in cfg.get("instruments", [])
+        if i["symbol"] in enabled
+    }
+    nt_block = (cfg.get("platforms") or {}).get("ninjatrader") or {}
+    settings.NINJATRADER.host = str(nt_block.get("host") or "127.0.0.1")
+    try:
+        settings.NINJATRADER.port = max(1, min(65535, int(nt_block.get("port") or 8790)))
+    except (TypeError, ValueError):
+        settings.NINJATRADER.port = 8790
+    settings.NINJATRADER.symbols = {
+        i["symbol"]: (i.get("ninjatrader_symbol") or i["symbol"])
         for i in cfg.get("instruments", [])
         if i["symbol"] in enabled
     }
@@ -605,6 +1198,9 @@ async def _wire_atlas(system, cfg: dict) -> Any:
     system._on_tick = tick_with_atlas
     system._on_orderbook = book_with_atlas
     system._atlas_hub = hub
+    # G1/U3: every new radar level is offered to the signals machine's WATCHING pathway
+    # (behind `atlas.radar.feed_signals`); one hook, every registration site.
+    hub.level_hook = getattr(system, "_on_radar_level", None)
     logger.info("the reference layout feature hub attached (%d instruments)", len(system.pipelines))
     return hub
 
@@ -622,12 +1218,20 @@ async def _start_atlas_extras(system) -> None:
         return
     data_source = getattr(system, "data_source", None)
     source = str(getattr(data_source, "value", data_source) or "")
-    if source in ("binance", "hyperliquid", "okx"):
-        logger.info("the reference layout extras: skipped — the %s source carries its own depth", source)
+    if source not in ("bybit", "both", "all"):
+        logger.info("the reference layout extras: skipped — only the Bybit exchange leg may fold "
+                    "its own depth in (source=%s)", source or "?")
         return
+    # Which symbols the EXCHANGE leg actually carries: under `both`/`all` the run's partition
+    # answers (a symbol mapped to the broker must not get Bybit depth folded under the broker's
+    # prints); under the bybit source it is every pipeline symbol the venue lists.
+    leg = None
+    parts = getattr(system, "_feed_symbols", None)
+    if isinstance(parts, dict) and parts.get("bybit"):
+        leg = {str(s) for s in parts["bybit"]}
     symbols: dict[str, float] = {}
     for pipeline in system.pipelines.values():
-        if pipeline.symbol in BYBIT_SUPPORTED:
+        if pipeline.symbol in BYBIT_SUPPORTED and (leg is None or pipeline.symbol in leg):
             symbols[pipeline.symbol] = pipeline.config.tick_size
     if not symbols:
         logger.info("the reference layout extras: no Bybit-servable instrument enabled")
@@ -674,6 +1278,11 @@ class EngineController:
         self._skipped = []
 
         try:
+            # Settings FIRST: select_instruments reads settings.ALPACA.symbols and the venue maps
+            # that apply_settings writes, so running it first meant a symbol mapped in the same
+            # visit was skipped with "add an Alpaca symbol", and an edited mt5_symbol streamed the
+            # old broker name for one whole run.
+            apply_settings(cfg)
             instruments, skipped = select_instruments(cfg)
             self._skipped = skipped
             if not instruments:
@@ -683,15 +1292,22 @@ class EngineController:
                     msg += " — " + "; ".join(f"{s['symbol']}: {s['reason']}" for s in skipped[:3])
                 return {"ok": False, "error": msg}
 
-            apply_settings(cfg)
-
             # Import late: main.py imports the dashboard app, which must already
             # exist before we flip DASHBOARD.enabled off.
             from orderflow_system.main import OrderflowSystem
             from orderflow_system.dashboard import app as dashboard_app
 
             risk = cfg.get("risk", {})
-            system = OrderflowSystem(instruments=instruments, data_source=settings.DATA_SOURCE)
+            # `both`/`all` legs each get their own symbol list (one instrument, one venue); the
+            # single-venue sources keep their historical lists. The partition knows which legs
+            # this run starts, so a stamp for a venue that is not a leg never strands a symbol.
+            source_now = str(cfg.get("data_source") or "").strip().lower()
+            partition = partition_instruments(
+                cfg, [i.instrument.value for i in instruments],
+                legs=(("bybit", "mt5") if source_now == "both"
+                      else ("bybit", "alpaca", "mt5", "ninjatrader")))
+            system = OrderflowSystem(instruments=instruments, data_source=settings.DATA_SOURCE,
+                                     feed_symbols=partition)
             system.aggregator.min_composite_score = float(risk.get("min_composite_score", 40.0))
             system.aggregator.signal_cooldown_seconds = float(risk.get("signal_cooldown_seconds", 30.0))
 

@@ -21,6 +21,9 @@
     const LEASE_MAX_MS = 12000;    // a stuck pointer must not hold the view for ever
 
     const leases = Object.create(null);     // surface -> {until, last, timer}
+    const userHolds = new Set();            // surface -> the user pressed its Pause button (sticky)
+    const holdAdapters = new Map();         // surface -> (on) => void, panels that must stop a loop
+    const HOLDS_KEY = 'ofap.userholds';
     const queues = Object.create(null);     // surface -> Map(key -> fn)   last-wins per key
     const writes = new Map();               // key -> fn                   coalesced writes
     const S = { frozen: false, feed: { ticks: 0, at: 0, rate: 0 }, holds: 0, deferred: 0, applied: 0, strips: 0 };
@@ -54,6 +57,7 @@
 
     function held(surface) {
         if (S.frozen) return true;                    // a frozen view holds every surface
+        if (surface && userHolds.has(surface)) return true;   // the user parked this one panel
         const l = surface ? leases[surface] : null;
         if (!l) return false;
         return nowMs() < l.until;
@@ -137,6 +141,65 @@
         paint();
     }
 
+    /* ── sticky user holds ────────────────────────────────────────────────────────────────
+       A lease is a gesture (transient); a USER HOLD is the Pause button on one panel: the user
+       pressed it and it stays pressed. Semantics are deliberately the same as a gesture hold —
+       updates for that surface are DEFERRED, never dropped, and applied on resume — so a panel
+       parked for study snaps current the moment it is resumed. Ingest is never touched, exactly
+       as with leases: the feed keeps running while the view is held. */
+    function persistHolds() {
+        try {
+            if (userHolds.size) localStorage.setItem(HOLDS_KEY, JSON.stringify([...userHolds]));
+            else localStorage.removeItem(HOLDS_KEY);
+        } catch (e) { /* private mode: the holds live for this session only */ }
+    }
+
+    function setUser(surface, on) {
+        if (!surface) return false;
+        const had = userHolds.has(surface);
+        if (Boolean(on) === had) return had;
+        if (on) userHolds.add(surface); else userHolds.delete(surface);
+        const adapter = holdAdapters.get(surface);
+        if (adapter) { try { adapter(Boolean(on)); } catch (e) { /* the panel's own problem */ } }
+        if (!on) {
+            flush(surface);                 // queued updates snap the panel current, once, now
+            flushWrites();
+            document.dispatchEvent(new CustomEvent('ofap:release', { detail: { surface: surface } }));
+        }
+        persistHolds();
+        paint();
+        document.dispatchEvent(new CustomEvent('ofap:user', { detail: { surface: surface, paused: Boolean(on) } }));
+        return Boolean(on);
+    }
+
+    function toggleUser(surface) { return setUser(surface, !userHolds.has(surface)); }
+    function userHeld(surface) { return userHolds.has(surface); }
+
+    /* A panel whose loop must physically stop (rather than defer) registers here. */
+    function onUserHold(surface, fn) { holdAdapters.set(surface, fn); }
+
+    function restoreHolds() {
+        try {
+            const raw = localStorage.getItem(HOLDS_KEY);
+            if (!raw) return;
+            JSON.parse(raw).forEach(function (s) { if (s) userHolds.add(String(s)); });
+            if (userHolds.size) paint();
+        } catch (e) { /* no stored holds, or unreadable: start live */ }
+    }
+
+    /* The Pause/Resume buttons: markup carries data-surf="<surface>", one delegated listener owns
+       the clicks, and paint() keeps every button's face honest with the effective state. */
+    function paintButtons() {
+        if (typeof document === 'undefined' || !document.querySelectorAll) return;
+        document.querySelectorAll('[data-surf]').forEach(function (btn) {
+            const id = btn.getAttribute('data-surf');
+            const on = held(id);
+            btn.classList.toggle('held', !!on);
+            const face = on ? 'Resume' : 'Pause';
+            if (btn.textContent !== face) btn.textContent = face;
+        });
+    }
+
     function flushAll() {
         Object.keys(queues).forEach(flush);
         flushWrites();
@@ -160,7 +223,8 @@
 
     function status() {
         const surfaces = Object.keys(leases).filter(function (s) { return nowMs() < leases[s].until; });
-        return { frozen: S.frozen, surfaces: surfaces, holds: surfaces.length,
+        userHolds.forEach(function (s) { if (surfaces.indexOf(s) === -1) surfaces.push(s); });
+        return { frozen: S.frozen, surfaces: surfaces, holds: surfaces.length, user: [...userHolds],
                  feed: { ticks: S.feed.ticks, rate: S.feed.rate, live: S.feed.live !== false },
                  strips: S.strips,
                  deferred: [...Object.keys(queues)].reduce(function (n, s) { return n + queues[s].size; }, 0),
@@ -189,10 +253,13 @@
         const el = chip();
         const busy = st.frozen || st.holds;
         el.classList.toggle('on', !!busy);
+        paintButtons();
         el.textContent = !busy ? ''
             : (st.frozen
                 ? '⏸ view held — feed live'
-                : '✋ ' + st.surfaces.join(' · ') + ' held — feed live') +
+                : (st.user && st.user.length
+                    ? '⏸ ' + st.user.join(' · ') + ' paused — feed live'
+                    : '✋ ' + st.surfaces.join(' · ') + ' held — feed live')) +
               (st.feed.rate ? ' · ' + st.feed.rate + ' tick/s' : '') +
               (st.strips ? ' · ' + st.strips + ' strip' + (st.strips === 1 ? '' : 's') + ' holding your place' : '') +
               (st.deferred ? ' · ' + st.deferred + ' update' + (st.deferred === 1 ? '' : 's') + ' waiting' : '');
@@ -225,8 +292,20 @@
 
     setInterval(function () { flushWrites(); }, 1500);
 
+    /* One delegated listener owns every Pause/Resume button; wiring happens once, buttons are
+       markup. A click on a button never counts as a gesture lease on the panel it pauses. */
+    document.addEventListener('click', function (e) {
+        const btn = e.target && e.target.closest ? e.target.closest('[data-surf]') : null;
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        toggleUser(btn.getAttribute('data-surf'));
+    }, true);
+    restoreHolds();
+
     window.OFAPINTENT = {
         lease: lease, release: release, held: held, defer: defer, deferKeyed: deferKeyed,
+        setUser: setUser, toggleUser: toggleUser, userHeld: userHeld, onUserHold: onUserHold,
         queueWrite: queueWrite, flushWrites: flushWrites, freezeView: freezeView, setFeed: setFeed,
         setStrips: setStrips,
         status: status, anyHeld: anyHeld,

@@ -81,6 +81,96 @@ async def reset_config() -> dict[str, Any]:
 
 
 # ──────────────────────────────────────────────────────────────
+# Configuration artifacts (T12/B10): the workspace and the studies setup as portable files
+# ──────────────────────────────────────────────────────────────
+
+#: What each artifact kind carries. Blocks not listed here never travel.
+_ARTIFACT_FORMAT = "ofap-config"
+_ARTIFACT_SCHEMA = 1
+_ARTIFACT_BLOCKS: dict[str, tuple[str, ...]] = {
+    "workspace": ("layouts", "workspaces", "ui"),
+    "studies": ("studies", "expression", "atlas", "ofx"),
+}
+
+
+def artifact_build(cfg: dict[str, Any], kind: str) -> dict[str, Any] | None:
+    """One portable file\'s worth of `kind`, or None for an unknown kind."""
+    blocks = _ARTIFACT_BLOCKS.get(kind)
+    if blocks is None:
+        return None
+    return {
+        "format": _ARTIFACT_FORMAT,
+        "schema": _ARTIFACT_SCHEMA,
+        "kind": kind,
+        "exported_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "app_version": cfg.get("version"),
+        "blocks": {name: cfg.get(name) for name in blocks if name in cfg},
+    }
+
+
+def artifact_validate(raw: Any) -> tuple[dict[str, Any] | None, str]:
+    """Read an artifact, or say readably why not. Returns (artifact, "") or (None, reason)."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return None, "this file is not JSON - an artifact is a .json export of the program\'s own settings."
+    if not isinstance(raw, dict):
+        return None, "no artifact found in the request."
+    if raw.get("format") != _ARTIFACT_FORMAT:
+        return None, "this file is not an OFAP configuration artifact (no format marker)."
+    schema = raw.get("schema")
+    if not isinstance(schema, int) or schema < 1:
+        return None, "the artifact has no readable schema version."
+    if schema > _ARTIFACT_SCHEMA:
+        return None, f"the artifact was made by a newer build (schema {schema}; this build reads {_ARTIFACT_SCHEMA})."
+    kind = raw.get("kind")
+    if kind not in _ARTIFACT_BLOCKS:
+        return None, f"unknown artifact kind {kind!r} - expected one of: {', '.join(_ARTIFACT_BLOCKS)}."
+    blocks = raw.get("blocks")
+    if not isinstance(blocks, dict) or not any(name in blocks for name in _ARTIFACT_BLOCKS[kind]):
+        return None, "the artifact carries none of the blocks this kind is made of."
+    return raw, ""
+
+
+@router.get("/config/artifact")
+async def get_config_artifact(kind: str = Query("workspace")) -> dict[str, Any]:
+    """T12/B10: the workspace or the studies setup as one portable JSON file."""
+    artifact = artifact_build(config_store.load_config(), kind)
+    if artifact is None:
+        return {"ok": False, "error": f"unknown artifact kind {kind!r} - expected: workspace, studies."}
+    return {"ok": True, "artifact": artifact}
+
+
+@router.post("/config/import")
+async def post_config_import(payload: dict = Body(default={})) -> dict[str, Any]:
+    """T12/B10: import an artifact - validated first, and a bad file changes nothing."""
+    raw = (payload or {}).get("artifact")
+    artifact, why = artifact_validate(raw)
+    if artifact is None:
+        return {"ok": False, "error": why}
+    kind = artifact["kind"]
+    cfg = config_store.load_config()
+    applied = []
+    for name in _ARTIFACT_BLOCKS[kind]:
+        if name in artifact["blocks"]:
+            cfg[name] = artifact["blocks"][name]
+            applied.append(name)
+    config_store.save_config(cfg)          # sanitised on the way in; blocks apply whole
+    return {"ok": True, "kind": kind, "schema": artifact["schema"], "applied": applied}
+
+
+@router.get("/config/defaults")
+async def config_defaults() -> dict[str, Any]:
+    """The factory config, read-only.
+
+    The per-view factory reset (T6/A15) needs to know what the defaults ARE without applying
+    them — the reset endpoint above writes, this one only answers.
+    """
+    return {"ok": True, "config": config_store.default_config()}
+
+
+# ──────────────────────────────────────────────────────────────
 # Capabilities
 # ──────────────────────────────────────────────────────────────
 
@@ -93,6 +183,8 @@ async def capabilities(refresh: bool = Query(default=False)) -> dict[str, Any]:
         caps["binance_symbols"] = await asyncio.to_thread(engine_mod.binance_validate, symbols)
         caps["hyperliquid_symbols"] = await asyncio.to_thread(engine_mod.hyperliquid_validate, symbols)
         caps["okx_symbols"] = await asyncio.to_thread(engine_mod.okx_validate, symbols)
+        caps["ninjatrader"] = await asyncio.to_thread(engine_mod.ninjatrader_status)
+        caps["ninjatrader_symbols"] = await asyncio.to_thread(engine_mod.ninjatrader_validate, symbols)
         caps["validated"] = True
     return caps
 
@@ -108,6 +200,7 @@ async def datasources() -> dict[str, Any]:
         return bool(spec.get("mt5_symbol"))
 
     mt5 = engine_mod.mt5_status()
+    nt = engine_mod.ninjatrader_status()
     return {
         "mt5": {
             "usable": mt5["available"],
@@ -137,6 +230,12 @@ async def datasources() -> dict[str, Any]:
             "reason": "Public OKX USDT swaps — crypto instruments only",
             "symbols": [s for s in symbols
                         if engine_mod.okx_capable(config_store.instrument_cfg(cfg, s) or {"symbol": s})],
+        },
+        "ninjatrader": {
+            "usable": nt["available"],
+            "reason": nt["reason"] or "NinjaTrader bridge ready",
+            "symbols": [s for s in symbols
+                        if engine_mod.ninjatrader_capable(config_store.instrument_cfg(cfg, s) or {"symbol": s})],
         },
     }
 
@@ -189,59 +288,277 @@ async def instruments_catalog() -> dict[str, Any]:
     return {"ok": True, "majors": majors, "venue_total": len(catalog)}
 
 
+#: The config stamp each addable source writes when it confirms a symbol (§82). Bybit was
+#: the original path; the Engine panel's look-up uses the same map for MT5 and Alpaca, so a
+#: row added from any of them carries the same kind of evidence `select_instruments` reads.
+ADD_STAMP_KEYS = {
+    "bybit": "bybit_symbol",
+    "binance": "binance_symbol",
+    "hyperliquid": "hyperliquid_symbol",
+    "okx": "okx_symbol",
+    "mt5": "mt5_symbol",
+    "alpaca": "alpaca_symbol",
+    "ninjatrader": "ninjatrader_symbol",
+}
+
+#: The accepted single-venue sources, in the order the panel should prefer them when the
+#: active source is a combined one ("both" = bybit+mt5, "all" = everything).
+_ADDABLE_SOURCES = ("bybit", "binance", "hyperliquid", "okx", "mt5", "alpaca", "ninjatrader")
+
+
+def _add_source(payload_source: str, cfg: dict[str, Any], symbols: list[str]) -> str:
+    """Which venue the add is against: the caller's choice, else the active source, else bybit.
+
+    A combined active source cannot be an add target on its own — the residue is decided by
+    what the symbol looks like (a USDT pair is the exchange lane, anything else the broker).
+    """
+    wanted = str(payload_source or "").strip().lower()
+    if wanted in _ADDABLE_SOURCES:
+        return wanted
+    active = str(cfg.get("data_source") or "").strip().lower()
+    if active in _ADDABLE_SOURCES:
+        return active
+    if active == "both":
+        return "bybit" if symbols and all(s.endswith("USDT") for s in symbols) else "mt5"
+    if active == "all":
+        # `all` runs the broker leg too (it used to run Alpaca alone), so a non-exchange residue
+        # goes where the partition sends it: the broker, which resolves names and refuses honestly.
+        return "bybit" if symbols and all(s.endswith("USDT") for s in symbols) else "mt5"
+    return "bybit"
+
+
 @router.post("/instruments/add")
 async def instruments_add(payload: dict = Body(default={})) -> dict[str, Any]:
-    """Add venue-listed instruments to the config, tick sizes straight from the venue.
+    """Add venue-confirmed instruments to the config, tick sizes straight from the venue.
 
-    A fresh install ships one crypto instrument; this is how the setup assistant
-    offers the rest without anyone hand-editing config files.
+    A fresh install ships one crypto instrument; the setup assistant offers the rest this way.
+    §82 gave the route two more lanes and one rule: the caller may name the source, the row is
+    stamped only on evidence the venue itself gave (a Bybit catalogue hit, an MT5
+    ``symbol_info``, an Alpaca mapping), and a symbol nothing confirms is reported in
+    ``skipped`` rather than written into the config.
     """
     import json
 
     wanted = [str(s).upper().strip() for s in (payload.get("symbols") or []) if str(s).strip()]
     if not wanted:
-        return {"ok": False, "error": "no symbols given", "added": [], "updated": []}
-    try:
-        catalog = await asyncio.to_thread(_fetch_venue_catalog)
-    except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "added": [], "updated": []}
-
+        return {"ok": False, "error": "no symbols given", "added": [], "updated": [], "skipped": []}
     cfg = config_store.load_config()
+    source = _add_source(str(payload.get("source") or ""), cfg, wanted)
+    stamp_key = ADD_STAMP_KEYS.get(source, "bybit_symbol")
+    ticks = {str(k).upper(): v for k, v in dict(payload.get("ticks") or {}).items()}
+    mt5_names = {str(k).upper(): str(v).strip() for k, v in dict(payload.get("mt5_symbols") or {}).items()}
+    enable = bool(payload.get("enable"))
+    asset_class = str(payload.get("asset_class") or "").strip()
+
+    catalog: dict[str, dict[str, Any]] = {}
+    broker: dict[str, dict[str, Any]] = {}
+    reasons: dict[str, str] = {}
+    if source == "bybit":
+        try:
+            catalog = await asyncio.to_thread(_fetch_venue_catalog)
+        except Exception as exc:
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "source": source,
+                    "added": [], "updated": [], "skipped": []}
+    elif source == "mt5":
+        if sys.platform != "win32":
+            return {"ok": False, "source": source, "added": [], "updated": [], "skipped": [],
+                    "error": "the MT5 feed is Windows-only"}
+        names = [mt5_names.get(sym) or sym for sym in wanted]
+        check = await asyncio.to_thread(engine_mod.mt5_validate_symbols, names, dict(cfg.get("mt5") or {}))
+        if not check.get("ok"):
+            return {"ok": False, "source": source, "added": [], "updated": [], "skipped": [],
+                    "error": str(check.get("reason") or "MT5 is not available")}
+        broker = dict(check.get("symbols") or {})
+        for sym in wanted:
+            stamp = mt5_names.get(sym) or sym
+            if not (broker.get(stamp) or {}).get("listed"):
+                reasons[sym] = f"the broker does not list {stamp}"
+    elif source == "alpaca":
+        from orderflow_system.desktop import alpaca as alpaca_mod
+
+        alp = dict(cfg.get("alpaca") or {})
+        if not (alp.get("key_id") and alp.get("secret")):
+            return {"ok": False, "source": source, "added": [], "updated": [], "skipped": [],
+                    "error": "link an Alpaca account first (Alpaca view) — the asset list needs the keys"}
+        alpaca_symbols = {str(k).upper(): str(v).strip() for k, v in dict(payload.get("alpaca_symbols") or {}).items()}
+        client = alpaca_mod.AlpacaClient(alp.get("key_id", ""), alp.get("secret", ""), bool(alp.get("paper", True)))
+
+        def _active_assets() -> Optional[dict[str, Any]]:
+            status_code, body = client.assets()
+            if status_code != 200 or not isinstance(body, list):
+                return None
+            return {str(a.get("symbol") or "").upper(): a for a in body
+                    if a.get("symbol") and a.get("tradable", True)}
+
+        assets = await asyncio.to_thread(_active_assets)
+        if assets is None:
+            return {"ok": False, "source": source, "added": [], "updated": [], "skipped": [],
+                    "error": "Alpaca's asset list could not be read — check the keys and paper mode"}
+        for sym in wanted:
+            target = (alpaca_symbols.get(sym) or sym).upper()
+            if target not in assets:
+                reasons[sym] = f"Alpaca does not list {target}"
+                continue
+            broker[sym] = {"listed": True, "tick_size": 0.01, "alpaca": target}
+    elif source == "ninjatrader":
+        check = await asyncio.to_thread(engine_mod.ninjatrader_validate, wanted)
+        if not check.get("ok"):
+            return {"ok": False, "source": source, "added": [], "updated": [], "skipped": [],
+                    "error": str(check.get("reason") or "the NinjaTrader bridge is not available")}
+        for sym in wanted:
+            info = (check.get("symbols") or {}).get(sym) or {}
+            if info.get("listed"):
+                broker[sym] = {"listed": True, "tick_size": info.get("tick_size"),
+                               "ninjatrader": info.get("ninjatrader") or sym}
+            else:
+                reasons[sym] = f"your NinjaTrader terminal does not list {sym}"
+    elif source in ("binance", "hyperliquid", "okx"):
+        validate = {"binance": engine_mod.binance_validate, "hyperliquid": engine_mod.hyperliquid_validate,
+                    "okx": engine_mod.okx_validate}[source]
+        try:
+            listed = await asyncio.to_thread(validate, wanted)
+        except Exception as exc:
+            return {"ok": False, "source": source, "added": [], "updated": [], "skipped": [],
+                    "error": f"{type(exc).__name__}: {exc}"}
+        for sym in wanted:
+            if listed.get(sym):
+                broker[sym] = {"listed": True, "tick_size": ticks.get(sym)}
+            else:
+                reasons[sym] = f"{source} does not list it"
+
     instruments = cfg.get("instruments") or []
     by_symbol = {i["symbol"]: i for i in instruments}
     template = by_symbol.get("BTCUSDT") or (instruments[0] if instruments else {})
     added: list[str] = []
     updated: list[str] = []
+    skipped: list[dict[str, str]] = []
 
     for sym in wanted:
-        info = catalog.get(sym)
-        if info is None or info.get("status") not in ("Trading", ""):
-            continue
-        if sym in by_symbol:
-            inst = by_symbol[sym]
-            inst["bybit_symbol"] = sym
-            inst["tick_size"] = info["tick_size"]
-            updated.append(sym)
-        else:
-            inst = {
-                "symbol": sym,
-                "asset_class": "Crypto",
-                "enabled": False,
-                "mt5_symbol": "",
-                "bybit_symbol": sym,
-                "tick_size": info["tick_size"],
-                "patterns": json.loads(json.dumps(template.get("patterns") or {})),
-            }
-            instruments.append(inst)
-            by_symbol[sym] = inst
-            added.append(sym)
+        tick = ticks.get(sym)
+        stamp = sym
+        if source == "bybit":
+            info = catalog.get(sym)
+            if info is None or info.get("status") not in ("Trading", ""):
+                skipped.append({"symbol": sym, "reason": "the venue does not list it"})
+                continue
+            tick = tick if tick is not None else info.get("tick_size")
+        elif source == "mt5":
+            stamp = mt5_names.get(sym) or sym
+            info = broker.get(stamp) or {}
+            if not info.get("listed"):
+                skipped.append({"symbol": sym, "reason": reasons.get(sym) or f"the broker does not list {stamp}"})
+                continue
+            tick = tick if tick is not None else (info.get("tick_size") or None)
+        else:                                    # alpaca / the venue-validate lanes
+            info = broker.get(sym) or {}
+            if not info.get("listed"):
+                skipped.append({"symbol": sym, "reason": reasons.get(sym) or f"the venue does not list it ({source})"})
+                continue
+            if source == "alpaca":
+                stamp = str(info.get("alpaca") or sym)
+            elif source == "ninjatrader":
+                stamp = str(info.get("ninjatrader") or sym)
+            else:
+                stamp = sym
+            tick = tick if tick is not None else info.get("tick_size")
 
-    if payload.get("enable"):
+        row = by_symbol.get(sym)
+        if row is not None:
+            row[stamp_key] = stamp
+            if tick is not None:
+                row["tick_size"] = float(tick)
+            updated.append(sym)
+            continue
+        entry = {
+            "symbol": sym,
+            "asset_class": asset_class or config_store.ASSET_CLASS.get(sym, "Other"),
+            "enabled": enable,
+            "mt5_symbol": stamp if source == "mt5" else "",
+            "alpaca_symbol": stamp if source == "alpaca" else "",
+            "bybit_symbol": stamp if source == "bybit" else "",
+            "ninjatrader_symbol": stamp if source == "ninjatrader" else "",
+            "tick_size": float(tick) if tick is not None else 0.01,
+            "patterns": json.loads(json.dumps(template.get("patterns") or {})),
+        }
+        if stamp_key not in entry:               # binance/hyperliquid/okx stamps ride in as-is
+            entry[stamp_key] = stamp
+        instruments.append(entry)
+        by_symbol[sym] = entry
+        added.append(sym)
+
+    if enable:
         for sym in added + updated:
             by_symbol[sym]["enabled"] = True
 
     saved = config_store.save_config(cfg)
-    return {"ok": True, "added": added, "updated": updated, "config": saved}
+    return {"ok": True, "source": source, "added": added, "updated": updated, "skipped": skipped,
+            "config": saved}
+
+
+def _resolve_instrument(symbol: str, cfg: dict[str, Any] | None = None,
+                        *, broker_names: Optional[list[str]] = None,
+                        nt_names: Optional[list[str]] = None) -> dict[str, Any]:
+    """One builder for the instrument look-up's answer (§82) — every caller gets the same one.
+
+    ``broker_names`` / ``nt_names`` are the venue symbol lists (MT5's broker list, the
+    NinjaTrader terminal's instrument list) when the caller could afford to fetch them;
+    without them the look-up still answers from the config and the engine alone (and says so).
+    """
+    from orderflow_system.desktop import instrument_lookup
+
+    cfg = cfg if cfg is not None else config_store.load_config()
+    status = engine_mod.engine.status()
+    mt5 = engine_mod.mt5_status() or {}
+    return instrument_lookup.resolve(
+        symbol,
+        instruments=list(cfg.get("instruments") or []),
+        engine_symbols=list(status.get("symbols") or []),
+        source=str(cfg.get("data_source") or "bybit"),
+        running=bool(status.get("running")),
+        mt5_available=bool(mt5.get("available")),
+        mt5_known=list(broker_names or []),
+        nt_known=list(nt_names or []),
+    )
+
+
+@router.get("/instruments/resolve")
+async def instruments_resolve(symbol: str = "", broker: bool = True) -> dict[str, Any]:
+    """What a typed symbol is: live, ready, disabled, addable or unknown — plus why (§82).
+
+    The Engine view's symbol box calls this before it accepts a change, so a name nothing
+    can stream is answered with a reason and an action instead of a blank stage.
+    """
+    cfg = config_store.load_config()
+    names: list[str] = []
+    nt_names: list[str] = []
+    source = str(cfg.get("data_source") or "").lower()
+    if broker and source in ("mt5", "both", "all"):
+        found = await asyncio.to_thread(engine_mod.mt5_symbol_names, dict(cfg.get("mt5") or {}))
+        names = list(found.get("names") or [])
+    elif broker and source == "ninjatrader":
+        rows = await asyncio.to_thread(engine_mod.ninjatrader_symbol_names)
+        nt_names = [str(row.get("Name") or "") for row in rows
+                    if isinstance(row, dict) and row.get("Name")]
+    out = _resolve_instrument(symbol, cfg, broker_names=names, nt_names=nt_names)
+    total = len(nt_names) if source == "ninjatrader" else len(names)
+    return {"ok": True, **out, "source": source or "bybit",
+            "broker_total": total, "running": bool(engine_mod.engine.status().get("running"))}
+
+
+@router.get("/mt5/symbols")
+async def mt5_symbol_list(q: str = "", limit: int = 40) -> dict[str, Any]:
+    """Search the connected broker's own symbol list (the wizard's "which name is it?").
+
+    Served from the feed module's cached listing; a terminal that is missing or not logged
+    in comes back as ``ok: false`` with the reason, never as an empty list.
+    """
+    cfg = config_store.load_config()
+    payload = dict(cfg.get("mt5") or {})
+    try:
+        want = max(1, min(200, int(limit)))
+    except (TypeError, ValueError):
+        want = 40
+    return await asyncio.to_thread(engine_mod.mt5_symbols, payload, str(q or ""), want)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -351,6 +668,8 @@ FREE_SOURCES = (
      "https://www.okx.com/api/v5/public/time", True),
     ("hyperliquid", "Hyperliquid", "public WS + REST — trades, whole-book snapshots, no key",
      "https://api.hyperliquid.xyz/info", True),
+    ("ninjatrader", "NinjaTrader 8", "your local terminal — free demo accounts work; needs the bridge add-on once",
+     "tcp://127.0.0.1:8790", True),
 )
 
 #: POST-only probe bodies: Hyperliquid's `/info` answers a bare GET with 405, so a plain GET probe
@@ -360,11 +679,22 @@ _PROBE_PAYLOADS = {"hyperliquid": {"type": "meta"}}
 
 
 def _probe_source(url: str, timeout: float = 4.0, payload: Optional[dict] = None) -> str:
-    """ok / unreachable / installed — a reachability fact, never a guess about capability.
+    """ok / unreachable / installed / idle — a reachability fact, never a guess about capability.
 
     ``payload`` is for POST-only endpoints (see `_PROBE_PAYLOADS`): the probe then makes the same
-    request the adapter makes, instead of a GET the venue answers with 405.
+    request the adapter makes, instead of a GET the venue answers with 405. A ``tcp://`` URL is a
+    loopback service (the NinjaTrader bridge): the probe is one connect, and "idle" means the
+    platform is not running — say so, never "unreachable".
     """
+    if url.startswith("tcp://"):
+        import socket
+        try:
+            hostport = url[len("tcp://"):]
+            host, _, port_text = hostport.partition(":")
+            with socket.create_connection((host, int(port_text or "0")), timeout=min(timeout, 1.0)):
+                return "ok"
+        except (OSError, ValueError):
+            return "idle"
     if not url:
         try:
             import importlib
@@ -385,17 +715,32 @@ def _probe_source(url: str, timeout: float = 4.0, payload: Optional[dict] = None
         return "unreachable"
 
 
+#: The /sources sweep: seven blocking socket probes (up to ~4 s each), so the result is cached
+#: and the sweep runs on a worker thread instead of the feeds' event loop (measured uncached:
+#: 2.7 s per call). `?refresh=1` forces a fresh sweep.
+_SOURCES_CACHE: dict[str, Any] = {"at": 0.0, "rows": None}
+_SOURCES_TTL_S = 20.0
+
+
+def _probe_all_sources() -> list[dict[str, Any]]:
+    return [{"id": sid, "name": name, "hint": hint,
+             "status": _probe_source(url, payload=_PROBE_PAYLOADS.get(sid)), "wired": wired}
+            for sid, name, hint, url, wired in FREE_SOURCES]
+
+
 @router.get("/sources")
-async def sources() -> dict[str, Any]:
+async def sources(refresh: int = Query(default=0)) -> dict[str, Any]:
     """Every data source that costs nothing, with a live reachability read and the active one."""
+    import time as _time
+
+    now = _time.time()
+    rows = _SOURCES_CACHE["rows"]
+    if refresh or rows is None or (now - float(_SOURCES_CACHE["at"])) >= _SOURCES_TTL_S:
+        rows = await asyncio.to_thread(_probe_all_sources)
+        _SOURCES_CACHE["rows"], _SOURCES_CACHE["at"] = rows, now
     cfg = config_store.load_config()
     active = str(cfg.get("data_source") or "bybit")
-    rows = [
-        {"id": sid, "name": name, "hint": hint,
-         "status": _probe_source(url, payload=_PROBE_PAYLOADS.get(sid)), "wired": wired}
-        for sid, name, hint, url, wired in FREE_SOURCES
-    ]
-    return {"ok": True, "sources": rows, "active": active,
+    return {"ok": True, "sources": [dict(r) for r in rows], "active": active,
             "note": "Only keyless/public feeds are listed; nothing here needs an account or a key."}
 
 
@@ -506,6 +851,7 @@ async def folder_open(payload: dict = Body(default={})) -> dict[str, Any]:
         "config": config_store.config_path().parent,
         "logs": config_store.log_path().parent,
         "exports": config_store.config_path().parent / "exports",
+        "backups": _backups_dir(),          # R6: wherever the user pointed the backup job
     }
     if which not in targets:
         return {"ok": False, "error": f"unknown folder: {which}", "known": sorted(targets)}
@@ -602,14 +948,22 @@ async def ofx_get() -> dict[str, Any]:
 @router.post("/ofx")
 async def ofx_save(payload: dict = Body(default={})) -> dict[str, Any]:
     """Persist the engine's parameters. config_store clamps them, so a bad input cannot make
-    the renderer unusable."""
+    the renderer unusable.
+
+    The answer carries the look-up's verdict on the stored symbol (§82): the panel used to
+    save any string and quietly fetch nothing, so the *save* is where the reason belongs.
+    """
     cfg = config_store.load_config()
     ofx = cfg.setdefault("ofx", {})
     for key in ("symbol", "R", "stack", "lambda_ms", "text_px", "sweep_c", "min_block", "va_pct", "ramp"):
         if key in payload:
             ofx[key] = payload[key]
     saved = config_store.save_config(cfg)
-    return {"ok": True, "ofx": saved.get("ofx") or {},
+    symbol = str((saved.get("ofx") or {}).get("symbol") or "")
+    stream = (_resolve_instrument(symbol, saved) if symbol
+              else {"symbol": "", "state": "unknown", "reason": "type an instrument name",
+                    "actions": ["open_instruments"], "via": None, "instrument": None, "suggestions": []})
+    return {"ok": True, "ofx": saved.get("ofx") or {}, "stream": stream,
             "note": "Stored in your config file; rendering happens in your browser session."}
 
 
@@ -695,6 +1049,27 @@ def _mask_bookmap(block: dict[str, Any]) -> dict[str, Any]:
     return safe
 
 
+def _ninjatrader_block(cfg: dict[str, Any]) -> dict[str, Any]:
+    """The stored NinjaTrader bridge settings, coerced to the shape the UI expects.
+
+    There is nothing secret in here: the bridge is a loopback socket to an add-on that was
+    installed by hand, so the block is a host, a port, a symbol and the plan the user runs.
+    """
+    from orderflow_system.desktop import platforms as platform_mod
+    stored = ((cfg.get("platforms") or {}).get("ninjatrader") or {})
+    return {**platform_mod.ninjatrader_defaults(), **(stored if isinstance(stored, dict) else {})}
+
+
+def _mask_ninjatrader(block: dict[str, Any]) -> dict[str, Any]:
+    """Same shape out, with the plan validated against the published plans."""
+    from orderflow_system.desktop import platforms as platform_mod
+    safe = dict(block)
+    safe["plan"] = safe.get("plan") if safe.get("plan") in platform_mod.NINJATRADER_PLAN_IDS else "free"
+    safe["host"] = str(safe.get("host") or "127.0.0.1")
+    safe["protocol"] = platform_mod.ninjatrader_defaults()["protocol"]
+    return safe
+
+
 @router.post("/atlas/footprint")
 async def atlas_footprint_save(payload: dict = Body(default={})) -> dict[str, Any]:
     """Save the footprint's analysis settings (imbalance mode/ratio, print-size filter).
@@ -729,15 +1104,18 @@ async def platforms_bridge() -> dict[str, Any]:
     cfg = config_store.load_config()
     block = _dtc_block(cfg)
     bookmap_block = _bookmap_block(cfg)
+    nt_block = _ninjatrader_block(cfg)
     cat = platform_mod.catalogue()
     rows = {row.get("id"): row for row in (cat.get("platforms") or [])}
     platform_row = rows.get("sierra") or (cat.get("platforms") or [{}])[0]
     bookmap_row = rows.get("bookmap") or {}
+    nt_row = rows.get("ninjatrader") or {}
     installs = await asyncio.to_thread(platform_mod.detect_installs)
     return {
         "ok": True,
         "sierra": _mask_dtc(block),
         "bookmap": _mask_bookmap(bookmap_block),
+        "ninjatrader": _mask_ninjatrader(nt_block),
         "catalogue": cat,
         "plans": platform_row.get("plans", []),
         "links": platform_row.get("links", []),
@@ -751,6 +1129,13 @@ async def platforms_bridge() -> dict[str, Any]:
         "bookmap_limits": bookmap_row.get("limits", {}),
         "bookmap_workflow": platform_mod.bookmap_workflow(bookmap_block.get("plan", "digital")),
         "bookmap_bridge": platform_mod.bookmap_bridge_state(),
+        "ninjatrader_plans": nt_row.get("plans", []),
+        "ninjatrader_links": nt_row.get("links", []),
+        "ninjatrader_prices_as_of": nt_row.get("prices_as_of", ""),
+        "ninjatrader_caveats": nt_row.get("caveats", []),
+        "ninjatrader_limits": nt_row.get("limits", {}),
+        "ninjatrader_workflow": platform_mod.ninjatrader_workflow(nt_block.get("plan", "free")),
+        "ninjatrader_bridge": platform_mod.ninjatrader_bridge_state(),
         "installs": installs,
         "suggested_symbols": platform_mod.suggested_symbols(config_store.enabled_symbols(cfg)),
         "free_note": "The free trial and the delayed streaming feed need no payment — start there.",
@@ -759,6 +1144,12 @@ async def platforms_bridge() -> dict[str, Any]:
         "note": "Optional: a DTC server on your own platform can feed this suite directly.",
         "bookmap_note": "Optional: Bookmap has no data-out API, so this suite ships a small read-only "
                         "add-on that republishes its live trades and depth on loopback.",
+        "ninjatrader_free_note": "The free path is real: the Simulated Data Feed needs no payment and "
+                                 "Kinetick End-Of-Day is free — real-time CME/EUREX Level I comes with a "
+                                 "funded NinjaTrader brokerage account.",
+        "ninjatrader_note": "Optional and powerful: NinjaTrader has no market-data-out API, so this "
+                            "suite ships a small read-only bridge add-on — and the terminal also "
+                            "becomes a full engine data source (add NQ/ES/… from its own list).",
     }
 
 
@@ -785,10 +1176,13 @@ async def platforms_plan(payload: dict = Body(default={})) -> dict[str, Any]:
 
     cfg = config_store.load_config()
     which = str(payload.get("platform") or "sierra").lower()
+    ninjatrader = which == "ninjatrader"
     bookmap = which == "bookmap"
-    ids = platform_mod.BOOKMAP_PLAN_IDS if bookmap else platform_mod.PLAN_IDS
-    fallback = "digital" if bookmap else "free"
-    block = cfg.setdefault("platforms", {}).setdefault("bookmap" if bookmap else "sierra", {})
+    ids = (platform_mod.NINJATRADER_PLAN_IDS if ninjatrader
+           else platform_mod.BOOKMAP_PLAN_IDS if bookmap else platform_mod.PLAN_IDS)
+    fallback = "free" if ninjatrader else "digital" if bookmap else "free"
+    block = cfg.setdefault("platforms", {}).setdefault(
+        "ninjatrader" if ninjatrader else "bookmap" if bookmap else "sierra", {})
     if "plan" in payload:
         plan = str(payload.get("plan") or fallback).lower()
         block["plan"] = plan if plan in ids else fallback
@@ -797,15 +1191,19 @@ async def platforms_plan(payload: dict = Body(default={})) -> dict[str, Any]:
     saved = config_store.save_config(cfg)
     dtc = _dtc_block(saved)
     bm = _bookmap_block(saved)
+    nt = _ninjatrader_block(saved)
     return {
         "ok": True,
-        "platform": "bookmap" if bookmap else "sierra",
+        "platform": "ninjatrader" if ninjatrader else "bookmap" if bookmap else "sierra",
         "sierra": _mask_dtc(dtc),
         "bookmap": _mask_bookmap(bm),
-        "plans": platform_mod.BOOKMAP_PLANS if bookmap else platform_mod.PLANS,
-        "workflow": (platform_mod.bookmap_workflow(bm.get("plan", "digital")) if bookmap
+        "ninjatrader": _mask_ninjatrader(nt),
+        "plans": (platform_mod.NINJATRADER_PLANS if ninjatrader
+                  else platform_mod.BOOKMAP_PLANS if bookmap else platform_mod.PLANS),
+        "workflow": (platform_mod.ninjatrader_workflow(nt.get("plan", "free")) if ninjatrader
+                     else platform_mod.bookmap_workflow(bm.get("plan", "digital")) if bookmap
                      else platform_mod.workflow(dtc.get("plan", "free"))),
-        "price_note": f"prices read {platform_mod.BOOKMAP_PRICES_AS_OF if bookmap else platform_mod.PRICES_AS_OF}"
+        "price_note": f"prices read {platform_mod.NINJATRADER_PRICES_AS_OF if ninjatrader else platform_mod.BOOKMAP_PRICES_AS_OF if bookmap else platform_mod.PRICES_AS_OF}"
                       f" from the vendor's pricing page",
     }
 
@@ -934,9 +1332,158 @@ async def bookmap_jar_open(payload: dict = Body(default={})) -> dict[str, Any]:
     folder = str(payload.get("folder") or "") or None
     return await asyncio.to_thread(platform_mod.reveal_bridge_jar, folder)
 
+
+@router.post("/platforms/bridge/ninjatrader")
+async def ninjatrader_settings_save(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Save the NinjaTrader bridge settings. No credentials exist here: it is a loopback socket.
+
+    The bridge add-on is the server; the suite only ever connects to the host/port it bound.
+    """
+    from orderflow_system.desktop import platforms as platform_mod
+
+    cfg = config_store.load_config()
+    block = _ninjatrader_block(cfg)
+    for key in ("enabled", "host", "symbol", "integrated", "bridge_built"):
+        if key in payload and payload[key] is not None:
+            block[key] = payload[key]
+    if payload.get("port") is not None:
+        try:
+            port = int(payload["port"])
+        except (TypeError, ValueError):
+            port = block.get("port", 8790)
+        block["port"] = port if 1 <= port <= 65535 else 8790
+    if payload.get("plan") is not None:
+        plan = str(payload["plan"]).lower()
+        block["plan"] = plan if plan in platform_mod.NINJATRADER_PLAN_IDS else "free"
+    block["protocol"] = platform_mod.ninjatrader_defaults()["protocol"]
+    cfg.setdefault("platforms", {})["ninjatrader"] = block
+    saved = config_store.save_config(cfg)
+    return {"ok": True, "ninjatrader": _mask_ninjatrader(_ninjatrader_block(saved)),
+            "note": "Stored in your per-user config file; the bridge only ever dials 127.0.0.1."}
+
+
+@router.post("/platforms/bridge/ninjatrader/test")
+async def ninjatrader_test(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Connect to the bridge add-on and report what it is streaming — the one-click check.
+
+    Uses the stored settings unless the caller supplies overrides. The answer names the add-on,
+    the NinjaTrader build and live connection it reported, message counts, one sample row and
+    whether level-2 depth actually arrived; nothing is stored and nothing is sent back.
+    """
+    from orderflow_system.data.ninjatrader_feed import ninjatrader_probe
+
+    cfg = config_store.load_config()
+    block = _ninjatrader_block(cfg)
+    host = str(payload.get("host") or block.get("host") or "127.0.0.1")
+    try:
+        port = int(payload.get("port") or block.get("port") or 8790)
+    except (TypeError, ValueError):
+        port = 8790
+    symbol = str(payload.get("symbol") or block.get("symbol") or "NQ")
+    try:
+        seconds = min(10.0, max(0.5, float(payload.get("seconds", 3.0) or 3.0)))
+    except (TypeError, ValueError):
+        seconds = 3.0
+    return await asyncio.to_thread(ninjatrader_probe, host, port, seconds=seconds,
+                                   timeout=6.0, symbol=symbol)
+
+
+@router.get("/platforms/bridge/ninjatrader/dll")
+async def ninjatrader_dll() -> dict[str, Any]:
+    """The bridge DLL this install ships: where it is, whether a copy is installed into
+    NinjaTrader's AddOns folder, and whether the two are the same build. Read-only — it never
+    loads or runs the DLL."""
+    from orderflow_system.desktop import platforms as platform_mod
+
+    return {"ok": True, **platform_mod.ninjatrader_bridge_state()}
+
+
+@router.post("/platforms/bridge/ninjatrader/dll/open")
+async def ninjatrader_dll_open(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Open the bridge folder so the DLL can be copied into NinjaTrader.
+
+    Accepts no path from the caller except this suite's own folder (the helper re-checks it).
+    """
+    from orderflow_system.desktop import platforms as platform_mod
+
+    folder = str(payload.get("folder") or "") or None
+    return await asyncio.to_thread(platform_mod.reveal_bridge_dll, folder)
+
 # ──────────────────────────────────────────────────────────────
 # Engine control
 # ──────────────────────────────────────────────────────────────
+
+@router.get("/marketwatch")
+async def marketwatch(source: str = "", filter: str = "", limit: int = 60,
+                      offset: int = 0) -> dict[str, Any]:
+    """The source's own symbol board (§87) — the platform's Market Watch, fed by this install.
+
+    Bybit answers for the whole board from one cached REST snapshot; MT5 answers per page off
+    the terminal; the NinjaTrader branch lists the terminal's master instruments (its bridge
+    only republishes subscribed ones, and the note says so). Read-only, loopback where possible.
+    """
+    from orderflow_system.desktop import marketwatch as marketwatch_mod
+
+    cfg = config_store.load_config()
+    return await asyncio.to_thread(
+        marketwatch_mod.market_watch,
+        source or str(cfg.get("data_source") or "bybit"), filter, limit, offset)
+
+
+@router.post("/launch")
+async def launch_mode(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Start one of the program's other run modes in its own console window (§87).
+
+    The top bar's Run menu sends {"mode": "headless" | "cli"}. Headless refuses while port 8099
+    already answers; the CLI pipeline exists in the source tree only (it is refused honestly on
+    a frozen build). Both share this profile's history store — the response says so, because a
+    second writer is exactly how the engine ends up answering *database is locked*.
+    """
+    import socket
+    import subprocess
+    import sys
+    from pathlib import Path as _Path
+
+    mode = str(payload.get("mode") or "").strip().lower()
+    if mode not in ("headless", "cli"):
+        return {"ok": False, "error": "unknown mode — 'headless' or 'cli'"}
+    frozen = bool(getattr(sys, "frozen", False))
+    if mode == "cli" and frozen:
+        return {"ok": False, "error": "the CLI pipeline ships in the source tree only — run it "
+                                      "there (python -m orderflow_system.main)"}
+    if mode == "headless":
+        try:
+            with socket.create_connection(("127.0.0.1", 8099), timeout=0.4):
+                return {"ok": False, "error": "port 8099 is already answering — a headless run is up"}
+        except OSError:
+            pass
+        args = ([sys.executable, "--headless", "--port", "8099"] if frozen
+                else [sys.executable, "-m", "orderflow_system.desktop", "--headless", "--port", "8099"])
+    else:
+        args = [sys.executable, "-m", "orderflow_system.main"]
+    repo_root = _Path(__file__).resolve().parents[2]
+    try:
+        proc = subprocess.Popen(args, cwd=str(repo_root),
+                                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+    except OSError as exc:
+        return {"ok": False, "error": f"launch failed: {exc}"}
+    note = ("a headless server is starting in its own console on http://127.0.0.1:8099 — it shares "
+            "this profile's history store, so stop it when the smoke test is done"
+            if mode == "headless" else
+            "the CLI pipeline is starting in its own console (feeds → detectors → Telegram) — it "
+            "shares this profile's history store; Ctrl+C in that console stops it")
+    return {"ok": True, "mode": mode, "pid": proc.pid, "command": " ".join(args), "note": note}
+
+
+@router.get("/systems")
+async def systems() -> dict[str, Any]:
+    """The Systems board (§86): every ingest path + capability with its honest state.
+
+    Read-only aggregation of what the engine and the platform detectors already know — the
+    Overview card polls it; nothing here starts or touches anything.
+    """
+    return await asyncio.to_thread(engine_mod.systems_report)
+
 
 @router.get("/engine/status")
 async def engine_status() -> dict[str, Any]:
@@ -955,8 +1502,11 @@ async def live_status() -> dict[str, Any]:
 
 @router.post("/engine/start")
 async def engine_start(cfg: Optional[dict] = Body(default=None)) -> dict[str, Any]:
+    # §83: a body here patches the stored config (merge) rather than replacing it — the
+    # wizard and the toolbar post a full config, and a future partial caller must not be able
+    # to reset the settings the body does not mention.
     if cfg:
-        config_store.save_config(cfg)
+        config_store.merge_config(cfg)
     cfg = config_store.load_config()
     logs.install(cfg.get("logging", {}).get("level", "INFO"))
     return await engine_mod.engine.start(cfg)
@@ -970,7 +1520,7 @@ async def engine_stop() -> dict[str, Any]:
 @router.post("/engine/restart")
 async def engine_restart(cfg: Optional[dict] = Body(default=None)) -> dict[str, Any]:
     if cfg:
-        config_store.save_config(cfg)
+        config_store.merge_config(cfg)
     return await engine_mod.engine.restart(config_store.load_config())
 
 
@@ -1025,7 +1575,14 @@ async def alpaca_status(refresh: bool = Query(default=False)) -> dict[str, Any]:
 
 @router.post("/alpaca/test")
 async def alpaca_test(payload: dict = Body(default={})) -> dict[str, Any]:
-    """Validate a key pair against Alpaca and report what the account can reach."""
+    """Validate a key pair against Alpaca and report what the account can reach.
+
+    §83: the `save` branch writes through ``merge_config`` (whole config ← the alpaca block).
+    It used to call ``save_config`` with the ALPACA BLOCK as if it were the whole config —
+    and ``save_config`` merges over the DEFAULTS, so pressing "Validate & save" reset every
+    other setting and parked the keys at the top level of the file, where the next launch's
+    ``alpaca`` block could not see them (the reported "I had to re-enter my keys").
+    """
     from orderflow_system.desktop import alpaca as alpaca_mod
 
     cfg = _alpaca_cfg()
@@ -1038,8 +1595,10 @@ async def alpaca_test(payload: dict = Body(default={})) -> dict[str, Any]:
     if report.get("ok") and payload.get("save"):
         cfg.update({"key_id": body["key_id"], "secret": body["secret"],
                     "paper": bool(body["paper"]), "enabled": True})
-        saved = config_store.save_config(cfg) if hasattr(config_store, "save_config") else None
-        report["saved"] = bool(saved if saved is not None else True)
+        # The block, merged over what is on disk — never a whole-config write from a block.
+        saved = config_store.merge_config({"alpaca": cfg})
+        report["saved"] = bool((saved.get("alpaca") or {}).get("secret"))
+        report["key_masked"] = alpaca_mod.mask_key(str(cfg.get("key_id") or ""))
         _ALPACA_CACHE.update({"report": report, "at": time.time()})
     return report
 
@@ -1160,6 +1719,14 @@ def _search_universe() -> Any:
             local_feeds[symbol] = "bybit"
         elif source in ("mt5", "both"):
             local_feeds[symbol] = "mt5"
+        elif source == "all":
+            # `all` runs every leg, so answer with the leg this symbol actually lands on —
+            # the partition is the one rule for that (engine.partition_instruments)
+            part = engine_mod.partition_instruments(
+                cfg, [symbol], legs=("bybit", "alpaca", "mt5", "ninjatrader"))
+            leg = next((name for name, syms in part.items() if symbol in syms), "")
+            if leg:
+                local_feeds[symbol] = leg
     universe = search_service.SymbolUniverse(
         config=cfg,
         assets_provider=(data.assets if data else None),
@@ -1742,8 +2309,11 @@ async def get_storage(refresh: int = Query(default=0)) -> dict[str, Any]:
     """DB size, row counts, retention settings and the last prune — cached 30 s.
 
     `COUNT(*)` over a 800 MB ticks table is not a free read, so this answers from a short
-    cache (`?refresh=1` forces a fresh read). With the engine stopped the file sizes are
-    still real; row counts say so instead of guessing.
+    cache (`?refresh=1` forces a fresh read). With the engine stopped the live handle is gone
+    but the file is still on disk, so the stopped path reads it READ-ONLY: sizes, page
+    accounting, the reclaimable bytes and the per-instrument tick span. Row counts still need
+    the engine, and the last prune is read back from the store — a restart can no longer make
+    it read "never".
     """
     import time as _time
 
@@ -1759,17 +2329,13 @@ async def get_storage(refresh: int = Query(default=0)) -> dict[str, Any]:
         snap = await system.db.storage_snapshot()
         last_prune = getattr(system, "_last_prune", None)
     else:
-        snap = {"db_path": str(config_store.db_path()), "bytes": 0, "wal_bytes": 0,
-                "tables": {}, "ticks": {"oldest_ms": 0, "newest_ms": 0}}
-        try:
-            from pathlib import Path as _Path
-            p = _Path(snap["db_path"])
-            snap["bytes"] = p.stat().st_size if p.exists() else 0
-            w = _Path(snap["db_path"] + "-wal")
-            snap["wal_bytes"] = w.stat().st_size if w.exists() else 0
-        except OSError:
-            pass
-        last_prune = None
+        # No engine handle: the file itself still answers — a stopped app is exactly when a user
+        # opens the Logs panel, and "nothing to see" is not an answer.
+        from orderflow_system.data.database import readonly_snapshot
+
+        snap = readonly_snapshot(str(config_store.db_path()))
+        snap.setdefault("tables", {})              # counts are the live handle's business
+        last_prune = config_store.load_last_prune()
 
     out = dict(snap)
     out["engine_running"] = system is not None
@@ -1785,6 +2351,26 @@ async def get_storage(refresh: int = Query(default=0)) -> dict[str, Any]:
         rt = (_rd, _ph, _sh)
     out["retention"] = {"days": rt[0], "prune_interval_hours": rt[1], "session_start_hour": rt[2]}
     out["last_prune"] = last_prune
+    # R6: the panels that manage storage need the whole picture — where the bytes are, where the
+    # curve points, what the backup job is set to, and what sets already exist in the target.
+    from orderflow_system.desktop import storage as storage_mod
+
+    settings = storage_mod.clamp_storage_settings(config_store.load_config())
+    config_dir = config_store.config_dir()
+    target = storage_mod.resolved_target(settings, config_dir)
+    usage = await asyncio.to_thread(storage_mod.usage_snapshot, config_store.db_path(),
+                                    config_dir=config_dir, target=target)
+    store = storage_mod.load_usage_store(storage_mod.usage_store_path(config_dir))
+    out["usage"] = usage
+    out["growth"] = storage_mod.growth_report(store.get("samples", []),
+                                              usage["db_bytes"] + usage["wal_bytes"],
+                                              retention_days=int(rt[0] or 0))
+    out["storage_settings"] = settings
+    out["backups"] = await asyncio.to_thread(storage_mod.list_backups, target)
+    email_cfg = dict((config_store.load_config().get("notify") or {}).get("email") or {})
+    out["smtp_configured"] = bool(email_cfg.get("host") and email_cfg.get("to"))
+    out["smtp_to"] = str(email_cfg.get("to") or "")
+    out["email_report"] = bool(settings.get("email_report") or settings.get("email_threshold"))
     _storage_cache["at"] = now
     _storage_cache["data"] = out
     return out
@@ -1803,6 +2389,547 @@ async def prune_storage_now() -> dict[str, Any]:
     _storage_cache["at"] = 0.0
     _storage_cache["data"] = None
     return {"ok": True, "summary": summary}
+
+
+@router.post("/storage/settings")
+async def set_storage_settings(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Save the storage block and the retention window beside it — clamped by the one helper.
+
+    The response carries the clamped values back, because those are what the jobs will use: the
+    panel must show the numbers in force, not the ones that were typed. Retention edits apply to
+    the next prune pass and the next engine start, live ones included — the jobs re-read the
+    config rather than trusting the boot-time copy.
+    """
+    from orderflow_system.desktop import storage as storage_mod
+
+    body = dict(payload or {})
+    patch: dict[str, Any] = {}
+    data_block = {k: v for k, v in body.items()
+                  if k in ("retention_days", "prune_interval_hours", "session_start_hour")}
+    if data_block:
+        patch["data"] = data_block
+    storage_block = {k: v for k, v in body.items() if k in storage_mod.DEFAULT_SETTINGS}
+    if storage_block:
+        patch["storage"] = storage_block
+    if not patch:
+        return {"ok": False, "error": "nothing to save — send retention_days / prune_interval_hours / storage keys"}
+    saved = config_store.merge_config(patch)
+    _storage_cache["at"] = 0.0
+    _storage_cache["data"] = None
+    from orderflow_system.desktop.engine import clamp_data_settings
+
+    sh, rd, ph = clamp_data_settings(saved)
+    return {"ok": True, "storage": storage_mod.clamp_storage_settings(saved),
+            "retention": {"days": rd, "prune_interval_hours": ph, "session_start_hour": sh}}
+
+
+@router.post("/storage/backup")
+async def storage_backup(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Run one backup now, to the configured target or the one in the body.
+
+    The body may name a target (a folder, a UNC share, a removable drive…), a format and how many
+    sets to keep — the same parameters the scheduled job uses, so "try it once" and "run it
+    nightly" are one code path with the same failure messages. An unreachable share is a 400 with
+    the operating system's reason, not a hang.
+    """
+    from orderflow_system.desktop import storage as storage_mod
+
+    body = dict(payload or {})
+    cfg = config_store.load_config()
+    settings = storage_mod.clamp_storage_settings(cfg)
+    target = (str(body.get("target") or "").strip()
+              or str(storage_mod.resolved_target(settings, config_store.config_dir())))
+    fmt = str(body.get("format") or settings["backup_format"])
+    try:
+        keep = int(body.get("keep") or settings["backup_keep"])
+    except (TypeError, ValueError):
+        keep = int(settings["backup_keep"])
+    try:
+        manifest = await asyncio.to_thread(storage_mod.run_backup, config_store.db_path(),
+                                           target, fmt=fmt, keep=keep)
+    except storage_mod.StorageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _storage_cache["at"] = 0.0
+    _storage_cache["data"] = None
+    return {"ok": True, "backup": manifest}
+
+
+@router.get("/storage/backups")
+async def storage_backups(target: str = Query(default="")) -> dict[str, Any]:
+    """The sets already in the target, newest first, with their manifests."""
+    from orderflow_system.desktop import storage as storage_mod
+
+    settings = storage_mod.clamp_storage_settings(config_store.load_config())
+    folder = str(target or "").strip() or str(storage_mod.resolved_target(settings, config_store.config_dir()))
+    sets = await asyncio.to_thread(storage_mod.list_backups, folder)
+    return {"ok": True, "target": folder, "sets": sets,
+            "total_bytes": sum(int(s.get("bytes") or 0) for s in sets)}
+
+
+@router.post("/storage/vacuum")
+async def storage_vacuum() -> dict[str, Any]:
+    """Reclaim free pages. Full VACUUM only with the engine stopped — with a writer live, the
+    incremental pass is the honest one (the app keeps auto_vacuum on for exactly that)."""
+    from orderflow_system.desktop import engine as engine_mod
+    from orderflow_system.desktop import storage as storage_mod
+
+    live = getattr(engine_mod.engine, "_system", None) is not None
+    result = await asyncio.to_thread(storage_mod.vacuum_now, config_store.db_path(),
+                                     allow_full=not live)
+    result["engine_running"] = live
+    _storage_cache["at"] = 0.0
+    _storage_cache["data"] = None
+    return {"ok": bool(result.get("ok")), **result}
+
+
+@router.post("/storage/report")
+async def storage_report_mail() -> dict[str, Any]:
+    """Email the storage report (plain text + a CSV attachment) to the configured address."""
+    from orderflow_system.desktop import storage as storage_mod
+
+    cfg = config_store.load_config()
+    settings = storage_mod.clamp_storage_settings(cfg)
+    config_dir = config_store.config_dir()
+    target = storage_mod.resolved_target(settings, config_dir)
+    usage = await asyncio.to_thread(storage_mod.usage_snapshot, config_store.db_path(),
+                                    config_dir=config_dir, target=target)
+    store = storage_mod.load_usage_store(storage_mod.usage_store_path(config_dir))
+    data_block = dict(cfg.get("data") or {})
+    days = int(data_block.get("retention_days", 0) or 0)
+    growth = storage_mod.growth_report(store.get("samples", []),
+                                       usage["db_bytes"] + usage["wal_bytes"], retention_days=days)
+    subject, body, csv_text = storage_mod.build_report(
+        usage, growth,
+        {"days": days, "prune_interval_hours": data_block.get("prune_interval_hours", 0),
+         "session_start_hour": data_block.get("session_start_hour", 0)},
+        await asyncio.to_thread(storage_mod.list_backups, target), config_store.load_last_prune())
+    result = await storage_mod.email_report(cfg, subject, body, attachments=[
+        ("storage-summary.csv", csv_text.encode("utf-8"), "text/csv")])
+    return {"ok": bool(result.get("ok")), "subject": subject, "error": result.get("error", ""),
+            "preview": body}
+
+
+# ──────────────────────────────────────────────────────────────
+# Program updates (R7): check on load, regularly while open, download on request
+# ──────────────────────────────────────────────────────────────
+
+_update_state: dict[str, Any] = {"checking": False}
+
+
+def _updates_state() -> dict[str, Any]:
+    """The remembered check result + the settings in force + the running build. Cheap, no wire."""
+    from orderflow_system.desktop import updater as updater_mod
+
+    cfg = config_store.load_config()
+    settings = updater_mod.clamp_update_settings(cfg)
+    cached = updater_mod.load_cache(updater_mod.cache_path(config_store.config_dir()))
+    state: dict[str, Any] = dict(cached) if isinstance(cached, dict) else {}
+    state.setdefault("current", updater_mod.local_version())
+    state.setdefault("release_page", updater_mod.RELEASE_PAGE)
+    latest_version = str((state.get("latest") or {}).get("version") or "")
+    skipped = str(settings.get("skipped_version") or "")
+    state["skipped"] = bool(skipped) and latest_version == skipped
+    if state["skipped"]:
+        state["update_available"] = False
+    return {"ok": True, "settings": settings, "checking": bool(_update_state["checking"]),
+            "download_dir": str(updater_mod.resolved_download_dir(settings, config_store.config_dir())),
+            "state": state}
+
+
+async def _update_auto_download(result: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
+    """Fetch the release's artefact — the mode='download' half of a check. Never raises."""
+    from orderflow_system.desktop import updater as updater_mod
+
+    asset = (result.get("latest") or {}).get("asset") or {}
+    if not asset.get("url"):
+        return {"ok": False, "error": "the release carries no downloadable artefact"}
+    dest = updater_mod.resolved_download_dir(settings, config_store.config_dir())
+    done = await asyncio.to_thread(updater_mod.download_asset, str(asset["url"]), dest,
+                                   name=str(asset.get("name") or ""),
+                                   expected_sha256=str(asset.get("sha256") or ""))
+    if done.get("ok"):
+        logger.info("[update] artefact ready: %s (%d bytes, verified=%s)",
+                    done.get("path"), int(done.get("bytes") or 0), done.get("verified"))
+    else:
+        logger.warning("[update] download failed: %s", done.get("error"))
+    return done
+
+
+async def _run_update_check(settings: dict[str, Any]) -> dict[str, Any]:
+    """One check: off the loop, remembered to disk, stamped into the config. Never raises."""
+    from orderflow_system.desktop import updater as updater_mod
+
+    if _update_state["checking"]:
+        return _updates_state()
+    _update_state["checking"] = True
+    try:
+        result = await asyncio.to_thread(updater_mod.check_for_update, channel=str(settings.get("channel") or "stable"))
+    finally:
+        _update_state["checking"] = False
+    config_dir = config_store.config_dir()
+    updater_mod.save_cache(updater_mod.cache_path(config_dir), result)
+    try:                                    # the interval must survive a restart to mean anything
+        config_store.merge_config({"updates": {"last_check_ms": int(result.get("checked_at_ms") or 0)}})
+    except Exception:                       # noqa: BLE001 - a stamp is not worth a failure
+        logger.debug("could not record the update check time", exc_info=True)
+    latest = (result.get("latest") or {}).get("version")
+    mine = (result.get("current") or {}).get("display")
+    if result.get("ok") and result.get("update_available"):
+        logger.info("[update] %s is available (running %s)", latest, mine)
+        fresh = updater_mod.clamp_update_settings(config_store.load_config())
+        if fresh["mode"] == "download":
+            await _update_auto_download(result, fresh)
+    elif not result.get("ok"):
+        logger.info("[update] check failed: %s", result.get("error"))
+    else:
+        logger.info("[update] up to date (%s)", mine)
+    return _updates_state()
+
+
+@router.get("/update/status")
+async def update_status(refresh: int = Query(default=0)) -> dict[str, Any]:
+    """The remembered state — and a check when the interval has passed (or `?refresh=1`).
+
+    The panel calls this on load and then on its own slow cadence, so "check on load" and "check
+    regularly" are the same debounced call: the wire is asked once per interval, not once per page.
+    """
+    from orderflow_system.desktop import updater as updater_mod
+
+    settings = updater_mod.clamp_update_settings(config_store.load_config())
+    import time as _time
+
+    if (bool(refresh) or updater_mod.check_due(settings, now_ms=int(_time.time() * 1000))) \
+            and not _update_state["checking"]:
+        asyncio.create_task(_run_update_check(settings))    # the panel never waits on the network
+    return _updates_state()
+
+
+@router.post("/update/check")
+async def update_check_now() -> dict[str, Any]:
+    """Ask now, whoever asked (the menu's Check now). Waits for the answer; a check is seconds."""
+    from orderflow_system.desktop import updater as updater_mod
+
+    settings = updater_mod.clamp_update_settings(config_store.load_config())
+    return await _run_update_check(settings)
+
+
+@router.post("/update/skip")
+async def update_skip(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Remember "not this one" — or clear it by sending an empty version."""
+    version = str((payload or {}).get("version") or "").strip()[:40]
+    config_store.merge_config({"updates": {"skipped_version": version}})
+    return _updates_state()
+
+
+@router.post("/update/download")
+async def update_download(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Fetch the release artefact (the picked one, or the name/url the caller asked for).
+
+    The file lands in the update folder — `<config>/updates` unless the user pointed elsewhere —
+    verified against the release's own SHA-256 when GitHub supplies one.
+    """
+    from orderflow_system.desktop import updater as updater_mod
+
+    body = dict(payload or {})
+    settings = updater_mod.clamp_update_settings(config_store.load_config())
+    state = _updates_state()["state"]
+    latest = dict(state.get("latest") or {})
+    assets = [a for a in (latest.get("assets") or []) if isinstance(a, dict)]
+    wanted = str(body.get("name") or "").strip()
+    url = str(body.get("url") or "").strip()
+    sha = ""
+    if wanted:
+        match = next((a for a in assets if str(a.get("name")) == wanted), None)
+        if match is None:
+            return {"ok": False, "error": f"the release carries no asset named {wanted!r}"}
+        url, sha = str(match.get("url") or ""), str(match.get("sha256") or "")
+    elif not url:
+        asset = latest.get("asset") or {}
+        url, sha = str(asset.get("url") or ""), str(asset.get("sha256") or "")
+    if not url:
+        return {"ok": False, "error": "nothing to download — run a check first"}
+    dest = updater_mod.resolved_download_dir(settings, config_store.config_dir())
+    done = await asyncio.to_thread(updater_mod.download_asset, url, dest,
+                                   name=str(body.get("filename") or ""), expected_sha256=sha)
+    return {"ok": bool(done.get("ok")), "download": done, "download_dir": str(dest)}
+
+
+@router.post("/update/settings")
+async def update_settings(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Save the updates block (clamped) — mode, interval, channel, download folder."""
+    from orderflow_system.desktop import updater as updater_mod
+
+    body = dict(payload or {})
+    block = {k: v for k, v in body.items() if k in updater_mod.DEFAULT_SETTINGS}
+    if not block:
+        return {"ok": False, "error": "nothing to save — send mode / interval_hours / channel / download_dir"}
+    saved = config_store.merge_config({"updates": block})
+    return {"ok": True, "settings": updater_mod.clamp_update_settings(saved)}
+
+
+@router.post("/update/open")
+async def update_open(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Open the update folder in the file browser, or the release page in the default browser."""
+    import os as _os
+    import subprocess
+    import sys as _sys
+    import webbrowser
+
+    from orderflow_system.desktop import updater as updater_mod
+
+    what = str((payload or {}).get("what") or "downloads").strip().lower()
+    if what == "page":
+        try:
+            webbrowser.open(updater_mod.RELEASE_PAGE)
+        except Exception as exc:                     # noqa: BLE001 - a headless run has no browser
+            return {"ok": False, "error": str(exc), "url": updater_mod.RELEASE_PAGE}
+        return {"ok": True, "opened": updater_mod.RELEASE_PAGE}
+    settings = updater_mod.clamp_update_settings(config_store.load_config())
+    folder = updater_mod.resolved_download_dir(settings, config_store.config_dir())
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        if _sys.platform.startswith("win"):
+            _os.startfile(str(folder))               # type: ignore[attr-defined]
+        elif _sys.platform == "darwin":
+            subprocess.Popen(["open", str(folder)])
+        else:
+            subprocess.Popen(["xdg-open", str(folder)])
+    except Exception as exc:                         # noqa: BLE001
+        return {"ok": False, "error": str(exc), "path": str(folder)}
+    return {"ok": True, "path": str(folder)}
+
+
+# ──────────────────────────────────────────────────────────────
+# Journal (R10) — the trade journal and its statement
+# ──────────────────────────────────────────────────────────────
+
+def _journal_rows(limit: int = 1000) -> list[dict[str, Any]]:
+    """Read the journal table read-only: the panel and the statement both work with the app down."""
+    import sqlite3
+
+    path = Path(config_store.db_path())
+    if not path.exists():
+        return []
+    conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    try:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT id, instrument, direction, entry_time_ms, exit_time_ms, entry_price, "
+            "exit_price, stop_loss, take_profit, pnl_ticks, rr_ratio, signals_json, notes "
+            "FROM trade_journal ORDER BY COALESCE(exit_time_ms, entry_time_ms, 0) DESC LIMIT ?",
+            (int(limit),))
+        return [dict(row) for row in cursor]
+    except sqlite3.OperationalError:            # a database from before the journal existed
+        return []
+    finally:
+        conn.close()
+
+
+@router.get("/journal")
+async def journal_view(limit: int = Query(default=500, ge=1, le=5000)) -> dict[str, Any]:
+    """The journal: rows, their statistics and the daily curve. Read-only."""
+    from orderflow_system.desktop import journal as journal_mod
+
+    rows = await asyncio.to_thread(_journal_rows, limit)
+    trades = journal_mod.normalise_trades(rows)
+    return {"ok": True, "rows": rows, "count": len(rows), "stats": journal_mod.stats(trades),
+            "daily": journal_mod.daily_series(trades)}
+
+
+@router.post("/journal/note")
+async def journal_note(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Write one trade's note — the only field the user edits in place."""
+    import sqlite3
+
+    body = dict(payload or {})
+    try:
+        trade_id = int(body.get("id"))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "which trade? send its id"}
+    note = str(body.get("notes") or "")[:2000]
+    conn = sqlite3.connect(str(config_store.db_path()), timeout=15)
+    try:
+        conn.execute("PRAGMA busy_timeout=15000")
+        conn.execute("UPDATE trade_journal SET notes = ? WHERE id = ?", (note, trade_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "id": trade_id, "notes": note}
+
+
+@router.post("/journal/statement")
+async def journal_statement() -> dict[str, Any]:
+    """Write the broker-style HTML statement into the exports folder (R10) and return its path."""
+    import time as _time
+
+    from orderflow_system.desktop import journal as journal_mod
+
+    rows = await asyncio.to_thread(_journal_rows, 5000)
+    trades = journal_mod.normalise_trades(rows)
+    try:
+        from orderflow_system import __version__
+        from orderflow_system.desktop.help import APP_CHANNEL
+
+        version = f"{__version__}-{APP_CHANNEL}"
+    except Exception:                            # noqa: BLE001 - a header without a version is fine
+        version = ""
+    html = journal_mod.html_statement(
+        trades, journal_mod.stats(trades),
+        meta={"app": "ModFlow OrderFlow Analysis Suite", "version": version,
+              "account": "local journal — simulated and manual trades"})
+    folder = _exports_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    name = "journal-statement-" + _time.strftime("%Y%m%d-%H%M%S", _time.gmtime()) + ".html"
+    target = folder / name
+    target.write_text(html, encoding="utf-8")
+    logger.info("[journal] statement written: %s (%d trades)", target, len(trades))
+    return {"ok": True, "path": str(target), "bytes": len(html), "trades": len(trades)}
+
+
+# ──────────────────────────────────────────────────────────────
+# Economic calendar (R11) — keyless weekly feed, cached
+# ──────────────────────────────────────────────────────────────
+
+def _calendar_cache_path() -> Path:
+    return config_store.config_dir() / "calendar-cache.json"
+
+
+@router.get("/calendar")
+async def calendar_view(hours: int = Query(default=48, ge=1, le=720),
+                        currencies: str = Query(default=""),
+                        impact: str = Query(default="high")) -> dict[str, Any]:
+    """The releases coming up, filtered — with the honest state of the feed it came from.
+
+    The feed is cached for four hours by the module; when it cannot be reached the payload carries
+    ``stale`` and the error, and the panel says "the feed is unreachable" instead of inventing dates.
+    """
+    import time as _time
+
+    from orderflow_system.desktop import calendar as calendar_mod
+
+    payload = await asyncio.to_thread(calendar_mod.fetch_events_cached, _calendar_cache_path(),
+                                      ttl_s=4 * 3600)
+    events = [e for e in (payload.get("events") or []) if isinstance(e, dict)]
+    up = calendar_mod.upcoming(events, now_ms=int(_time.time() * 1000), within_hours=float(hours),
+                               currencies=currencies or None, min_impact=impact)
+    return {"ok": bool(payload.get("ok")), "stale": bool(payload.get("stale")),
+            "error": str(payload.get("error") or ""), "fetched_at_ms": payload.get("fetched_at_ms"),
+            "events": up, "upcoming": len(up), "total": len(events),
+            "window_hours": hours, "min_impact": impact,
+            "source": "Forex Factory weekly calendar JSON (nfs.faireconomy.media) — keyless"}
+
+
+@router.post("/data/import")
+async def data_import(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Load a CSV of prints or bars into the suite's own database (R8).
+
+    Takes the app's own export shape, an MT5/Sierra/Databento-style CSV, or no header at all;
+    timestamps may be epoch seconds, epoch milliseconds or ISO 8601, and the delimiter is sniffed.
+    Unreadable rows are counted with their reason — nothing is guessed. Prints are matched against
+    what is already stored in the imported window (so re-running a file does not double the tape);
+    bars replace per (instrument, timestamp, timeframe), so a correction re-imports as a correction.
+    """
+    from orderflow_system.desktop import dataport
+
+    body = dict(payload or {})
+    text = str(body.get("text") or "")
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="no CSV text in the body")
+    if len(text) > 40_000_000:
+        raise HTTPException(status_code=413, detail=(
+            "that file is over 40 MB — split it by day; a day of prints is what the views read at once"))
+    kind = "candles" if str(body.get("kind") or "ticks").lower().startswith("candle") else "ticks"
+    symbol = str(body.get("symbol") or "").strip().upper()
+    has_header = body.get("has_header")
+    parsed = (dataport.parse_candles if kind == "candles" else dataport.parse_ticks)(
+        text, symbol=symbol, has_header=has_header if isinstance(has_header, bool) else None)
+    if not parsed["rows"]:
+        return {"ok": False, "kind": kind, "error": "no readable rows",
+                "errors": parsed["errors"][:10], "delimiter": parsed["delimiter"],
+                "headers": parsed["headers"]}
+    result = await asyncio.to_thread(dataport.import_rows, str(config_store.db_path()),
+                                     kind, parsed["rows"])
+    stamps = [row[1] for row in parsed["rows"]]
+    logger.info("[data] imported %d %s row(s) from %s (skipped %d, bad rows %d)",
+                result["inserted"], kind, str(body.get("name") or "a pasted CSV")[:60],
+                result["skipped_existing"], parsed["skipped"])
+    _storage_cache["at"] = 0.0
+    _storage_cache["data"] = None
+    return {"ok": True, "kind": kind, "inserted": result["inserted"],
+            "skipped_existing": result["skipped_existing"],
+            "checked_existing": result["checked_existing"],
+            "bad_rows": parsed.get("bad_rows", parsed["skipped"]),
+            "deduped": parsed.get("deduped", 0), "errors": parsed["errors"][:10],
+            "delimiter": parsed["delimiter"], "headers": parsed["headers"],
+            "instrument": symbol or (parsed["rows"][0][0] if parsed["rows"] else ""),
+            "first_ms": min(stamps), "last_ms": max(stamps)}
+
+
+@router.post("/data/export")
+async def data_export(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Write one table (or one instrument's window) to a CSV in the exports folder (R8).
+
+    RFC 4180, CRLF, ISO 8601 UTC stamps — the same shape the backup writer uses, so an export can be
+    re-imported through /data/import (pinned by test_dataport.py). Big tables travel gzipped.
+    """
+    from orderflow_system.desktop import dataport
+
+    body = dict(payload or {})
+    kind = "candles" if str(body.get("kind") or "ticks").lower().startswith("candle") else "ticks"
+    symbol = str(body.get("symbol") or "").strip().upper()
+
+    def _ms(value: Any) -> Any:
+        try:
+            return int(value) if value not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    try:
+        limit = max(1, min(5_000_000, int(body.get("limit") or 2_000_000)))
+    except (TypeError, ValueError):
+        limit = 2_000_000
+    done = await asyncio.to_thread(dataport.export_rows, str(config_store.db_path()), kind,
+                                   str(_exports_dir()), symbol=symbol,
+                                   from_ms=_ms(body.get("from_ms")), to_ms=_ms(body.get("to_ms")),
+                                   limit=limit)
+    logger.info("[data] exported %d %s row(s) to %s", done["rows"], kind, done["path"])
+    return {"ok": True, "kind": kind, "instrument": symbol, **done}
+
+
+@router.post("/storage/cleanup")
+async def storage_cleanup(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Sweep the derived files: the venue backfill cache, and exports older than the window.
+
+    Derived (re-downloadable) or re-creatable only — never the database, the config or a backup.
+    """
+    import time as _time
+
+    from orderflow_system.data import backfill as backfill_mod
+
+    body = dict(payload or {})
+    try:
+        keep_days = max(1, min(365, int(body.get("keep_days") or 30)))
+    except (TypeError, ValueError):
+        keep_days = 30
+    cache_dir = Path(config_store.backfill_cache_dir())
+    cache_removed = await asyncio.to_thread(backfill_mod.prune_cache, cache_dir, keep_days=keep_days)
+    exports = _exports_dir()
+    exports_removed: list[str] = []
+    cutoff = _time.time() - keep_days * 86400
+    if exports.exists():
+        for item in exports.iterdir():
+            try:
+                if item.is_file() and item.stat().st_mtime < cutoff:
+                    item.unlink()
+                    exports_removed.append(item.name)
+            except OSError:
+                continue
+    _storage_cache["at"] = 0.0
+    _storage_cache["data"] = None
+    logger.info("[storage] cleanup: %d cache file(s), %d old export(s) removed (keep %d d)",
+                cache_removed, len(exports_removed), keep_days)
+    return {"ok": True, "cache_files_removed": cache_removed, "exports_removed": exports_removed,
+            "keep_days": keep_days, "cache_dir": str(cache_dir), "exports_dir": str(exports)}
 
 
 @router.post("/logs/clear")
@@ -1828,6 +2955,14 @@ def _exports_dir() -> Path:
     if base is None:
         base = Path(os.environ.get("APPDATA") or Path.home()) / "OrderFlowAnalysisPro"
     return base / "exports"
+
+
+def _backups_dir() -> Path:
+    """Where the backup job writes: the configured target, or the app's own backups folder."""
+    from orderflow_system.desktop import storage as storage_mod
+
+    settings = storage_mod.clamp_storage_settings(config_store.load_config())
+    return storage_mod.resolved_target(settings, config_store.config_dir())
 
 
 @router.post("/export/save")
@@ -1912,8 +3047,29 @@ async def workspaces_post(payload: dict = Body(default={})) -> dict[str, Any]:
 
 def _layouts_state(block: dict[str, Any]) -> dict[str, Any]:
     items = block.get("items") if isinstance(block.get("items"), dict) else {}
+    versions_in = block.get("versions") if isinstance(block.get("versions"), dict) else {}
+    versions: dict[str, list[dict[str, Any]]] = {}
+    for ident, ring in versions_in.items():
+        if isinstance(ring, list) and ring:
+            versions[str(ident)] = [{"at": int(row.get("at") or 0), "name": str(row.get("name") or "")}
+                                    for row in ring[:10] if isinstance(row, dict)]
     return {"mode": block.get("mode") or "classic", "active": block.get("active") or "",
-            "items": items, "count": len(items)}
+            "items": items, "count": len(items), "versions": versions}
+
+
+def _push_layout_version(block: dict[str, Any], ident: str, entry: dict[str, Any]) -> None:
+    """Keep the layout as it was before this write — newest first, capped (T2's undo)."""
+    import time as _time
+
+    versions = block.get("versions")
+    if not isinstance(versions, dict):
+        versions = block["versions"] = {}
+    ring = versions.get(ident)
+    if not isinstance(ring, list):
+        ring = versions[ident] = []
+    ring.insert(0, {"at": int(_time.time() * 1000), "name": str(entry.get("name") or ident)[:40],
+                    "entry": json.loads(json.dumps(entry))})
+    del ring[config_store.LAYOUT_VERSIONS_MAX:]
 
 
 @router.get("/layouts")
@@ -1921,12 +3077,18 @@ async def layouts_get() -> dict[str, Any]:
     """Every saved terminal layout, the boot mode and the active layout (straight from the store)."""
     cfg = config_store.load_config()
     block = cfg.get("layouts") if isinstance(cfg.get("layouts"), dict) else {}
-    return {"ok": True, **_layouts_state(block)}
+    state = _layouts_state(block)
+    if os.environ.get("OFAP_SAFE_START") == "1":
+        # T2: a safe start boots Classic no matter what the store says; the store is not written.
+        state["mode"] = "classic"
+        state["safe"] = True
+    return {"ok": True, **state}
 
 
 @router.post("/layouts")
 async def layouts_post(payload: dict = Body(default={})) -> dict[str, Any]:
-    """One write per call: mode · save · import · duplicate · rename · delete · activate · export.
+    """One write per call: mode · save · import · duplicate · rename · delete · activate · export ·
+    restore_version (a layout's previous version comes back from the ring T2 keeps).
 
     Actions apply in that order, so `{"save": …, "activate": …}` is a single round trip. The response
     carries the state the store *accepted* — the store's sanitiser is the authority, so a layout it
@@ -1983,6 +3145,9 @@ async def layouts_post(payload: dict = Body(default={})) -> dict[str, Any]:
         wanted_save = str(entry.get("id") or "").strip().lower()
         if not wanted_save:
             wanted_save = entry["id"] = "ly" + uuid.uuid4().hex[:8]
+        previous = items.get(wanted_save)
+        if isinstance(previous, dict):
+            _push_layout_version(block, wanted_save, previous)
         items[wanted_save] = entry
 
     if payload.get("duplicate"):
@@ -2007,9 +3172,26 @@ async def layouts_post(payload: dict = Body(default={})) -> dict[str, Any]:
         ident = str(payload["delete"]).strip().lower()
         if ident in items:
             actions.append("delete")
+            _push_layout_version(block, ident, items[ident])       # a delete is recoverable
             items.pop(ident, None)
             if block.get("active") == ident:
                 block["active"] = ""
+
+    if isinstance(payload.get("restore_version"), dict):
+        rv = payload["restore_version"]
+        ident = str(rv.get("id") or "").strip().lower()
+        try:
+            at = int(rv.get("at") or 0)
+        except (TypeError, ValueError):
+            at = 0
+        ring = (block.get("versions") or {}).get(ident)
+        hit = next((row for row in ring if isinstance(row, dict)
+                    and int(row.get("at") or 0) == at), None) if isinstance(ring, list) else None
+        if isinstance(hit, dict) and isinstance(hit.get("entry"), dict):
+            actions.append("restore_version")
+            items[ident] = json.loads(json.dumps(hit["entry"]))
+        else:
+            refused = refused or f"no version of {ident!r} at {at}"
 
     if isinstance(payload.get("activate"), str) and payload["activate"]:
         ident = payload["activate"].strip().lower()
@@ -2078,7 +3260,10 @@ async def windows_get() -> dict[str, Any]:
 
 @router.post("/windows")
 async def windows_post(payload: dict = Body(default={})) -> dict[str, Any]:
-    """Open / close / focus / pin one auxiliary window.
+    """Open / close / focus / pin / reset one auxiliary window — the page's own window manager.
+    A reset takes a window home: its stored geometry is dropped and it is re-placed on the primary
+    screen (reopened there when open), which is the rescue for a window stranded on a monitor that
+    is gone.
 
     Every path answers with the *resulting* state, so the shell adopts what happened rather than
     what it asked for: a refusal with a reason when the cap is reached, the resolved placement
@@ -2139,6 +3324,39 @@ async def windows_post(payload: dict = Body(default={})) -> dict[str, Any]:
                 "screen_label": placement.get("screen_label", ""), "windows_set": stored,
                 **_windows_state()}
 
+    if action == "reset":
+        # T2: take a window home — geometry dropped, re-placed on the primary screen, reopened
+        # there when it was open. This is the in-app rescue for the field's classic failure:
+        # "the window became unreachable" after a monitor change.
+        wid = str(payload.get("id") or "").strip().lower()
+        rows = windows_mod.records()
+        record = next((r for r in rows if r["id"] == wid), None)
+        if record is None:
+            return {"ok": False, "action": action, "error": "no window with id %r" % wid,
+                    **_windows_state()}
+        try:
+            screens = host.screens()
+        except Exception:
+            screens = []
+        home = windows_mod.place_aux({**record, "screen_key": None, "x": None, "y": None},
+                                     screens, count=1, screen_index=0)
+        was_open = wid in set(host.open_ids() or [])
+        if was_open:
+            try:
+                host.close(wid)
+            except Exception:
+                logger.debug("window close failed during reset", exc_info=True)
+            windows_mod.drop_record(wid)
+        windows_mod.add_record(home)
+        try:
+            host.open(home)
+        except Exception as exc:
+            logger.warning("window reset open failed", exc_info=True)
+            return {"ok": False, "action": action,
+                    "error": "the window host refused: %s" % exc, **_windows_state()}
+        return {"ok": True, "action": action, "reset": wid,
+                "screen_label": home.get("screen_label", ""), **_windows_state()}
+
     if action in ("close", "focus", "ontop"):
         wid = str(payload.get("id") or "").strip().lower()
         if not wid:
@@ -2188,7 +3406,7 @@ async def windows_post(payload: dict = Body(default={})) -> dict[str, Any]:
         return {"ok": True, "action": action, "closed": closed, **_windows_state()}
 
     return {"ok": False, "action": action,
-            "error": "unknown action %r (open, close, focus, ontop, close_all)" % action,
+            "error": "unknown action %r (open, close, focus, ontop, reset, close_all)" % action,
             **_windows_state()}
 
 

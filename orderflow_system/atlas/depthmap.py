@@ -90,6 +90,7 @@ class DepthHeatmap:
         wall_quantile: float = 0.97,
         wall_age_ms: int = 120_000,
         upper_cutoff_pct: float = 5.0,
+        upper_cutoff_abs: float = 0.0,
         pull_pct: float = 0.6,
         pull_window_ms: int = 3000,
         pull_near_ticks: float = 6.0,
@@ -104,6 +105,9 @@ class DepthHeatmap:
         self.wall_quantile = float(wall_quantile)
         self.wall_age_ms = int(wall_age_ms)
         self.upper_cutoff_pct = float(upper_cutoff_pct)
+        # B2: an exact saturation size; 0 means "follow the percentile cut-off". Display-only —
+        # it changes `scale_max` in the snapshot, never a value or a detection.
+        self.upper_cutoff_abs = float(upper_cutoff_abs)
         # the reference platform's "extend last known volume", OFF by default here for a protocol
         # reason: Bybit's orderbook deltas *delete* a level when its size reaches zero, so
         # an absent level means "no orders there", not "not reported". Carrying those
@@ -230,7 +234,7 @@ class DepthHeatmap:
         # flipping carry-forward (or the cutoff) has to take effect immediately, and
         # with a data-only key it would wait for the next ingest to be noticed.
         key = (self._version, int(columns), int(max_rows), bool(self.carry_forward),
-               float(self.upper_cutoff_pct))
+               float(self.upper_cutoff_pct), float(self.upper_cutoff_abs))
         cached = self._snapshot_cache
         if cached is not None and cached[0] == key:
             out = dict(cached[1])
@@ -303,6 +307,10 @@ class DepthHeatmap:
             cut = max(0.0, min(50.0, float(self.upper_cutoff_pct)))
             idx = min(len(flat) - 1, int(round((1.0 - cut / 100.0) * (len(flat) - 1))))
             scale_max = flat[idx]
+            # B2: a pinned absolute ceiling wins over the percentile one; the flat[0] guard still
+            # applies, so a pin below the smallest size saturates everything rather than zeroing.
+            if float(self.upper_cutoff_abs) > 0:
+                scale_max = float(self.upper_cutoff_abs)
             scale_max = max(scale_max, flat[0])
         else:
             scale_max = 0.0

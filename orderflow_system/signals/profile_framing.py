@@ -31,6 +31,15 @@ class LevelType(Enum):
     LVN = "lvn"
     MERGED_VAH = "merged_vah"
     MERGED_VAL = "merged_val"
+    # the level radar's own sources (fold-in plan §4 / G1): the machine's net widens beyond
+    # profile qualifiers to these, offered through the hub's level hook (U3).
+    NODE = "node"
+    UNFINISHED = "unfinished"
+    VIRGIN_POC = "virgin_poc"
+    HTF_POC = "htf_poc"
+    AREA_POC = "area_poc"
+    VWAP_BAND = "vwap_band"
+    STACKED = "stacked"
 
 
 @dataclass

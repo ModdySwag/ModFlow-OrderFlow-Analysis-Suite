@@ -290,3 +290,19 @@ def test_feed_history_seeding_emits_ticks_mapped_to_the_app_symbol():
     assert {s for s, _t in got} == {"AAPL", "BTCUSDT"}, "history lands on the app's own symbols"
     stamp = got[0][1].timestamp_ms
     assert stamp == 1789479000000 and all(t.timestamp_ms >= stamp for _s, t in got)
+def test_a_repeated_snapshot_print_is_delivered_once():
+    """A REST snapshot repeats its `latestTrade` until a new print exists; re-delivering it as a
+    fresh tick counted the same fill over and over into volume and delta."""
+    import asyncio
+    transport = StubTransport({"clock": (200, CLOCK_OPEN),
+                               "snapshots": (200, {"AAPL": SNAPSHOT_AAPL})})
+    data = AlpacaData("k", "s", transport=transport)
+    ticks: list[tuple[str, object]] = []
+    feed = AlpacaFeed({"AAPL": "AAPL"}, on_tick=lambda s, t: ticks.append((s, t)), data=data)
+
+    first = asyncio.run(feed.poll_once())
+    second = asyncio.run(feed.poll_once())
+
+    assert first["equities"] == 1 and len(ticks) == 1
+    assert second["equities"] == 0 and second["unchanged"] == 1, second
+    assert len(ticks) == 1, "the same print must not be delivered twice"

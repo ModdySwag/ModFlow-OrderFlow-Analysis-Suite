@@ -190,10 +190,15 @@ class FeedSession:
                     await self._on_connected(self._conn)
                 heartbeat = asyncio.create_task(self._heartbeat_loop())
                 async for raw in self._conn:            # ← never cancelled from outside
-                    await self._on_frame(raw)
+                    data_frame = await self._on_frame(raw)
                     self._frames += 1
                     self._last_frame_ms = self._now_ms()
-                    self._backoff.record_parsed()       # the ladder resets on DATA, not on connect
+                    if data_frame is not False:
+                        # The ladder resets on DATA, not on connect — and not on a subscribe ack
+                        # or a pong either: a venue that accepts, acks and then stalls must keep
+                        # escalating instead of hammering at 1 s. A handler returns False for a
+                        # frame that carried no market data; None (the common case) means data.
+                        self._backoff.record_parsed()
             except asyncio.CancelledError:
                 raise
             except BaseException as exc:                # noqa: BLE001 — a feed must survive anything

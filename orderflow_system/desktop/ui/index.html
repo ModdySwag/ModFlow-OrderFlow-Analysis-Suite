@@ -32,7 +32,10 @@
 var d = document.documentElement;
 if (v.theme) d.dataset.theme = v.theme;
 if (v.accent) d.dataset.accent = v.accent;
-if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: the defaults stand */ } })();
+if (v.density) d.dataset.density = v.density;
+if (v.contrast) d.dataset.contrast = v.contrast;
+if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale)); d.style.zoom = String(v.scale); }
+} catch (e) { /* storage blocked: the defaults stand */ } })();
 </script>
 </head>
 <body>
@@ -47,6 +50,9 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                 <span class="brand-name">ModFlow</span>
                 <span class="brand-sub">Orderflow Analysis Suite</span>
             </div>
+            <!-- §92 post-script: the rail's hide control lives discreetly by the logo (top), not
+                 in the footer — same #railHide id chrome.js and the shortcut prompts already use. -->
+            <button id="railHide" class="rail-collapse" title="Hide the side rail">‹</button>
         </div>
 
         <button class="nav-item active" data-view="overview"><span class="nav-icon">◈</span> Overview</button>
@@ -57,6 +63,7 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
         <button class="nav-item" data-view="ofx" title="Order-flow engine: split-candle footprint matrix, DOM heatmap with liquidity decay, execution sweeps, CVD ribbon and the crosshair HUD."><span class="nav-icon">◫</span> Engine</button>
         <button class="nav-item" data-view="depth"><span class="nav-icon">≡</span> Depth</button>
         <button class="nav-item" data-view="tape"><span class="nav-icon">⇅</span> Time &amp; Sales</button>
+        <button class="nav-item" data-view="marketwatch" title="The source’s own board, live: the MetaTrader 5 terminal’s Market Watch when MT5 is chosen, the exchange’s whole board on Bybit."><span class="nav-icon">◧</span> Market Watch</button>
         <button class="nav-item" data-view="trackers"><span class="nav-icon">⚡</span> Trackers <span class="nav-badge" id="navTrackerCount">0</span></button>
         <button class="nav-item" data-view="cvd"><span class="nav-icon">∿</span> CVD</button>
         <button class="nav-item" data-view="profile"><span class="nav-icon">▥</span> Profile</button>
@@ -64,9 +71,11 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
         <button class="nav-item" data-view="signals"><span class="nav-icon">◉</span> Signals <span class="nav-badge" id="navSignalCount">0</span></button>
         <button class="nav-item" data-view="strategy"><span class="nav-icon">⛭</span> Strategy</button>
         <button class="nav-item" data-view="performance"><span class="nav-icon">◔</span> Performance</button>
+        <button class="nav-item" data-view="journal" title="The trade journal: your own trades, their statistics (win rate, profit factor, expectancy, Sharpe), and a broker-style HTML statement."><span class="nav-icon">✎</span> Journal</button>
         <div class="rail-spacer"></div>
         <button class="nav-item" data-view="replay"><span class="nav-icon">⟲</span> Replay</button>
         <button class="nav-item" data-view="alerts"><span class="nav-icon">✦</span> Alerts <span class="nav-badge" id="navAlertCount">0</span></button>
+        <button class="nav-item" data-view="inbox" title="Every alert the engine fired, as tiles you can filter and act on (T14/B7)"><span class="nav-icon">◈</span> Inbox <span class="nav-badge" id="navInboxCount">0</span></button>
         <button class="nav-item" data-view="instruments"><span class="nav-icon">☰</span> Instruments</button>
         <button class="nav-item" data-view="alpaca" title="Link a US brokerage account: stocks, ETFs, options, crypto, news and the market calendar (Alt+A)."><span class="nav-icon">⌂</span> Alpaca</button>
         <button class="nav-item" data-view="platforms" title="Optional external data bridge (DTC). No account details are stored."><span class="nav-icon">⌸</span> Platforms</button>
@@ -74,6 +83,7 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
         <button class="nav-item" data-view="logs"><span class="nav-icon">▣</span> Logs</button>
         <button class="nav-item" data-view="watchlist"><span class="nav-icon">▤</span> Watchlist</button>
         <button class="nav-item" data-view="news"><span class="nav-icon">✉</span> News</button>
+        <button class="nav-item" data-view="calendar" title="The economic calendar: this week's releases by impact and currency, with optional alerts ahead of high-impact events (keyless feed)."><span class="nav-icon">▦</span> Calendar</button>
         <button class="nav-item" data-view="fundamentals" title="Filed fundamentals for the active instrument: SEC EDGAR annual filings for US filers, CoinGecko market data for crypto (no key, no account)"><span class="nav-icon">▧</span> Fundamentals</button>
         <button class="nav-item" data-view="options" title="Deribit's public crypto option chain: expiries, strikes, IV and the Greeks (BTC/ETH/SOL by currency; no key, no account)."><span class="nav-icon">◇</span> Options</button>
         <div class="rail-footer">
@@ -84,6 +94,10 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
         </div>
     </aside>
 
+    <!-- The way back for the rail: an arrow at the left edge, visible exactly while the rail is
+         hidden — hide and return both live where the eye already is. -->
+    <button id="railReveal" class="rail-reveal" title="Show the side rail (R)">❯</button>
+
     <!-- ═══ Content ═══ -->
     <div class="content">
         <nav id="menuBar" class="menubar" role="menubar" aria-label="Application menu"></nav>
@@ -93,14 +107,24 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
            mode; the terminal bar carries its own copy, so exactly one is ever visible. -->
       <span class="top-wins" id="topWins"></span>
       <span class="brand-mini">ModFlow</span>
+      <button id="railToggle" class="chrome-toggle" aria-pressed="false" title="Hide the side rail (R)">⇤</button>
             <div class="symbol-picker">
                 <label for="symbolSelect">Instrument</label>
                 <select id="symbolSelect"></select>
             </div>
-            <span class="pill" id="enginePill"><span class="dot"></span> <span id="enginePillText">Stopped</span></span>
+            <span class="pill" id="enginePill"
+                  data-hint-title="The engine"
+                  data-hint-body="The streaming process behind every panel. It only streams the instruments that are enabled in Instruments; the Engine view’s look-up can add one the venue confirms."
+                  data-hint-actions="instruments lookup"><span class="dot"></span> <span id="enginePillText">Stopped</span></span>
             <span class="pill" id="wsPill"><span class="dot"></span> <span id="wsPillText">WS --</span></span>
-            <span class="pill" id="sourcePill">source: --</span>
-            <span class="pill" id="livePill" title="What the panels are actually reading: live engine, warming up, or demo data">data: --</span>
+            <span class="pill" id="sourcePill"
+                  data-hint-title="Data source"
+                  data-hint-body="What feeds the panels. An exchange feed (Bybit, Binance, OKX, Hyperliquid) carries crypto perpetuals only — indices, metals, FX and CFDs need MetaTrader 5 on Windows, or Alpaca for US equities."
+                  data-hint-actions="menu lookup">source: --</span>
+            <span class="pill" id="livePill" title="What the panels are actually reading: live engine, warming up, or demo data"
+                  data-hint-title="What the panels are reading"
+                  data-hint-body="live = the engine is streaming. warming = connected, no closed bar yet. demo = no engine running (or this panel has no live data for the symbol) — the demo generator only fills the instruments it models."
+                  data-hint-actions="engine lookup">data: --</span>
             <div class="grow"></div>
             <div class="seg" id="modeSwitch" role="group" aria-label="Workspace: classic layout or widget terminal">
                 <button class="seg-btn on" type="button" data-mode="classic" aria-pressed="true"
@@ -120,18 +144,31 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
     </div>
     <button id="ofapPause" class="ofap-pause" type="button" aria-pressed="false"
             title="Hold every background refresh while you work on the board">▶ live — updates running</button>
+    <!-- §93: the top menu bar's way back sits with the top-right status controls, and wears its
+         name — beside Instrument a bare caret read as decoration (owner's note). -->
+    <button id="menubarToggle" class="chrome-toggle mb-toggle" type="button" aria-pressed="false"
+            title="Hide the top menu bar (B)"><span class="ct-face">⌃</span>menu bar</button>
   </header>
 
         <main class="views">
 
             <!-- ── Overview ── -->
-            <section class="view active" data-view="overview">
+            <section class="view active" data-view="overview" data-surface="overview">
                 <div class="view-head">
-                    <div class="view-title">Overview</div>
+                    <div class="view-title">Overview</div> <button class="btn small surf-pause" data-surf="overview" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
                     <div class="view-sub" id="ovSub">engine stopped — press Start</div>
                 </div>
                 <div id="ovBanner"></div>
                 <div id="ovAlpacaBanner"></div>
+                <div class="card" id="systemsCard">
+                    <div class="card-head"><span class="card-title">Systems</span><div class="spacer"></div>
+                        <span class="dim" id="systemsScore">checking&hellip;</span>
+                        <button class="btn small" id="systemsRefresh" title="Re-check every ingest path and capability">Re-check</button></div>
+                    <div class="card-body">
+                        <div class="sy-grid" id="systemsGrid"></div>
+                        <div class="dim sy-note" id="systemsNote"></div>
+                    </div>
+                </div>
                 <div class="grid cols-4">
                     <div class="kpi" id="kpiPrice"><span class="kpi-label">Last price</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
                     <div class="kpi" id="kpiDelta"><span class="kpi-label">Cumulative delta</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
@@ -158,7 +195,7 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
             <!-- ── Chart ── -->
             <section class="view" data-view="chart" data-surface="chart">
                 <div class="view-head">
-                    <div class="view-title">Chart</div>
+                    <div class="view-title">Chart</div> <button class="btn small surf-pause" data-surf="chart" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
                     <div class="view-sub" id="chartSub">candles · delta · value-area levels · signal markers</div>
                     <div class="grow"></div>
                     <div class="row">
@@ -174,7 +211,7 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                         <div class="field"><label>Bars</label><select id="chartMode" title="Bar expression: delta-tinted body, split candle, heat body, wick-only, or the plain candles. Split candles need pixels inside the range and the vendor chart cannot draw them — the legend says so.">
                             <option value="default">candles</option><option value="delta">delta tint</option>
                             <option value="split">split candle</option><option value="heat">heat body</option>
-                            <option value="wick">wick only</option></select></div>
+                            <option value="wick">wick only</option><option value="candles">candles</option></select></div>
                         <div class="field"><label>Palette</label><select id="chartPalette" title="Colour vocabulary for the candles and the delta lane: the theme pair, or a two-hue set measured for a colour vision deficiency.">
                             <option value="theme">theme</option><option value="deutan">deutan-safe</option>
                             <option value="protan">protan-safe</option><option value="tritan">tritan-safe</option></select></div>
@@ -232,8 +269,8 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                 <div id="studiesBody"><div class="dim">loading…</div></div>
             </section>
 
-            <section class="view" data-view="orderflow">
-                <div class="view-head"><div class="view-title">Order Flow</div>
+            <section class="view" data-view="orderflow" data-surface="orderflow">
+                <div class="view-head"><div class="view-title">Order Flow</div> <button class="btn small surf-pause" data-surf="orderflow" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
                     <div class="view-sub">bid/ask volume per price level, POC and value area</div></div>
                 <div class="grid cols-4">
                     <div class="kpi" id="ofPoc"><span class="kpi-label">POC</span><span class="kpi-value">--</span></div>
@@ -260,10 +297,19 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
 
             <!-- ── Depth ── -->
             <section class="view" data-view="ofx" data-surface="ofx">
-                <div class="view-head"><div class="view-title">Order-flow engine</div>
+                <div class="view-head"><div class="view-title">Order-flow engine</div> <button class="btn small surf-pause" data-surf="ofx" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
                     <div class="view-sub">DOM liquidity behind a split-candle footprint matrix; execution sweeps, crosshair HUD and a CVD ribbon locked to the same X transform</div></div>
                 <div class="row ofx-bar">
                     <label>symbol <input id="ofxSymbol" size="10" value="BTCUSDT"></label>
+                    <select id="ofxSymPick" class="ofx-sym-pick" title="Quick-pick a configured instrument — streaming first, then enabled, then off (§85)"></select>
+                    <span id="ofxSymbolState" class="ofx-sym-chip" title="What the server says this symbol is: streaming, enabled, addable or unknown (§82)"
+                          data-hint-title="Instrument look-up"
+                          data-hint-body="Hover or right-click for what the server makes of this symbol — and the button that fixes it."
+                          data-hint-actions="lookup"></span>
+                    <button id="ofxSymbolFind" class="btn small" title="Look the symbol up: what streams it here, and what it takes to start it (§82)"
+                        data-hint-title="Look the symbol up"
+                        data-hint-body="Any name works: a market name (NQ1!), your broker’s spelling (USTEC), or one of the suite’s own rows (NAS100USDT)."
+                        data-hint-actions="instruments">find</button>
                     <label>R <input id="ofxR" type="number" step="0.5" min="1.5" max="20" style="width:64px"></label>
                     <label>stack <input id="ofxStack" type="number" step="1" min="2" max="8" style="width:52px"></label>
                     <label>lambda ms <input id="ofxLambda" type="number" step="50" min="100" max="5000" style="width:76px"></label>
@@ -273,17 +319,42 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                     <label title="How each bar is expressed: the footprint default, a delta-tinted body, a split candle (sell left / buy right), a heat-gradient body, or wick + footprint only. The legend under the stage names whichever is active.">bars <select id="ofxMode" title="Bar expression mode">
                         <option value="default">default</option><option value="delta">delta tint</option>
                         <option value="split">split candle</option><option value="heat">heat body</option>
-                        <option value="wick">wick + footprint</option></select></label>
+                        <option value="wick">wick + footprint</option><option value="candles">candles</option></select></label>
+                    <label title="T10/B13 — once a column compresses below the text threshold the footprint degrades to plain candles (display-only; the saved bar mode is untouched). Off keeps the volume-profile fallback.">auto-candles <input type="checkbox" id="ofxDegrade" checked></label>
                     <label title="Colour vocabulary: the theme's own green/red pair, or a two-hue set chosen and MEASURED for a colour vision deficiency (expression.selftest.js simulates each palette under protanopia, deuteranopia and tritanopia).">palette <select id="ofxPalette" title="Colour palette (theme or a colour-blind-safe pair)">
                         <option value="theme">theme</option><option value="deutan">deutan-safe</option>
                         <option value="protan">protan-safe</option><option value="tritan">tritan-safe</option></select></label>
                     <label title="Depth-heat ramp behind the matrix. Both ramps are monotone in luminance — magnitude never rides on hue alone — and the engine's selftest measures that.">ramp <select id="ofxRamp">
                         <option value="classic">classic</option><option value="thermal">thermal</option></select></label>
+                    <label title="B2 — the heat scheme: a named preset writes the whole recipe (ceiling, floor, contrast) in one go; a hand-edited dial reads 'custom'. The ceiling is shared with the Heatmap view.">scheme <select id="ofxHeatScheme" title="Heat scheme">
+                        <option value="balanced">balanced</option>
+                        <option value="walls">wall hunt</option>
+                        <option value="detail">thin-book</option>
+                        <option value="quiet">quiet book</option>
+                        <option value="custom" hidden>custom</option></select></label>
+                    <label title="B2 — contrast: a gamma over the depth ramp. Above 1 darkens the mids so the big levels stand out; below 1 lifts them so a thin book keeps its shape. 1 = the shipped look.">contrast <input id="ofxHeatContrast" type="number" step="0.05" min="0.5" max="2.5" style="width:58px"></label>
+                    <label title="B2 — floor: resting size below which nothing is drawn on the depth heat (0 = off). The share floor and the absolute ceiling live in Settings ▸ Depth heat.">floor <input id="ofxHeatFloor" type="number" step="0.5" min="0" style="width:64px"></label>
+                    <label title="T10/B3 — vertical smoothing of the depth heat: 'auto' engages when the drawn rows compress below ~2.5 px (hysteresis releases at 4 px), 'manual' always draws it, 'none' keeps the raw cells. Display-only.">smooth <select id="ofxHeatSmooth" title="Heat smoothing (auto | manual | none)">
+                        <option value="auto">auto</option><option value="manual">manual</option>
+                        <option value="none">none</option></select></label>
+                    <button id="ofxHeatGlobal" class="btn small" title="B2 — write this surface's heat scheme (contrast + floor) to every heat surface: the Engine and the Heatmap view.">⇉ global</button>
                     <button id="ofxSnap" class="ofx-chip">● live</button>
                     <button id="ofxFit" class="ofx-chip" title="Show the whole session in view (double-clicking the stage does the same)">⤢ fit</button>
                     <canvas id="ofxSpark" width="90" height="20" title="live price sparkline"></canvas>
                     <span class="spacer"></span>
                     <span class="dim" id="ofxLod">LOD: —</span>
+                </div>
+                <!-- §82: the instrument look-up. Opened by `find` or by the symbol chip; the
+                     server's answer (state, reason, actions, suggestions) is painted here, so a
+                     symbol nothing can stream gets a sentence and a button, not a blank stage. -->
+                <div id="ofxSymbolPanel" class="ofx-sym-panel" hidden>
+                    <div class="ofx-sym-head"><b id="ofxSymTitle">instrument look-up</b>
+                        <span class="spacer"></span>
+                        <button class="ofx-sym-x" id="ofxSymClose" type="button" title="close">×</button></div>
+                    <div class="ofx-sym-reason" id="ofxSymReason"></div>
+                    <div class="ofx-sym-actions" id="ofxSymActions"></div>
+                    <div class="ofx-sym-rows" id="ofxSymRows"></div>
+                    <div class="ofx-sym-msg" id="ofxSymMsg"></div>
                 </div>
                 <div class="ofx-flex">
                     <div id="ofxStage" class="ofx-stage">
@@ -307,7 +378,7 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
             </section>
 
             <section class="view" data-view="depth" data-surface="depth">
-                <div class="view-head"><div class="view-title">Market depth</div>
+                <div class="view-head"><div class="view-title">Market depth</div> <button class="btn small surf-pause" data-surf="depth" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
                     <div class="view-sub">L2 ladder with imbalance and spread</div></div>
                 <div class="grid cols-3">
                     <div class="kpi" id="dpBid"><span class="kpi-label">Best bid</span><span class="kpi-value">--</span></div>
@@ -320,16 +391,43 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
 
             <!-- ── Tape ── -->
             <section class="view" data-view="tape" data-surface="tape">
-                <div class="view-head"><div class="view-title">Time &amp; Sales</div>
+                <div class="view-head"><div class="view-title">Time &amp; Sales</div> <button class="btn small surf-pause" data-surf="tape" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
                     <div class="view-sub">tick-by-tick prints, large trades highlighted</div></div>
                 <div id="tapeBanner"></div>
                 <div class="card"><div class="card-head"><span class="card-title">Tape</span></div>
                     <div class="card-body" style="padding:0"><div id="tapeContainer" style="height:620px"></div></div></div>
             </section>
 
+            <!-- ── Market Watch ── -->
+            <section class="view" data-view="marketwatch" data-surface="marketwatch">
+                <div class="view-head"><div class="view-title">Market Watch</div>
+                    <div class="view-sub" id="mwSub">the source’s own board — bid, ask and daily change</div></div>
+                <div id="mwBanner"></div>
+                <div class="card">
+                    <div class="card-head"><span class="card-title">Board</span><div class="spacer"></div>
+                        <select id="mwSource" title="Which venue’s board to mirror (empty = the engine’s source)">
+                            <option value="">engine source</option>
+                            <option value="bybit">Bybit — whole board</option>
+                            <option value="mt5">MetaTrader 5 — the terminal’s Market Watch</option>
+                            <option value="ninjatrader">NinjaTrader 8</option>
+                        </select>
+                        <input id="mwFilter" placeholder="filter…" style="width:150px" title="Match part of a symbol name">
+                        <span class="dim" id="mwCount"></span>
+                        <span class="dim" id="mwLive" title="How fresh the board is — pause to freeze it">live</span>
+                        <button class="btn small surf-pause" id="mwPause" data-surf="marketwatch" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
+                        <button class="btn small" id="mwRefresh" title="Take one fresh read now (works while paused)">Refresh</button></div>
+                    <div class="card-body" style="padding:0">
+                        <table class="data" id="mwTable">
+                            <thead><tr><th>Symbol</th><th style="text-align:right">Bid</th><th style="text-align:right">Ask</th><th style="text-align:right">Daily Change</th></tr></thead>
+                            <tbody id="mwBody"></tbody></table>
+                        <div class="dim" id="mwNote" style="padding:8px 12px"></div>
+                    </div>
+                </div>
+            </section>
+
             <!-- ── Signals ── -->
-            <section class="view" data-view="signals">
-                <div class="view-head"><div class="view-title">Signals</div>
+            <section class="view" data-view="signals" data-surface="signals">
+                <div class="view-head"><div class="view-title">Signals</div> <button class="btn small surf-pause" data-surf="signals" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
                     <div class="view-sub">aggregated pattern signals with entry, stop, targets and grade</div></div>
                 <div class="card"><div class="card-head"><span class="card-title">Signal cards</span></div>
                     <div class="card-body" style="padding:0"><div id="signalsContainer" style="min-height:400px"></div></div></div>
@@ -371,6 +469,20 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                             <label class="switch" title="tint levels the engine has seen held past its wall-age threshold (2 min by default)"><input type="checkbox" id="hmAgeTint"> wall age</label>
                             <label class="switch"><input type="checkbox" id="hmEvents" checked> spoof/stack</label></div></div>
                         <div class="field"><label>&nbsp;</label><button class="btn small" id="hmAuto"><span id="hmAutoLabel">auto: on</span></button></div>
+                        <div class="field"><label>Heat</label><div class="row">
+                            <select id="hmHeatScheme" title="B2 — the heat scheme: a named preset writes the whole recipe (ceiling, floor, contrast); a hand-edited dial reads 'custom'.">
+                                <option value="balanced">balanced</option>
+                                <option value="walls">wall hunt</option>
+                                <option value="detail">thin-book</option>
+                                <option value="quiet">quiet book</option>
+                                <option value="custom" hidden>custom</option></select>
+                            <input id="hmHeatContrast" type="number" step="0.05" min="0.5" max="2.5" style="width:58px" title="B2 — contrast: a gamma over the ramp (above 1 darkens the mids, below 1 lifts them).">
+                            <input id="hmHeatFloor" type="number" step="0.5" min="0" style="width:64px" title="B2 — floor: no colour below this resting size (0 = off).">
+                            <select id="hmHeatSmooth" title="T10/B3 — vertical smoothing (auto | manual | none); display-only" style="width:110px">
+                                <option value="auto">smoothing: auto</option><option value="manual">smoothing: manual</option>
+                                <option value="none">smoothing: none</option></select>
+                            <button class="btn small" id="hmHeatGlobal" title="B2 — write this view's heat scheme (contrast + floor) to every heat surface: the Heatmap and the Engine.">⇉ global</button>
+                        </div></div>
                     </div>
                 </div>
                 <div class="grid cols-4">
@@ -381,7 +493,16 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                 </div>
                 <div class="card"><div class="card-head"><span class="card-title">Liquidity map</span><div class="spacer"></div>
                     <span class="dim" id="hmStatus">waiting for data…</span></div>
-                    <div class="card-body" style="padding:0"><canvas id="heatmapCanvas" class="heat-canvas"></canvas></div>
+                    <div class="card-body hm-split" style="padding:0"><canvas id="heatmapCanvas" class="heat-canvas"></canvas><div class="hm-rail" id="hmColRail">
+                        <div class="hm-rail-head"><span class="hm-rail-title">Columns <span class="dim" id="hmColNote">—</span></span></div>
+                        <div class="hm-rail-ctl">
+                            <select id="hmColMetric" title="T14/B4 — what each column accumulates between resets."><option value="traded">traded since reset</option><option value="resting">resting Δ since reset</option></select>
+                            <select id="hmColReset" title="T14/B4 — the reset policy: manual (button / double-click), scheduled (every 30 s) or conditional (when a row crosses the threshold)."><option value="manual">reset: manual</option><option value="scheduled">reset: every 30 s</option><option value="conditional">reset: on threshold</option></select>
+                            <input type="number" id="hmColThreshold" min="0" step="50" style="width:70px" title="T14/B4 — the conditional threshold.">
+                            <button class="btn small" id="hmColResetAll" title="Reset every column’s accumulation now.">↺ all</button>
+                        </div>
+                        <div class="hm-rail-rows" id="hmColRows"><div class="dim">waiting for a snapshot…</div></div>
+                    </div></div>
                 </div>
                 <div class="grid cols-2">
                     <div class="card"><div class="card-head"><span class="card-title">Level events</span></div>
@@ -394,13 +515,13 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
             </section>
 
             <!-- ── Trackers (MBO-style detections) ── -->
-            <section class="view" data-view="trackers">
-                <div class="view-head"><div class="view-title">Order-flow trackers</div>
+            <section class="view" data-view="trackers" data-surface="trackers">
+                <div class="view-head"><div class="view-title">Order-flow trackers</div> <button class="btn small surf-pause" data-surf="trackers" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
                     <div class="view-sub">iceberg · sweeps · stop runs · liquidations · big trades · speed of tape</div></div>
                 <div id="tkBanner"></div>
                 <div class="grid cols-4">
                     <div class="kpi" id="tkBig"><span class="kpi-label">Big trades</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="tkSweeps"><span class="kpi-label">Sweeps</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="tkSweeps"><span class="kpi-label">Sweeps (inferred)</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
                     <div class="kpi" id="tkIcebergs"><span class="kpi-label">Icebergs (inferred)</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
                     <div class="kpi" id="tkSpeed"><span class="kpi-label">Speed of tape</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
                 </div>
@@ -409,7 +530,8 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                         <span class="tag warn" title="True MBO is not published by any public Bybit feed — this is inferred from repeated equal prints at one price">inferred</span></div>
                         <div class="card-body" style="padding:0"><table class="data" id="tkIcebergTable">
                             <thead><tr><th>Time</th><th>Price</th><th>Side</th><th>Refills</th><th>Modal</th><th>Total</th><th>Life</th><th>Grade</th></tr></thead><tbody></tbody></table></div></div>
-                    <div class="card"><div class="card-head"><span class="card-title">Sweeps</span></div>
+                    <div class="card"><div class="card-head"><span class="card-title">Sweeps</span><div class="spacer"></div>
+                        <span class="tag warn" title="A sweep is inferred from consecutive prints eating several levels in one direction — no public feed publishes this as an event">inferred</span></div>
                         <div class="card-body" style="padding:0"><table class="data" id="tkSweepTable">
                             <thead><tr><th>Time</th><th>Side</th><th>Levels</th><th>Size</th><th>Aggressors</th><th>Range (ticks)</th><th>Corridor</th><th>Duration</th></tr></thead><tbody></tbody></table></div></div>
                 </div>
@@ -429,6 +551,7 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                         <thead><tr><th>Zone</th><th>Buy</th><th>Sell</th><th>Total</th><th>Delta</th><th>Trades</th><th>Last</th></tr></thead><tbody></tbody></table></div></div>
                 <div class="grid cols-2">
                     <div class="card"><div class="card-head"><span class="card-title">Stop runs</span><div class="spacer"></div>
+                        <span class="tag warn" title="A stop run is inferred from a fast move plus clustered prints at one side — “confirmed” means liquidations corroborated it">inferred</span><div class="spacer"></div>
                         <span class="tag warn" title="Inferred from fast range expansion + volume burst, confirmed by liquidation clusters">inferred</span></div>
                         <div class="card-body" style="padding:0"><table class="data" id="tkStopTable">
                             <thead><tr><th>Time</th><th>Dir</th><th>Ticks</th><th>Volume</th><th>Stops</th><th>Liquidations</th></tr></thead><tbody></tbody></table></div></div>
@@ -544,6 +667,42 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                     <div class="kpi" id="rpClock"><span class="kpi-label">Replay clock</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
                     <div class="kpi" id="rpMode"><span class="kpi-label">Mode</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
                 </div>
+                <div class="card"><div class="card-head"><span class="card-title">Simulated account</span>
+                    <div class="spacer"></div><span class="pill" id="ppPill"><span class="dot"></span> <span id="ppPillText">no session</span></span></div>
+                    <div class="card-body">
+                        <!-- R9: no broker, no money. The account consumes the prints the replay (or the
+                             live tape) already delivers, so the fills are the tape's — a market order
+                             fills at the next print, a limit when a print trades through it. -->
+                        <div class="row">
+                            <div class="field"><label>Size</label><input type="number" id="ppSize" value="1" min="0.0001" step="1"></div>
+                            <div class="field"><label>Kind</label><select id="ppKind">
+                                <option value="market">Market</option>
+                                <option value="limit">Limit</option>
+                                <option value="stop">Stop</option></select></div>
+                            <div class="field"><label>Price (limit/stop)</label><input type="number" id="ppPrice" step="any" placeholder="—"></div>
+                        </div>
+                        <div class="row">
+                            <div class="field"><label>Stop loss</label><input type="number" id="ppSl" step="any" placeholder="optional"></div>
+                            <div class="field"><label>Take profit</label><input type="number" id="ppTp" step="any" placeholder="optional"></div>
+                            <button class="btn success" id="ppBuy">Buy</button>
+                            <button class="btn danger" id="ppSell">Sell</button>
+                        </div>
+                        <div class="hint" id="ppRisk">stop / target typed here are priced in paper ticks against the account.</div>
+                        <div class="row danger-row">
+                            <button class="btn" id="ppFlatten">Flatten</button>
+                            <button class="btn" id="ppCancelAll">Cancel working</button>
+                            <button class="btn" id="ppEnd">End &amp; save to journal</button>
+                            <button class="btn small" id="ppLock" aria-pressed="false" title="Lock order placement — Buy/Sell and the armed keys stop placing orders; flatten and cancel stay live">Lock trading</button>
+                            <span class="dim" id="ppResult">—</span>
+                        </div>
+                        <div class="grid cols-4">
+                            <div class="kpi" id="ppPosition"><span class="kpi-label">Position</span><span class="kpi-value">flat</span><span class="kpi-sub">—</span></div>
+                            <div class="kpi" id="ppRealised"><span class="kpi-label">Realised</span><span class="kpi-value">0</span><span class="kpi-sub">ticks</span></div>
+                            <div class="kpi" id="ppUnrealised"><span class="kpi-label">Open</span><span class="kpi-value">0</span><span class="kpi-sub">ticks</span></div>
+                            <div class="kpi" id="ppWorking"><span class="kpi-label">Working orders</span><span class="kpi-value">0</span><span class="kpi-sub">—</span></div>
+                        </div>
+                        <div class="hint" id="ppFills">the last fills appear here — <a class="help-link" href="#" data-helptopic="view.replay">how the simulator works</a></div>
+                    </div></div>
                 <div class="banner info" style="display:block">
                     Replay feeds the same analytics the live engine uses, so the Heatmap, Trackers, CVD, Profile and Frames views rebuild while it runs.
                     Ticks come from this app's own SQLite history; the exchange tape is the fallback for symbols that have no local history yet.
@@ -578,9 +737,28 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
             </section>
 
             <!-- ── Instruments ── -->
+            <section class="view" data-view="inbox">
+                <div class="view-head"><div class="view-title">Inbox</div>
+                    <div class="view-sub" id="inboxSub">every alert the engine fired, categorised — the record the Alerts rules write, as tiles you can act on</div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Notifications</span><div class="spacer"></div>
+                    <span class="dim" id="inboxCount">0</span>
+                    <label class="switch"><input type="checkbox" id="inboxDnd"> do not disturb</label>
+                    <label class="switch"><input type="checkbox" id="inboxPriority"> priority first</label>
+                    <button class="btn small" id="inboxReadAll">Mark all read</button>
+                    <button class="btn small" id="inboxRefresh">Refresh</button></div>
+                    <div class="card-body">
+                        <div class="row" id="inboxChips"></div>
+                        <div class="lk-body" id="inboxBody"><div class="dim">Loading…</div></div>
+                    </div>
+                </div>
+            </section>
+
             <section class="view" data-view="instruments" data-surface="instruments">
                 <div class="view-head"><div class="view-title">Instruments</div>
-                    <div class="view-sub">choose what the engine subscribes to — unsupported feeds are greyed out</div></div>
+                    <div class="view-sub">choose what the engine subscribes to — unsupported feeds are greyed out</div>
+                    <div class="grow"></div>
+                    <button class="btn small" id="instLookup"
+                        title="Type any name (NQ1!, US100, your broker’s spelling) and the app says what can stream it and what to do about it">Look up an instrument…</button></div>
                 <div id="instBanner"></div>
                 <div class="card"><div class="card-head"><span class="card-title">Coverage</span><div class="spacer"></div>
                     <button class="btn small" id="btnValidate">Validate against Bybit</button>
@@ -626,9 +804,81 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                 <div id="platformsBody"><div class="dim">loading…</div></div>
             </section>
 
+            <!-- ── Journal (R10: the trade journal and its statement) ── -->
+            <section class="view" data-view="journal" data-surface="journal">
+                <div class="view-head"><div class="view-title">Journal</div>
+                    <div class="view-sub">your trades, their statistics, and a statement you can send</div>
+                    <div class="grow"></div>
+                    <button class="btn small" id="jnRefresh">Refresh</button>
+                    <button class="btn small" id="jnStatement">Export HTML statement</button></div>
+                <div id="jnBanner"></div>
+                <div class="grid cols-4" id="jnStats"></div>
+                <div class="card"><div class="card-head"><span class="card-title">Trades</span>
+                    <div class="spacer"></div><span class="dim" id="jnCount">—</span></div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="field"><label>Note for the selected trade</label><input type="text" id="jnNote" placeholder="select a row, then write the note"></div>
+                            <button class="btn" id="jnSaveNote">Save note</button>
+                            <span class="dim" id="jnActionResult">—</span>
+                        </div>
+                        <div id="jnTable" class="hint">no trades yet — a simulated session can be saved here from the Replay view · <a class="help-link" href="#" data-helptopic="view.journal">about the journal</a></div>
+                    </div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Daily P&amp;L</span></div>
+                    <div class="card-body"><div id="jnDaily" class="hint">—</div></div></div>
+            </section>
+
+            <!-- ── Calendar (R11: the economic calendar) ── -->
+            <section class="view" data-view="calendar" data-surface="calendar">
+                <div class="view-head"><div class="view-title">Economic calendar</div>
+                    <div class="view-sub">this week's releases by impact and currency — keyless feed, cached</div>
+                    <div class="grow"></div>
+                    <label class="switch"><input type="checkbox" id="calAlerts"> alerts ahead of high-impact events</label>
+                    <div class="field"><label>Lead (minutes)</label><input type="number" id="calLead" min="1" max="240" step="5" value="15"></div>
+                    <div class="field"><label>Currencies</label><input type="text" id="calCurrencies" placeholder="all — e.g. USD,EUR"></div>
+                    <button class="btn small" id="calRefresh">Refresh</button></div>
+                <div id="calBanner"></div>
+                <div class="card"><div class="card-head"><span class="card-title">Upcoming</span>
+                    <div class="spacer"></div><span class="dim" id="calSource">—</span></div>
+                    <div class="card-body"><div id="calTable" class="hint">loading…</div></div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Watch filter</span></div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="field"><label>Window (hours)</label><input type="number" id="calHours" min="1" max="720" step="1" value="48"></div>
+                            <div class="field"><label>Minimum impact</label><select id="calImpact">
+                                <option value="high">High only</option>
+                                <option value="medium">Medium and up</option>
+                                <option value="low">Everything</option></select></div>
+                        </div>
+                        <div class="hint">Alerts go through the channels already configured in Settings ▸ alerts (Telegram, ntfy, email). The feed is Forex Factory's public weekly JSON — no key, no account; if it is unavailable the panel says so rather than inventing dates.</div>
+                    </div></div>
+            </section>
+
             <section class="view" data-view="settings">
                 <div class="view-head"><div class="view-title">Settings</div>
                     <div class="view-sub" id="setSub">stored in your user config directory — no source edits</div></div>
+
+                <!-- T7/B1: one searchable surface for every registered setting — modeless, staged,
+                     with the factory default one toggle away. The registry is the same one the
+                     Chart menus and the Keys sheet read from. -->
+                <div class="card"><div class="card-head"><span class="card-title">Find a setting</span>
+                    <div class="spacer"></div><span class="dim" id="setSearchInfo">—</span></div>
+                    <div class="card-body">
+                        <div class="row">
+                            <input type="text" id="setSearch" class="set-search" autocomplete="off" spellcheck="false"
+                                placeholder="search every setting — words, group:tape, view:heatmap, path:…">
+                            <button class="btn" id="setShowOriginal" aria-pressed="false"
+                                title="Reveal each setting’s factory default beside its current value">Show original values</button>
+                            <button class="btn primary" id="setApplyAll" disabled
+                                title="Write every staged change through the registry gate">Apply staged</button>
+                            <button class="btn" id="setRevertAll" disabled
+                                title="Drop every staged change, back to what the config holds">Revert staged</button>
+                        </div>
+                        <div class="hint">Editing stages a change; <b>Apply staged</b> writes them all,
+                            <b>✓</b> writes one field now, <b>↺</b> drops a field’s edit. Nothing is
+                            written until you say so, and refused values come back with the reason.</div>
+                        <div id="setResults" class="set-results"></div>
+                    </div></div>
+
                 <div class="grid cols-2">
                     <div class="card"><div class="card-head"><span class="card-title">Appearance</span>
                         <div class="spacer"></div><span class="dim">the config is the record — applied before the first paint</span></div>
@@ -647,6 +897,11 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                                     <option value="comfortable">Comfortable</option>
                                     <option value="compact">Compact</option>
                                     <option value="dense">Dense</option></select></div>
+                                <div class="field"><label>Contrast tier</label><select id="setContrast" title="T11/B15 — readability tiers layered on the theme: Calm quiets the chrome, Aggressive hardens borders and lifts secondary text.">
+                                    <option value="calm">Calm</option>
+                                    <option value="standard">Standard</option>
+                                    <option value="aggressive">Aggressive</option></select></div>
+                                <div class="field"><label>UI scale</label><input type="number" id="setScale" min="0.75" max="1.5" step="0.05" style="width:76px" title="T11/B14 — scales the whole interface (Ctrl+= / Ctrl+- step, Ctrl+0 resets)."></div>
                             </div>
                             <div class="hint">Every colour in the shell reads from the token block in atlas.css: these three switches swap the tokens, never the layout.</div>
                         </div></div>
@@ -704,6 +959,148 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
                         <div class="grid cols-3" id="atlasV2Grid"></div>
                     </div></div>
 
+                <div class="card"><div class="card-head"><span class="card-title">Storage</span>
+                    <div class="spacer"></div><span class="pill" id="stPill"><span class="dot"></span> <span id="stPillText">—</span></span></div>
+                    <div class="card-body">
+                        <!-- R6: what the program occupies, where the curve points, and the window that
+                             keeps it bounded. The numbers come from GET /api/control/storage. -->
+                        <div class="grid cols-3" id="stUsage"></div>
+                        <div class="hint" id="stGrowth">—</div>
+                        <div class="row">
+                            <div class="field"><label>Keep ticks (days)</label><input type="number" id="stRetention" min="0" max="3650" step="1"></div>
+                            <div class="field"><label>Prune every (hours)</label><input type="number" id="stPruneInterval" min="1" max="168" step="1"></div>
+                            <div class="field"><label>Session start (UTC hour)</label><input type="number" id="stSessionHour" min="0" max="23" step="1"></div>
+                        </div>
+                        <div class="hint">Retention deletes tick rows older than the window, then reclaims the freed pages. 0 keeps everything; the numbers save as you change them and apply on the next pass.</div>
+                        <div class="row">
+                            <button class="btn" id="btnStPrune">Prune now</button>
+                            <button class="btn" id="btnStVacuum">Reclaim space</button>
+                            <button class="btn" id="btnStCleanup">Sweep caches</button>
+                        </div>
+                        <div class="hint" id="stLastPrune">—</div>
+                        <hr>
+                        <!-- R8: your history out, other people's history in. The reader takes the
+                             app's own export shape, an MT5/Sierra/Databento-style CSV, or no header
+                             at all; the writer emits RFC 4180 with ISO 8601 UTC stamps. -->
+                        <div class="row">
+                            <button class="btn" id="btnDataImport">Import CSV…</button>
+                            <button class="btn" id="btnDataExportTicks">Export ticks</button>
+                            <button class="btn" id="btnDataExportCandles">Export candles</button>
+                            <input type="file" id="dataImportFile" accept=".csv,.txt,.tsv" style="display:none">
+                        </div>
+                        <div class="hint" id="dataActionResult">import: the active instrument's symbol is assumed unless the file names one · export: written to your exports folder</div>
+                        <div class="dim" id="stActionResult"></div>
+                    </div></div>
+
+                <div class="card"><div class="card-head"><span class="card-title">Backup &amp; reports</span>
+                    <div class="spacer"></div><span class="dim">portable formats: SQLite · CSV (RFC 4180) · JSON manifest · SHA-256</span></div>
+                    <div class="card-body">
+                        <!-- R6: one set per run in one ISO-stamped folder: the database hot-copied through
+                             SQLite's own backup API, the analyst tables as CSV, a manifest with counts and
+                             checksums. The target is any writable path — folder, UNC share, removable
+                             drive, synced folder — and it is proved by writing before a backup starts. -->
+                        <label class="switch" style="margin-bottom:10px"><input type="checkbox" id="stAutoBackup"> automatic backups while the engine runs</label>
+                        <div class="row">
+                            <div class="field"><label>Every (hours)</label><input type="number" id="stBackupInterval" min="1" max="720" step="1"></div>
+                            <div class="field"><label>Keep sets</label><input type="number" id="stBackupKeep" min="1" max="60" step="1"></div>
+                            <div class="field"><label>Contents</label><select id="stBackupFormat">
+                                <option value="sqlite+csv">Database + CSV</option>
+                                <option value="sqlite">Database only</option>
+                                <option value="csv">CSV only</option></select></div>
+                        </div>
+                        <div class="field"><label>Target</label><input type="text" id="stBackupTarget"
+                            placeholder="empty = this app's backups folder — or \\server\share, E:\backups, a OneDrive folder">
+                            <div class="hint">Any writable path: a local folder, a network share (\\server\share), a removable drive (E:\) or a cloud-synced folder.</div></div>
+                        <div class="row">
+                            <button class="btn primary" id="btnStBackup">Back up now</button>
+                            <button class="btn" id="btnStOpenBackups">Open backups folder</button>
+                            <span class="dim" id="stBackupResult"></span>
+                        </div>
+                        <div class="hint" id="stBackupList">—</div>
+                        <hr>
+                        <label class="switch"><input type="checkbox" id="stEmailReport"> email the report after each automatic backup</label>
+                        <label class="switch" style="margin-bottom:8px"><input type="checkbox" id="stEmailThreshold"> email when the database passes the size budget</label>
+                        <div class="row">
+                            <div class="field"><label>Size budget (MB, 0 = off)</label><input type="number" id="stMaxDb" min="0" max="1000000" step="100"></div>
+                        </div>
+                        <div class="row">
+                            <div class="field"><label>SMTP host</label><input type="text" id="stSmtpHost" placeholder="smtp.example.com"></div>
+                            <div class="field"><label>Port</label><input type="number" id="stSmtpPort" min="1" max="65535" step="1" value="587"></div>
+                            <div class="field"><label>Username</label><input type="text" id="stSmtpUser" placeholder="you@example.com"></div>
+                        </div>
+                        <div class="row">
+                            <div class="field"><label>Password / app password</label><input type="password" id="stSmtpPass"></div>
+                            <div class="field"><label>From</label><input type="text" id="stSmtpFrom" placeholder="defaults to the username"></div>
+                            <div class="field"><label>Send reports to</label><input type="text" id="stSmtpTo" placeholder="alerts@example.com"></div>
+                        </div>
+                        <div class="row">
+                            <button class="btn" id="btnStSmtpSave">Save mailbox</button>
+                            <button class="btn" id="btnStReport">Send report now</button>
+                            <span class="dim" id="stEmailState">—</span>
+                        </div>
+                        <div class="hint">The report is plain text with a CSV attachment, sent through the same SMTP path the alert channel uses. Gmail and Outlook need an app password.</div>
+                    </div></div>
+
+                <div class="card"><div class="card-head"><span class="card-title">Configuration artifacts</span>
+                    <div class="spacer"></div><span class="dim">export / import as one JSON file — the schema is stamped and corrupt files are refused readably</span></div>
+                    <div class="card-body">
+                        <!-- T12/B10: workspace = the arrangement (layouts, workspaces, the shell’s ui
+                             block); studies = the analysis setup (studies, expressions, the heat recipes). -->
+                        <div class="row">
+                            <button class="btn" id="btnCfgExportWorkspace">Export workspace</button>
+                            <button class="btn" id="btnCfgExportStudies">Export studies</button>
+                            <button class="btn" id="btnCfgImport">Import artifact…</button>
+                            <input type="file" id="cfgImportFile" accept=".json,application/json" style="display:none">
+                            <span class="dim" id="cfgArtifactResult">—</span>
+                        </div>
+                        <div class="hint">Files land in the exports folder, next to the data exports. Importing applies the artifact’s blocks whole — <b>workspace</b>: layouts, workspaces, ui; <b>studies</b>: studies, expression, atlas, ofx — and everything is clamped by the store on the way in.</div>
+                    </div></div>
+
+                <div class="card"><div class="card-head"><span class="card-title">Updates</span>
+                    <div class="spacer"></div><span class="pill" id="updPill"><span class="dot"></span> <span id="updPillText">—</span></span></div>
+                    <div class="card-body">
+                        <!-- R7: the running build, the newest release, and the honest state between
+                             them. Checks run when the app opens and on a slow timer; the wire is
+                             touched once per interval, not once per page. -->
+                        <div class="sy-tile"><div class="sy-line"><span class="sy-name">Running build</span>
+                            <div class="spacer"></div><span class="tag dim" id="updCurrent">—</span></div>
+                            <div class="sy-detail" id="updStatus">—</div></div>
+                        <div class="row">
+                            <button class="btn primary" id="btnUpdCheck">Check now</button>
+                            <button class="btn" id="btnUpdDownload">Download update</button>
+                            <button class="btn" id="btnUpdOpen">Open updates folder</button>
+                            <button class="btn" id="btnUpdPage">Release page</button>
+                            <button class="btn" id="btnUpdSkip">Skip / un-skip this version</button>
+                        </div>
+                        <div class="hint" id="updResult">—</div>
+                        <div class="hint" id="updNotes" style="white-space:pre-wrap;max-height:200px;overflow:auto"></div>
+                        <hr>
+                        <div class="row">
+                            <div class="field"><label>When a newer build exists</label><select id="updMode">
+                                <option value="check">Tell me — download when I ask</option>
+                                <option value="download">Fetch the installer automatically</option></select></div>
+                            <div class="field"><label>Check every (hours)</label><input type="number" id="updInterval" min="1" max="720" step="1"></div>
+                            <div class="field"><label>Channel</label><select id="updChannel">
+                                <option value="stable">Stable releases</option>
+                                <option value="prerelease">Pre-releases (beta)</option></select></div>
+                        </div>
+                        <div class="field"><label>Download folder</label><input type="text" id="updDir"
+                            placeholder="empty = this app's updates folder"></div>
+                        <div class="hint">A found update waits until you are not typing before it says so, and is always visible here and in the Update menu. Downloads are verified against the release's own SHA-256 when GitHub publishes one — <a class="help-link" href="#" data-helptopic="work.updates">the policy</a>.</div>
+                    </div></div>
+
+                <div class="card"><div class="card-head"><span class="card-title">Sound</span>
+                    <div class="spacer"></div><span class="dim" id="sndResult">—</span></div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="field"><label>Trade audio</label><select id="sndEnabled">
+                                <option value="off">Off — silent</option>
+                                <option value="on">On — alert sounds</option></select></div>
+                            <div class="field"><label>Volume (%)</label><input type="number" id="sndVolume" min="0" max="100" step="5"></div>
+                            <button class="btn" id="sndTest">Test sound</button>
+                        </div>
+                        <div class="hint">Off by default. The four alert samples ship with the app; the Alerts panel’s own switch and the tape’s Chart menu write the same settings.</div>
+                    </div></div>
                 <div class="row">
                     <button class="btn primary" id="btnSaveSettings">Save settings</button>
                     <button class="btn" id="btnSaveRestart">Save &amp; restart engine</button>
@@ -855,7 +1252,13 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
      Alerts card, so this tag must stay ahead of atlas.js. test_alert_format.py pins the order. -->
 <script src="/desktop/alert-format.js"></script>
 <script src="/desktop/expression.js"></script>
+<!-- B2: the heat-scheme vocabulary both heat surfaces read (OFAPRAMP). Parsed before atlas.js —
+     the Heatmap's painter reads it at paint time, the Engine's colour table at build time, and
+     test_b2_ramps.py pins the module's whole surface. -->
+<script src="/desktop/ramp.js"></script>
 <script src="/desktop/atlas.js"></script>
+<script src="/desktop/colrail.js"></script>
+<script src="/desktop/table.js"></script>
 <!-- The arbiter must be parsed BEFORE atlas-v2.js runs its loader: that loader injects the rest of
      the modules (intent.js among them) and its guard looks for this exact attribute. With the tag
      after atlas-v2.js the guard found nothing, injected a second copy, and the module's IIFE ran
@@ -869,12 +1272,32 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
 <script src="/desktop/cursor-link.js"></script>
 <script src="/desktop/strips.js"></script>
 <script src="/desktop/ofx.js"></script>
+<script src="/desktop/instrument.js"></script>
+<script src="/desktop/lookup.js"></script>
+<script src="/desktop/hint.js"></script>
+<script src="/desktop/systems.js"></script>
 <script src="/desktop/ofx-view.js"></script>
+<script src="/desktop/marketwatch.js"></script>
+<script src="/desktop/ticks.js"></script>
+<script src="/desktop/chrome.js"></script>
+<script src="/desktop/windowing.js"></script>
+<script src="/desktop/freeze.js"></script>
+<script src="/desktop/watermark.js"></script>
+<script src="/desktop/settings-pro.js"></script>
+<script src="/desktop/templates.js"></script>
 <script src="/desktop/drawings.js"></script>
+<script src="/desktop/risk.js"></script>
 <script src="/desktop/menubar.js"></script>
 <script src="/desktop/shell.js"></script>
 <script src="/desktop/windows-ui.js"></script>
+<script src="/desktop/storage.js"></script>
+<script src="/desktop/updates.js"></script>
+<script src="/desktop/paper.js"></script>
+<script src="/desktop/journal.js"></script>
+<script src="/desktop/calendar.js"></script>
+<script src="/desktop/inbox.js"></script>
 <script src="/desktop/links.js"></script>
+<script src="/desktop/scopes.js"></script>
 <script src="/desktop/bus.js"></script>
 <script src="/desktop/watchlist.js"></script>
 <script src="/desktop/news.js"></script>
@@ -891,9 +1314,14 @@ if (v.density) d.dataset.density = v.density; } catch (e) { /* storage blocked: 
     <span>source: <b id="statusSource">—</b></span>
     <span>workspace: <b id="statusWorkspace">default</b></span>
     <span>mode: <b id="statusMode">Classic</b></span>
+    <span id="statusLock" class="dim" hidden>layout locked</span>
+    <span id="keysArmed" class="status-armed" hidden>&#9000; order keys armed</span>
+    <span id="statusDelay" class="status-delay" hidden>market data delayed</span>
+    <span id="statusPause" class="dim" hidden>feeds paused</span>
     <span>tab: <b id="statusTab">—</b></span>
     <span>widgets: <b id="statusWidgets">0</b></span>
     <span>feed: <b id="statusFeed">—</b></span>
+    <span>oldest sample: <b id="statusOldest">—</b></span>
     <span>bus: <b id="statusBus">idle</b></span>
     <span class="dim" id="statusHint"></span>
   </div>

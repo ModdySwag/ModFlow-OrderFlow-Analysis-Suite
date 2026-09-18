@@ -39,7 +39,7 @@ def _layout(**over):
 
 def test_defaults_carry_the_layouts_block(store):
     cfg = store.default_config()
-    assert cfg["layouts"] == {"mode": "classic", "active": "", "items": {}}
+    assert cfg["layouts"] == {"mode": "classic", "active": "", "items": {}, "versions": {}}
 
 
 def test_a_layout_round_trips_with_its_geometry(store):

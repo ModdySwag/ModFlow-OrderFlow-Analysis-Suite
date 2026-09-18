@@ -34,6 +34,10 @@
     var map = [];        // every row: bindings (run set) and documented locals (run null)
     var recent = [];     // the last firings — {id, chord, at}; the live gates and probes read it
     var docSeq = 0;
+    /* T3: the armed gate. A row marked `danger: true` refuses to dispatch until the user has
+       armed the order keys (a visible, per-session switch) — the study's cheapest mitigation for
+       the worst failure this app can have: a stray key that places an order. */
+    var armed = false;
 
     /* ── the pure half ─────────────────────────────────────────────────────── */
 
@@ -104,6 +108,7 @@
             var b = map[i];
             if (!b.run) continue;                                 // documented locals never dispatch
             if (b.keys.indexOf(chord) < 0) continue;
+            if (b.danger && !armed) continue;              // the armed gate (T3)
             if (inField && !b.inField) continue;
             if (b.when && !b.when(ev)) continue;
             if (!best || (b.priority || 0) > (best.priority || 0)) best = b;
@@ -128,6 +133,8 @@
             when: spec.when || null,
             run: spec.run,
             inField: Boolean(spec.inField),
+            danger: Boolean(spec.danger),
+            why: String(spec.why || ''),
             priority: spec.priority || 0,
             owner: spec.owner || null,
             text: null,
@@ -163,7 +170,8 @@
         return map.map(function (b) {
             return {
                 id: b.id, keys: b.text || keysText(b), label: b.label, scope: b.scope,
-                owner: b.owner, dispatched: Boolean(b.run),
+                owner: b.owner, dispatched: Boolean(b.run), danger: Boolean(b.danger),
+                why: String(b.why || ''),
             };
         }).sort(function (a, b) {
             var ia = SCOPE_ORDER.indexOf(a.scope);
@@ -185,6 +193,25 @@
         } catch (e) { /* reportClientError's own console fallback is the last resort */ }
     }
 
+    var dangerHintAt = 0;
+
+    function hintDisarmed(chord) {
+        if (armed) return;
+        for (var i = 0; i < map.length; i += 1) {
+            var b = map[i];
+            if (b.run && b.danger && b.keys.indexOf(chord) >= 0) {
+                var now = Date.now();
+                if (now - dangerHintAt > 4000) {
+                    dangerHintAt = now;
+                    if (typeof toast === 'function') {
+                        toast(document.body, 'that key places a simulated order — arm the order keys in the Keys menu first', 'info');
+                    }
+                }
+                return;
+            }
+        }
+    }
+
     function dispatch(ev) {
         var chord = canonical(ev);
         if (!chord) return;
@@ -192,7 +219,7 @@
         if (chord === 'space' && isActivatible(ev.target)) return;
         var inField = isTypingTarget(ev.target) || isTypingTarget(document.activeElement);
         var hit = resolve(chord, ev, { inField: inField });
-        if (!hit) return;
+        if (!hit) { hintDisarmed(chord); return; }
         if (ev.preventDefault) ev.preventDefault();
         recent.push({ id: hit.id, chord: chord, at: Date.now() });
         if (recent.length > 12) recent.splice(0, recent.length - 12);
@@ -236,7 +263,9 @@
     bind({ id: 'view-switch', keys: ['1', '2', '3', '4', '5', '6', '7', '8', '9'], scope: 'Global',
         label: 'switch view by rail order',
         run: function (ev) {
-            var rail = document.querySelectorAll('.rail .nav-item');
+            /* T4/A-corr: view order = the rail's VIEW items — the injected Setup button (no
+               data-view, first in the rail) must not shift the 1-9 mapping. */
+            var rail = document.querySelectorAll('.rail .nav-item[data-view]');
             var item = rail[Number(ev.key) - 1];
             if (item) item.click();
         } });
@@ -245,14 +274,126 @@
         label: 'jump to the broker-account view',
         run: function () { if (typeof showView === 'function') showView('alpaca'); } });
 
+    /* §92 — the common-scenario gaps the audit found. (Zen already lives in menubar.js as
+       Alt+Z — a lesson from the receipt: check the registry before binding, ids replace.) The File menu always displayed
+       Ctrl+Alt+R for the engine restart and there was NO such binding (a lie); start/stop had
+       neither key nor hint. Now all three exist, plus the two journeys every session needs:
+       find an instrument, and move through the panels without the mouse. */
+    bind({ id: 'engine-start', keys: ['ctrl+alt+s'], scope: 'Global',
+        label: 'start the engine',
+        run: function () { if (window.OFAPENGINE) window.OFAPENGINE('start'); } });
+    bind({ id: 'engine-stop', keys: ['ctrl+alt+x'], scope: 'Global',
+        label: 'stop the engine',
+        run: function () { if (window.OFAPENGINE) window.OFAPENGINE('stop'); } });
+    bind({ id: 'engine-restart', keys: ['ctrl+alt+r'], scope: 'Global',
+        label: 'restart the engine',
+        run: function () { if (window.OFAPENGINE) window.OFAPENGINE('restart'); } });
+    bind({ id: 'find-instrument', keys: ['ctrl+f'], scope: 'Global',
+        label: 'find an instrument (the look-up)',
+        run: function () {
+            if (window.OFAPHINT && OFAPHINT.run) OFAPHINT.run('lookup');
+            else if (typeof showView === 'function') showView('ofx');
+        } });
+    bind({ id: 'view-next', keys: ['ctrl+pagedown'], scope: 'Global',
+        label: 'next panel in the rail',
+        run: function () { cycleView(1); } });
+    bind({ id: 'view-prev', keys: ['ctrl+pageup'], scope: 'Global',
+        label: 'previous panel in the rail',
+        run: function () { cycleView(-1); } });
+    function cycleView(step) {
+        var rail = document.querySelectorAll('.rail .nav-item[data-view]');
+        if (!rail.length) return;
+        var active = document.querySelector('.rail .nav-item.active');
+        var idx = 0;
+        for (var i = 0; i < rail.length; i += 1) { if (rail[i] === active) { idx = i; break; } }
+        var next = rail[(idx + step + rail.length) % rail.length];
+        if (next) next.click();
+    }
+
+    /* ── the shortcut prompts (§92) ────────────────────────────────────────── */
+
+    /* Where a control has a shortcut, the control says so — on its tooltip (title), for screen
+       readers (aria-keyshortcuts) and inside its hover card (data-hint-title, which hint.js reads
+       at show-time). One table, one pass, re-runnable: the menubar re-renders itself, controls
+       arrive with views, and a second call is harmless. */
+    function accelOf(id, index) {
+        for (var i = 0; i < map.length; i += 1) {
+            var b = map[i];
+            if (b.id !== id) continue;
+            if (typeof index === 'number') return b.keys && b.keys.length > index ? pretty(b.keys[index]) : '';
+            return keysText(b);
+        }
+        return '';
+    }
+
+    function annotate() {
+        if (typeof document === 'undefined' || !document.querySelectorAll) return;
+        function put(el, text) {
+            if (!el || !text) return;
+            el.setAttribute('aria-keyshortcuts', text);
+            var t = el.getAttribute('title') || '';
+            if (t.indexOf('Shortcut ' + text) < 0) {
+                el.setAttribute('title', (t ? t + ' · ' : '') + 'Shortcut ' + text);
+            }
+            var ht = el.getAttribute('data-hint-title');
+            if (ht && ht.indexOf('Shortcut') < 0) {
+                el.setAttribute('data-hint-title', ht + ' · Shortcut ' + text);
+            }
+        }
+        [['#ofapPause', 'freeze'], ['#menuBtn', 'palette'], ['#btnStart', 'engine-start'],
+         ['#btnStop', 'engine-stop'], ['#railTerminal', 'terminal-toggle'],
+         ['#menubarToggle', 'chrome-menubar'], ['#mbHide', 'chrome-menubar'],
+         ['#railToggle', 'chrome-rail'], ['#railHide', 'chrome-rail'],
+         ['#railReveal', 'chrome-rail']].forEach(function (r) {
+            document.querySelectorAll(r[0]).forEach(function (el) { put(el, accelOf(r[1])); });
+        });
+        /* T4/A-corr: the digits number VIEW items — the Setup button (no data-view) would
+           otherwise take "1" and shift every view's displayed digit by one. */
+        document.querySelectorAll('.rail .nav-item[data-view]').forEach(function (el, i) {
+            if (i < 9) put(el, String(i + 1));                        // the view-switch row, in order
+        });
+    }
+
     /* ── wiring ────────────────────────────────────────────────────────────── */
 
     if (document && typeof document.addEventListener === 'function') {
         document.addEventListener('keydown', dispatch);
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function () { setTimeout(annotate, 300); });
+        } else {
+            setTimeout(annotate, 300);
+        }
+    }
+
+    function setArmed(value) {
+        armed = Boolean(value);
+        if (typeof document !== 'undefined' && document.getElementById) {
+            var chip = document.getElementById('keysArmed');
+            if (chip) chip.hidden = !armed;
+        }
+        return armed;
+    }
+
+    /* T6/A8: whether a row could fire right now — the same gates the dispatcher consults
+       (run present, armed for danger rows, `when` true), so a menu that disables rows cannot
+       drift from what the key would actually do. */
+    function canDispatch(id) {
+        for (var i = 0; i < map.length; i += 1) {
+            if (map[i].id !== id) continue;
+            var b = map[i];
+            if (!b.run) return false;
+            if (b.danger && !armed) return false;
+            if (b.when) { try { return Boolean(b.when({})); } catch (e) { return false; } }
+            return true;
+        }
+        return false;
     }
 
     window.OFAPKEYS = {
         bind: bind, document: documentRows, list: list, run: run, dispatch: dispatch,
+        armed: function () { return armed; }, setArmed: setArmed,
+        canDispatch: canDispatch,
+        annotate: annotate, accelOf: accelOf,
         resolve: resolve, canonical: canonical, pretty: pretty, keysText: keysText,
         isTypingTarget: isTypingTarget, inView: inView, recent: recent,
         map: function () { return map; },

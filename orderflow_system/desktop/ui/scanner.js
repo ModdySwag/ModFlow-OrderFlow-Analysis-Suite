@@ -6,7 +6,7 @@
    "which of my instruments is doing something right now?" is one glance.
    ══════════════════════════════════════════════════════════════════ */
 
-const SCAN = { sort: 'score', view: null, lastKey: '', rows: [], timer: null };
+const SCAN = { sort: 'score', view: null, lastKey: '', rows: [], timer: null, prev: new Map() };
 
 const SCAN_COLUMNS = [
     ['symbol', 'Instrument', 'The instrument. Click a row to switch the whole app to it.'],
@@ -17,13 +17,14 @@ const SCAN_COLUMNS = [
     ['delta_pct', 'Δ% of vol', 'Delta as a percentage of volume — who is winning the tape, size-adjusted.'],
     ['prints_per_s', 'Prints/s', 'Tape speed: prints per second.'],
     ['big_trades', 'Big', 'Adaptive big-print count in the window.'],
-    ['sweeps', 'Sweeps', 'Multi-level sweep count.'],
-    ['stop_runs', 'Stop runs', 'Stop-run detections.'],
+    ['sweeps', 'Sweeps', 'Multi-level sweep count. Inferred from the tape.'],
+    ['stop_runs', 'Stop runs', 'Stop-run detections. Inferred from the tape.'],
     ['liquidations', 'Liqs', 'Liquidation events seen.'],
     ['imbalances', 'Imb', 'Levels currently showing a stacked imbalance.'],
+    ['radar_score', 'Radar', 'Tracked level lifecycles — armed · approaching · held. Sort to rank by what is arming where (approach ×1 + held ×2 + confirmed ×3, capped at 6).'],
     ['pressure_buy', 'Book bid %', 'Weighted bid liquidity as a percentage of its own recent normal.'],
     ['pressure_sell', 'Book ask %', 'Weighted ask liquidity as a percentage of its own recent normal.'],
-    ['absorption_score', 'Absorb', 'Absorption score: aggression that is failing to move price.'],
+    ['absorption_score', 'Absorb', 'Absorption score: aggression that is failing to move price. Inferred from the tape.'],
     ['depth_executions', 'Eaten', 'Prints that took a large share of the size resting at their price.'],
     ['depth_refills', 'Refilled', 'Levels that came back after being eaten (inferred hidden size).'],
     ['ticks_from_vwap', 'VWAP t', 'Distance from the VWAP in ticks; negative means below it.'],
@@ -75,6 +76,7 @@ function scanEnsureView() {
     const section = document.createElement('section');
     section.className = 'view';
     section.dataset.view = 'scanner';
+    section.dataset.surface = 'scanner';   // §89: parkable like the other live panels
     section.id = 'scanView';
     const head = SCAN_COLUMNS.map(([key, label, tip]) =>
         `<th data-sort="${key}" title="${tip}">${label}</th>`).join('');
@@ -83,12 +85,13 @@ function scanEnsureView() {
             <div class="view-title">Scanner</div>
             <div class="view-sub" id="scanSub">one ranked row per instrument — click a column to sort, a row to switch</div>
             <div class="grow"></div>
+            <button class="btn small surf-pause" data-surf="scanner" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
             <button class="btn small" id="scanRefresh" title="Refresh the table now">Refresh</button>
         </div>
         <div class="card"><div class="card-body">
             <div class="scan-wrap"><table class="scan">
                 <thead><tr>${head}</tr></thead>
-                <tbody id="scanRows"><tr><td colspan="19" class="dim">waiting for the engine…</td></tr></tbody>
+                <tbody id="scanRows"><tr><td colspan="20" class="dim">waiting for the engine…</td></tr></tbody>
             </table></div>
             <div class="scan-note" id="scanNote"></div>
         </div></div>`;
@@ -119,7 +122,7 @@ function scanRender(table) {
     if (!body) return;
     const rows = table.rows || [];
     if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="19" class="dim">the engine is not streaming anything yet</td></tr>';
+        body.innerHTML = '<tr><td colspan="20" class="dim">the engine is not streaming anything yet</td></tr>';
     } else {
         const maxScore = Math.max(1, ...rows.map((r) => r.score || 0));
         body.innerHTML = rows.map((r) => {
@@ -138,6 +141,7 @@ function scanRender(table) {
                 <td>${r.stop_runs || 0}</td>
                 <td>${r.liquidations || 0}</td>
                 <td>${r.imbalances || 0}</td>
+                <td>${r.radar_note || '–'}</td>
                 <td>${scanNum(r.pressure_buy, 0)}</td>
                 <td>${scanNum(r.pressure_sell, 0)}</td>
                 <td>${scanNum(r.absorption_score, 0)}</td>
@@ -147,6 +151,27 @@ function scanRender(table) {
                 <td title="score ${r.score}"><span class="scan-bar" style="width:${width}px"></span> ${scanNum(r.score, 0)}</td>
             </tr>`;
         }).join('');
+        /* §90: rows are rebuilt each poll, so the cell comparison lives here between renders:
+           a price that moved tints (and flashes); a row whose numbers moved announces itself. */
+        rows.forEach((r, i) => {
+            const tr = body.children[i];
+            if (!tr) return;
+            const prev = SCAN.prev.get(r.symbol);
+            if (prev && prev.last !== r.last && prev.last != null && r.last != null) {
+                const cell = tr.children[1];
+                const up = Number(r.last) > Number(prev.last);
+                if (cell) {
+                    cell.classList.remove('tick-up', 'tick-down');
+                    void cell.offsetWidth;
+                    cell.classList.add(up ? 'tick-up' : 'tick-down');
+                }
+            }
+            if (prev && prev.sig !== `${r.delta}|${r.delta_pct}|${r.prints_per_s}|${r.score}`) {
+                tr.classList.add('tick-in');
+                setTimeout(() => tr.classList.remove('tick-in'), 750);
+            }
+            SCAN.prev.set(r.symbol, { last: r.last, sig: `${r.delta}|${r.delta_pct}|${r.prints_per_s}|${r.score}` });
+        });
         body.querySelectorAll('td.sym').forEach((td) => {
             td.onclick = () => {
                 const sym = td.dataset.symbol;
@@ -171,6 +196,10 @@ function scanRender(table) {
 async function scanRefresh() {
     scanEnsureView();
     if (!document.getElementById('scanRows')) return;
+    if (window.OFAPINTENT && OFAPINTENT.held('scanner')) {
+        OFAPINTENT.deferKeyed('scanner', 'snap', scanRefresh);
+        return;
+    }
     const inView = (document.querySelector('.view[data-view="scanner"]') || {}).classList?.contains('active');
     if (!inView && SCAN.lastKey) return;                 // only poll the visible view
     try {
@@ -189,10 +218,16 @@ async function scanRefresh() {
 
 (function scanLoop() {
     scanEnsureView();
-    SCAN.timer = setInterval(() => {
-        if (window.OFAPINTENT && OFAPINTENT.anyHeld()) return;   // never repaint over the user's hands
-        const view = document.querySelector('.view[data-view="scanner"]');
-        if (view && (view.classList.contains('active') || view.style.display === 'flex')) scanRefresh();
-    }, 4000);
+    /* §89: registered with the global hold (was a silent gap) — pause clears it, resume rebuilds. */
+    const startPoll = () => {
+        const id = setInterval(() => {
+            if (window.OFAPINTENT && OFAPINTENT.anyHeld()) return;   // never repaint over the user's hands
+            const view = document.querySelector('.view[data-view="scanner"]');
+            if (view && (view.classList.contains('active') || view.style.display === 'flex')) scanRefresh();
+        }, 4000);
+        if (window.OFAPPause) window.OFAPPause.register(id, startPoll);
+        return id;
+    };
+    SCAN.timer = startPoll();
     setTimeout(scanRefresh, 5000);
 })();

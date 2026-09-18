@@ -324,3 +324,22 @@ def test_live_status_is_exposed_on_the_control_router():
 
     paths = {route.path for route in router.routes}
     assert "/api/control/live-status" in paths
+def test_a_failing_ticks_write_never_escapes_into_the_feed(system):
+    """_on_tick runs inside the venue's frame handler; an escape from there is read as a dead
+    socket by the feed session, so one transient "database is locked" tore every stream down."""
+    import asyncio
+
+    class FailingDB:
+        async def insert_ticks_batch(self, symbol, ticks):
+            raise RuntimeError("database is locked")
+
+    system.db = FailingDB()
+    system._tick_batch_size = 2
+    symbol = next(iter(system.pipelines))
+    ticks = _make_ticks(seconds=3)
+
+    asyncio.run(system._on_tick(symbol, ticks[0]))
+    asyncio.run(system._on_tick(symbol, ticks[1]))       # crosses the batch size: the write runs
+
+    assert system._db_write_failures == 1
+    assert system._tick_buffers[symbol] == [], "the failed batch is dropped, not retried forever"

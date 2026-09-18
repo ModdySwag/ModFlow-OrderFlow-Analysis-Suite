@@ -56,6 +56,21 @@ LAYOUT_THEMES = ("dark", "light")
 LAYOUT_GRID_COLS = 12
 LAYOUT_GRID_ROWS = 8
 LAYOUT_MAX_ITEMS = 24
+
+#: T6/A15 — which config paths each view’s "remember my settings" snapshot covers. The UI
+#: keeps a mirror (`menubar.js` VIEW_DEFAULTS_MAP) and `test_t6_menus.py` pins the two equal, so a
+#: snapshot can never name a path the store would refuse to carry back.
+VIEW_DEFAULT_MAP: dict[str, tuple[str, ...]] = {
+    "chart": ("ui.chart",),
+    "logs": ("ui.logs",),
+    "heatmap": ("atlas.heatmap",),
+    "tape": ("atlas.tape",),
+    "cvd": ("atlas.cvd",),
+    "profile": ("atlas.market_profile",),
+    "ofx": ("ofx", "atlas.ofx"),
+}
+
+LAYOUT_VERSIONS_MAX = 10                             # previous versions kept per layout
 LAYOUT_MAX_TABS = 12
 LAYOUT_MAX_WIDGETS = 24
 
@@ -66,12 +81,27 @@ LAYOUT_MAX_WIDGETS = 24
 #: The five expression modes, and the palettes, spelled exactly as `desktop/ui/expression.js`
 #: declares them. `test_expression.py` holds the JS catalogue and these tuples equal, so a mode added
 #: in one place and missing in the other fails the suite instead of silently clamping to the default.
-EXPRESSION_MODES = ("default", "delta", "split", "heat", "wick")
+EXPRESSION_MODES = ("default", "delta", "split", "heat", "wick", "candles")
 EXPRESSION_PALETTES = ("theme", "deutan", "protan", "tritan")
 #: The depth-heat ramps the engine can draw (`ofx.js` publishes the same list as `OFX.RAMPS`). The
 #: control, the engine and this clamp list are held equal by the same test — a third ramp added to
 #: the engine used to be unreachable from the control (§41 defect 1).
 RAMP_KEYS = ("classic", "thermal")
+#: T10/B3 — how the heat surfaces smooth their rows when the map is compressed: 'auto'
+#: engages below ~2.5 px rows (hysteresis releases at 4), 'manual' always draws it, 'none'
+#: keeps the raw cells. Display-only; `ramp.js` holds the maths and its selftest.
+SMOOTH_MODES = ("auto", "manual", "none")
+
+#: T12/B9 — the display dials that follow the instrument: both heat surfaces’ recipes, the
+#: Engine’s ramp and smoothing, the degrade switch. `scopes.js` snaps these when the instrument
+#: changes and applies the stored block when that instrument comes back; the sanitiser keeps
+#: only these paths, so a hand-edited file can never smuggle anything else into a scope.
+SCOPED_DISPLAY_PATHS = (
+    "ofx.heat_contrast", "ofx.heat_floor", "ofx.heat_floor_pct", "ofx.heat_smooth", "ofx.ramp",
+    "atlas.ofx.degrade",
+    "atlas.heatmap.upper_cutoff_pct", "atlas.heatmap.upper_cutoff_abs", "atlas.heatmap.contrast",
+    "atlas.heatmap.floor", "atlas.heatmap.floor_pct", "atlas.heatmap.smooth",
+)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -99,26 +129,96 @@ def log_path() -> Path:
     return config_dir() / "orderflow.log"
 
 
+def _in_source_checkout(path: Path) -> bool:
+    """True when this file sits inside a git working tree (a checkout, not an install)."""
+    try:
+        here = path.resolve().parent
+    except OSError:                                # pragma: no cover - unresolvable path
+        return False
+    for candidate in (here, *here.parents):
+        if (candidate / ".git").exists():
+            return True
+    return False
+
+
+def _looks_like_our_db(path: Path) -> bool:
+    """A real database of ours: SQLite, read-only, carrying the `ticks` table."""
+    import sqlite3
+
+    con = None
+    try:
+        con = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=2.0)
+        row = con.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ticks'"
+        ).fetchone()
+        return bool(row and row[0])
+    except Exception:
+        return False
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
+
+
 def db_path() -> Path:
     """The per-user database (never the repo, which may be read-only if installed).
 
     One-time migration: an older install kept `orderflow_data.db` in the working
     directory, so if this user has one and the per-user copy is still empty, copy
     it across once — otherwise a fresh desktop start would look like the history
-    vanished.
+    vanished. Two guards keep that from importing somebody else's file: the legacy
+    database must carry our `ticks` table, and a working directory inside a source
+    checkout is never a user install — a stray collector database had been written
+    into the repo here, and every scratch profile was quietly inheriting its
+    hundreds of thousands of stale rows.
     """
     target = config_dir() / "orderflow_data.db"
     try:
         legacy = Path("orderflow_data.db")
         thin = target.is_file() is False or target.stat().st_size < 1_000_000
         if thin and legacy.is_file() and legacy.stat().st_size > 1_000_000:
-            import shutil
+            if _in_source_checkout(legacy):
+                logger.debug("legacy DB %s is inside a source checkout — not migrating", legacy)
+            elif not _looks_like_our_db(legacy):
+                logger.debug("legacy DB %s is not an OrderFlow database — not migrating", legacy)
+            else:
+                import shutil
 
-            shutil.copy2(legacy, target)
-            logger.info("Migrated %s → %s (%.1f MB)", legacy, target, legacy.stat().st_size / 1e6)
+                shutil.copy2(legacy, target)
+                logger.info("Migrated %s → %s (%.1f MB)", legacy, target, legacy.stat().st_size / 1e6)
     except Exception:                              # pragma: no cover - never break startup
         logger.debug("legacy DB migration skipped", exc_info=True)
     return target
+
+
+def storage_state_path() -> Path:
+    """Where the last retention pass is remembered (derived state, safe to delete).
+
+    Without this the storage line read `last prune: never` after every restart, because the
+    summary only ever lived in the engine's memory.
+    """
+    return config_dir() / "storage_state.json"
+
+
+def save_last_prune(summary: dict) -> None:
+    """Persist the prune summary so the Logs panel can still quote it after a restart."""
+    try:
+        storage_state_path().write_text(
+            json.dumps(summary, separators=(",", ":")), encoding="utf-8"
+        )
+    except Exception:                              # pragma: no cover - a summary is not worth a failure
+        logger.debug("could not persist the prune summary", exc_info=True)
+
+
+def load_last_prune() -> "dict | None":
+    """The last persisted prune summary, or None when none has run on this machine yet."""
+    try:
+        data = json.loads(storage_state_path().read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def backfill_cache_dir() -> Path:
@@ -156,6 +256,12 @@ ASSET_CLASS = {
     "EURJPY": "Forex", "GBPJPY": "Forex",
     "AAPL": "Stocks", "TSLA": "Stocks", "AMZN": "Stocks", "MSFT": "Stocks",
     "NVDA": "Stocks", "META": "Stocks", "GOOGL": "Stocks",
+    # futures roots the NinjaTrader bridge commonly carries (§84)
+    "NQ": "Indices", "MNQ": "Indices", "ES": "Indices", "MES": "Indices",
+    "YM": "Indices", "MYM": "Indices", "RTY": "Indices", "M2K": "Indices",
+    "CL": "Energy", "MCL": "Energy", "NG": "Energy",
+    "GC": "Metals", "MGC": "Metals", "SI": "Metals",
+    "6E": "Forex", "6B": "Forex", "6J": "Forex", "6A": "Forex", "6C": "Forex", "6S": "Forex",
     "BTCUSDT": "Crypto",
 }
 
@@ -206,7 +312,7 @@ def default_config() -> dict[str, Any]:
 
     return {
         "version": 1,
-        "data_source": "bybit",            # mt5 | bybit | binance | hyperliquid | okx | both | alpaca | all
+        "data_source": "bybit",            # mt5 | bybit | binance | hyperliquid | okx | both | alpaca | ninjatrader | all
         "instruments": instruments,
         "telegram": {"enabled": False, "bot_token": "", "chat_id": ""},
         # Optional alert channels. All free: ntfy needs no account at all (pick a
@@ -241,7 +347,7 @@ def default_config() -> dict[str, Any]:
         # Terminal layouts: the widget arrangement for the shell's terminal mode — named, per screen
         # and per theme, with tabs. Same atomic write + sanitiser pattern as every other block, and
         # the config file stays the single store (browser storage is never the source of truth).
-        "layouts": {"mode": "classic", "active": "", "items": {}},
+        "layouts": {"mode": "classic", "active": "", "items": {}, "versions": {}},
         # Drawings, per view+symbol, in data space (epoch seconds + price). The shape mirrors the
         # reference program's own drawingSettings so the two models stay comparable.
         "drawings": {},
@@ -250,7 +356,13 @@ def default_config() -> dict[str, Any]:
                 "min_block": 0.0, "va_pct": 0.7,
                 # the depth heat recipe: a hue ramp carries magnitude only while it stays monotone in
                 # luminance, which is a property `ofx.selftest` measures (P1-8)
-                "ramp": "classic"},
+                "ramp": "classic",
+                # B2: the heat scheme's live dials — contrast (a gamma over the ramp; 1 = as
+                # shipped), a floor in size units and a floor as a share of the book's sizes.
+                "heat_contrast": 1.0, "heat_floor": 0.0, "heat_floor_pct": 0.0,
+                # T10/B3: vertical smoothing of the depth heat ('auto' engages only when the
+                # rows compress below ~2.5 px; 'none' keeps the raw cells).
+                "heat_smooth": "auto"},
         # How a bar is expressed (P1-8): one mode and one palette per chart surface, so the Engine
         # view and the Chart view can differ about their own drawing. The words for whatever is
         # chosen come from `desktop/ui/expression.js` — the same module the renderers paint from.
@@ -279,7 +391,19 @@ def default_config() -> dict[str, Any]:
                 "bucket_ms": 1000, "max_columns": 900, "wall_quantile": 0.97,
                 "pull_pct": 0.6, "pull_window_ms": 3000, "stack_pct": 1.5,
                 "upper_cutoff_pct": 5.0,     # colour saturates at this top share (the reference layout)
+                "upper_cutoff_abs": 0.0,     # B2: or an exact size (0 = use the % above); applies on restart
+                "contrast": 1.0,             # B2: gamma over the ramp (1 = as shipped)
+                "floor": 0.0,                # B2: no colour below this resting size (0 = off)
+                "floor_pct": 0.0,            # B2: …or below this bottom share of sizes (0 = off)
+                "smooth": "auto",            # T10/B3: vertical smoothing (auto | manual | none)
+                "values_min_px": 0,          # T5/A20: draw cell sizes once a cell is this wide (0 = off)
             },
+            # T5/A11: display-side renderer preferences read by the canvases, not by the ingest.
+            # T10/B13: degrade the footprint to plain candles once a column drops under the
+            # text threshold (display-only; false keeps the volume-profile fallback).
+            "ofx": {"fit_tolerance": 0.25, "degrade": True},
+            # T14/B4: the columns rail on the Map — the reset semantics ARE the feature.
+            "columns": {"metric": "traded", "reset": "manual", "threshold": 500, "reset_s": 30},
             "tape": {
                 "big_quantile": 0.99, "big_min_size": 0.0, "block_multiple": 3.0,
                 "sweep_levels": 5, "sweep_max_ms": 120, "sweep_min_size": 0.0,
@@ -302,11 +426,25 @@ def default_config() -> dict[str, Any]:
             "footprint": {"min_print_size": 0.0, "imbalance_mode": "same_price",
                           "imbalance_threshold": 3.0, "equal_tolerance": 0.0,
                           "show_equal": True, "show_extremes": True},
+            # Level reads (fold-in plan §3): unfinished-business magnets drawn until price
+            # revisits them, and node runs (consecutive bars sharing one high-volume price).
+            # Both are fed from closed bars; a disabled row stops feeding and dispatching.
+            "unfinished": {"enabled": True, "max_open": 200, "merge_ticks": 0.5},
+            "nodes": {"enabled": True, "tol_ticks": 0.5},
+            # G1 level radar (fold-in plan §4): every level source tracked as a lifecycle object
+            # (armed → approaching → defended / confirmed → spent / failed), ranked in the Scanner.
+            "radar": {"enabled": True, "tol_ticks": 2.0, "approach_mult": 2.5,
+                      "max_age_min": 240, "spent_keep_min": 30, "feed_signals": True},
             "dots": {"window_ms": 300000, "cluster_ms": 250, "min_size": 0.0},
             "correlation": {"bucket_ms": 60000, "window": 120, "min_samples": 10, "top": 12},
             # trade detector: executions that eat resting depth, and refills of those levels
             "detector": {"min_share": 0.25, "size_mult": 4.0, "resting_mult": 8.0,
                          "refill_pct": 0.7, "refill_ms": 4000},
+            # T4/A5: how long a panel's samples may age before the chips and the status strip
+            # call it stale — seconds, 0 = the built-in window (depth/trades 5 s, quote/candles
+            # 60 s; atlas/freshness.py is the table of record and test_freshness.py keeps the JS
+            # copy equal). Display-only: the server's own windows are unchanged.
+            "freshness": {"depth_s": 0, "quote_s": 0, "trades_s": 0, "candles_s": 0},
             # scanner: cross-instrument ranking window (seconds)
             "scanner_window_s": 900,
             # participants' intent: DOM pressure weighting + training window (sensible defaults)
@@ -347,12 +485,46 @@ def default_config() -> dict[str, Any]:
             "retention_days": 7,           # tick rows older than this are pruned; 0 keeps all
             "prune_interval_hours": 6,     # how often the retention job runs
         },
+        # R11: economic-calendar alerts. Off by default — an alert with no lead time is noise.
+        "calendar": {
+            "alerts": False,           # tell me before high-impact events
+            "lead_minutes": 15,        # how long before
+            "currencies": "",          # "USD,EUR" — empty = every currency
+        },
+        # R7: program updates. The app ships from a public repo; a check costs one keyless API
+        # call, so the only real decisions are how often, which channel, and whether to fetch the
+        # artefact unattended. `last_check_ms` and `skipped_version` are written by the updater.
+        "updates": {
+            "mode": "check",           # check = tell me when there is one; download = fetch it too
+            "interval_hours": 6,       # 1..720 — how often a check may run while the app is open
+            "channel": "stable",       # stable | prerelease
+            "download_dir": "",        # empty = <config>/updates
+            "last_check_ms": 0,        # stamped by the updater after each check
+            "skipped_version": "",     # "not this one" — survives restarts
+        },
+        # R6: storage management — backups the user schedules, and the size budget that warns
+        # before a disk does. `backup_target` is any writable path: a folder, a UNC share
+        # (\\server\share), a removable drive or a synced folder. Empty = <config>/backups.
+        "storage": {
+            "auto_backup": False,          # run the backup job on its interval while the engine is up
+            "backup_interval_hours": 24,   # 1..720
+            "backup_target": "",
+            "backup_format": "sqlite+csv",  # sqlite | csv | sqlite+csv
+            "backup_keep": 5,              # rotation: keep the newest N sets in the target
+            "max_db_mb": 0,                # 0 = no budget; else warn/email when the DB passes it
+            "email_report": False,         # email a report after every automatic backup
+            "email_threshold": True,       # email when the size budget is passed
+        },
         # GUI-only flags. The engine never reads these; they exist so the front end
         # can remember what the user already saw without a second storage file.
         "ui": {
             # "not now" on the Alpaca banner — persisted so the dismissal survives a
             # reload, and cleared at the next start while the account is unlinked
             "banner_dismissed_alpaca": False,
+            "layout_lock": False,
+            "heatmap_minimal": False,    # T5/A10: the heatmap’s chrome-lite mode
+            "view_defaults": {},          # T6/A15: remembered per-view settings (view → path → subtree)
+            "paper_lock": False,
             # where the setup assistant should resume (step index, 0 = start)
             "wizard_resume_step": 0,
             # The shell's appearance (theme.js, themes/*.css). The config is the record; the browser
@@ -360,10 +532,30 @@ def default_config() -> dict[str, Any]:
             "theme": "dark",            # dark | light | contrast
             "accent": "cobalt",         # the eight Windows accents
             "density": "comfortable",   # comfortable | compact | dense
+            # T11/B15: contrast readability tiers; T11/B14: the interface scale (Ctrl+= / Ctrl+- / Ctrl+0).
+            "contrast": "standard",      # calm | standard | aggressive
+            "scale": 1.0,                # 0.75–1.5, step 0.05
+            # T11/B17: link-group colours (A–D) — the group letter always rides beside the colour.
+            "link_colors": {"A": "#6ec1ff", "B": "#ffb454", "C": "#7fe0a8", "D": "#d49bff"},
+            # T12/B9: per-instrument display blocks — the dials in SCOPED_DISPLAY_PATHS, snapped
+            # when the instrument changes and applied when that instrument comes back.
+            "instrument_scopes": {},
+            # T14/B6: the look-up overlay’s last filters (connection / group / text).
+            "lookup": {"source": "all", "type": "all", "text": ""},
+            # T14/B7: the inbox’s reading state — the read watermark, DND and the sort toggle.
+            "notifications": {"read_ms": 0, "dnd": False, "priority": False},
+            # T15/B5: the one-table component — which surfaces trial it, and their saved layouts.
+            "table_component": [],
+            "tables": {},
             # §72: the desktop window's own geometry, so a multi-monitor user reopens where they
             # left off — on the monitor they left it on. x/y are None until the window has been
             # closed once; the launcher then clears/pins them against the screens that exist.
             "window": {"width": 1500, "height": 940, "x": None, "y": None, "maximised": False},
+            # §83: view state the user sets by hand. These used to live only in the page, so a
+            # restart put the chart back on its factory range and re-showed every marker the
+            # user had switched off — the same class of "I have to set it again" as the keys.
+            "chart": {"range": 0, "markers": True, "vp": True},
+            "logs": {"auto": True, "level": ""},
             # §73: the auxiliary windows that are OPEN — one widget each, placed on a monitor.
             # This is the desired set, not a history: opening adds, closing (either way) removes,
             # and a launch restores exactly what was open. Geometry lives here so a multi-monitor
@@ -640,6 +832,35 @@ def _sanitise_layouts(cfg: dict[str, Any]) -> None:
     active = str(block.get("active") or "").strip().lower()
     block["active"] = active if active in items else ""
 
+    # Previous versions (T2): what a layout was before the last writes. Kept per id — a
+    # version of a deleted layout stays, because that is exactly what makes a delete
+    # recoverable. Newest first, capped, and a version of nothing is not a version.
+    raw_versions = block.get("versions")
+    versions: dict[str, list[dict[str, Any]]] = {}
+    if isinstance(raw_versions, dict):
+        for key, ring in list(raw_versions.items())[:LAYOUT_MAX_ITEMS]:
+            ident = str(key).strip().lower()
+            if not LAYOUT_ID_RE.match(ident) or not isinstance(ring, list):
+                continue
+            kept: list[dict[str, Any]] = []
+            for row in ring:
+                if len(kept) >= LAYOUT_VERSIONS_MAX:
+                    break
+                if not isinstance(row, dict):
+                    continue
+                entry = _clean_layout(ident, row.get("entry"))
+                if entry is None:
+                    continue
+                try:
+                    at = max(0, int(row.get("at") or 0))
+                except (TypeError, ValueError):
+                    at = 0
+                kept.append({"at": at, "entry": entry,
+                             "name": str(row.get("name") or entry.get("name") or "")[:40]})
+            if kept:
+                versions[ident] = kept
+    block["versions"] = versions
+
 
 def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     """Clamp/coerce user input so a bad value can never kill the engine."""
@@ -660,6 +881,28 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     sierra["password"] = str(sierra.get("password", "") or "")[:200]
     sierra["use_tls"] = bool(sierra.get("use_tls", False))
     sierra["symbol"] = str(sierra.get("symbol", "") or "").strip().upper()[:24]
+
+    # MT5: apply_settings() reads these straight into the settings module, so a hand-edited
+    # config.json could kill every later engine start (a non-numeric poll_interval_ms raises
+    # inside int()). Clamp only a block that exists — a config without one is left alone.
+    raw_mt5 = cfg.get("mt5")
+    if isinstance(raw_mt5, dict):
+        try:
+            raw_mt5["login"] = max(0, int(raw_mt5.get("login", 0) or 0))
+        except (TypeError, ValueError):
+            raw_mt5["login"] = 0
+        raw_mt5["password"] = str(raw_mt5.get("password", "") or "")[:200]
+        raw_mt5["server"] = str(raw_mt5.get("server", "") or "").strip()[:120]
+        raw_mt5["path"] = str(raw_mt5.get("path", "") or "").strip()[:400]
+        try:
+            raw_mt5["poll_interval_ms"] = max(20, min(5000, int(raw_mt5.get("poll_interval_ms", 100) or 100)))
+        except (TypeError, ValueError):
+            raw_mt5["poll_interval_ms"] = 100
+        raw_mt5["enable_book"] = bool(raw_mt5.get("enable_book", True))
+        try:
+            raw_mt5["download_history_days"] = max(0, min(60, int(raw_mt5.get("download_history_days", 3) or 0)))
+        except (TypeError, ValueError):
+            raw_mt5["download_history_days"] = 3
 
     # Studies: names are module identifiers, parameters are user scalars, and a pasted
     # module is source text the browser validates before running. Nothing here executes
@@ -852,6 +1095,11 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     ofx["min_block"] = round(_clamp(ofx.get("min_block", 0.0), 0.0, 1_000_000.0, 0.0), 2)
     ofx["va_pct"] = round(_clamp(ofx.get("va_pct", 0.7), 0.5, 0.95, 0.7), 2)
     ofx["ramp"] = ofx.get("ramp") if ofx.get("ramp") in RAMP_KEYS else "classic"
+    # B2: the heat scheme's live dials, clamped to the registry's own bounds (junk restores the look).
+    ofx["heat_contrast"] = round(_clamp(ofx.get("heat_contrast", 1.0), 0.5, 2.5, 1.0), 3)
+    ofx["heat_floor"] = round(_clamp(ofx.get("heat_floor", 0.0), 0.0, 1_000_000.0, 0.0), 3)
+    ofx["heat_floor_pct"] = round(_clamp(ofx.get("heat_floor_pct", 0.0), 0.0, 50.0, 0.0), 2)
+    ofx["heat_smooth"] = ofx.get("heat_smooth") if ofx.get("heat_smooth") in SMOOTH_MODES else "auto"
 
     # Expression (P1-8): an unknown mode or palette draws the default rather than a blank stage —
     # the same rule the appearance keys follow, and the JS clamps to the identical lists.
@@ -860,7 +1108,8 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
         node = _block(expr, surface)
         node["mode"] = node.get("mode") if node.get("mode") in EXPRESSION_MODES else "default"
         node["palette"] = node.get("palette") if node.get("palette") in EXPRESSION_PALETTES else "theme"
-    if cfg["data_source"] not in ("mt5", "bybit", "binance", "hyperliquid", "okx", "both", "alpaca", "all"):
+    if cfg["data_source"] not in ("mt5", "bybit", "binance", "hyperliquid", "okx", "both", "alpaca",
+                                  "ninjatrader", "all"):
         cfg["data_source"] = "bybit"
 
     sierra_block = (cfg.get("platforms") or {}).get("sierra")
@@ -869,6 +1118,16 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
         if sierra_block["plan"] not in ("free", "p3", "p5", "p10", "p11", "p12"):
             sierra_block["plan"] = "free"
         sierra_block["integrated"] = bool(sierra_block.get("integrated"))
+
+    # NinjaTrader bridge block (only when present — a fresh config grows it when the platform
+    # view saves; the plan ids mirror platforms.NINJATRADER_PLAN_IDS and the test pins that).
+    nt_block = plat.get("ninjatrader")
+    if isinstance(nt_block, dict):
+        nt_block["plan"] = str(nt_block.get("plan") or "free").lower()
+        if nt_block["plan"] not in ("free", "monthly", "lifetime"):
+            nt_block["plan"] = "free"
+        nt_block["integrated"] = bool(nt_block.get("integrated"))
+        nt_block["bridge_built"] = bool(nt_block.get("bridge_built"))
 
     dash = _block(cfg, "dashboard")
     try:
@@ -891,6 +1150,9 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
             inst["tick_size"] = float(inst.get("tick_size", 0.1))
         except (TypeError, ValueError):
             inst["tick_size"] = 0.1
+        if inst.get("ninjatrader_symbol"):
+            # Case is the terminal's: "NQ 12-26" is a name, not a ticker — never fold it.
+            inst["ninjatrader_symbol"] = str(inst["ninjatrader_symbol"]).strip()[:48]
 
     risk = _block(cfg, "risk")
     for key, default in (("signal_cooldown_seconds", 30.0), ("min_composite_score", 40.0)):
@@ -922,6 +1184,40 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     view = str(search.get("default_view") or "orderflow")
     search["default_view"] = view if view in ("orderflow", "chart", "tape", "heatmap", "cvd", "profile") else "orderflow"
 
+    fresh = _block(_block(cfg, "atlas"), "freshness")
+    _fresh_clean: dict[str, float] = {}
+    for _kind in ("depth_s", "quote_s", "trades_s", "candles_s"):
+        try:
+            _fresh_clean[_kind] = min(3600.0, max(0.0, float(fresh.get(_kind, 0.0) or 0.0)))
+        except (TypeError, ValueError):
+            _fresh_clean[_kind] = 0.0
+    fresh.clear()                    # the block is rebuilt: a hand-edited key is not kept
+    fresh.update(_fresh_clean)
+    _disp = _block(_block(cfg, "atlas"), "heatmap")
+    try:
+        _disp["values_min_px"] = int(min(200.0, max(0.0, float(_disp.get("values_min_px", 0) or 0))))
+    except (TypeError, ValueError):
+        _disp["values_min_px"] = 0
+    # B2: the absolute ceiling and the two rendering dials, clamped to the registry's bounds.
+    _disp["upper_cutoff_abs"] = round(_clamp(_disp.get("upper_cutoff_abs", 0.0), 0.0,
+                                             100_000_000.0, 0.0), 3)
+    _disp["contrast"] = round(_clamp(_disp.get("contrast", 1.0), 0.5, 2.5, 1.0), 3)
+    _disp["floor"] = round(_clamp(_disp.get("floor", 0.0), 0.0, 1_000_000.0, 0.0), 3)
+    _disp["floor_pct"] = round(_clamp(_disp.get("floor_pct", 0.0), 0.0, 50.0, 0.0), 2)
+    _disp["smooth"] = _disp.get("smooth") if _disp.get("smooth") in SMOOTH_MODES else "auto"
+    _ofxp = _block(_block(cfg, "atlas"), "ofx")
+    _ofxp["degrade"] = bool(_ofxp.get("degrade", True))
+    _ft = _ofxp.get("fit_tolerance", 0.25)
+    try:
+        _ofxp["fit_tolerance"] = round(min(0.9, max(0.0, float(0.25 if _ft is None else _ft))), 3)
+    except (TypeError, ValueError):
+        _ofxp["fit_tolerance"] = 0.25
+    # T14/B4: the columns rail’s dials — two enums and two bounds; an unknown reads the shipped look.
+    _acols = _block(_block(cfg, "atlas"), "columns")
+    _acols["metric"] = _acols.get("metric") if _acols.get("metric") in ("traded", "resting") else "traded"
+    _acols["reset"] = _acols.get("reset") if _acols.get("reset") in ("manual", "scheduled", "conditional") else "manual"
+    _acols["threshold"] = _clamp(_acols.get("threshold", 500), 0.0, 1e9, 500.0)
+    _acols["reset_s"] = _clamp(_acols.get("reset_s", 30), 5.0, 600.0, 30.0)
     fp = _block(_block(cfg, "atlas"), "footprint")
     fp["min_print_size"] = max(0.0, float(fp.get("min_print_size", 0.0) or 0.0))
     mode = str(fp.get("imbalance_mode", "same_price") or "same_price").lower()
@@ -936,6 +1232,22 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
         fp["equal_tolerance"] = 0.0
     fp["show_equal"] = bool(fp.get("show_equal", True))
     fp["show_extremes"] = bool(fp.get("show_extremes", True))
+    # Level reads (fold-in plan §3): unfinished-business + node trackers' dials.
+    _unf = _block(_block(cfg, "atlas"), "unfinished")
+    _unf["enabled"] = bool(_unf.get("enabled", True))
+    _unf["max_open"] = int(_clamp(_unf.get("max_open", 200), 1.0, 5000.0, 200.0))
+    _unf["merge_ticks"] = round(_clamp(_unf.get("merge_ticks", 0.5), 0.0, 10.0, 0.5), 3)
+    _nd = _block(_block(cfg, "atlas"), "nodes")
+    _nd["enabled"] = bool(_nd.get("enabled", True))
+    _nd["tol_ticks"] = round(_clamp(_nd.get("tol_ticks", 0.5), 0.0, 10.0, 0.5), 3)
+    # G1 level radar (fold-in plan §4): its own dials + the U3 hand-off switch.
+    _rd = _block(_block(cfg, "atlas"), "radar")
+    _rd["enabled"] = bool(_rd.get("enabled", True))
+    _rd["tol_ticks"] = round(_clamp(_rd.get("tol_ticks", 2.0), 0.1, 50.0, 2.0), 3)
+    _rd["approach_mult"] = round(_clamp(_rd.get("approach_mult", 2.5), 1.0, 10.0, 2.5), 3)
+    _rd["max_age_min"] = int(_clamp(_rd.get("max_age_min", 240), 5.0, 1440.0, 240.0))
+    _rd["spent_keep_min"] = int(_clamp(_rd.get("spent_keep_min", 30), 0.0, 240.0, 30.0))
+    _rd["feed_signals"] = bool(_rd.get("feed_signals", True))
     sort = str(search.get("sort") or "relevance")
     search["sort"] = sort if sort in ("relevance", "symbol", "name", "last", "chg", "volume", "feed") else "relevance"
 
@@ -946,6 +1258,22 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
 
     ui = _block(cfg, "ui")
     ui["banner_dismissed_alpaca"] = bool(ui.get("banner_dismissed_alpaca", False))
+    ui["layout_lock"] = bool(ui.get("layout_lock", False))
+    ui["heatmap_minimal"] = ui.get("heatmap_minimal") is True
+    _vd = ui.get("view_defaults")
+    _vdc: dict[str, dict[str, Any]] = {}
+    if isinstance(_vd, dict):
+        for _view, _groups in list(_vd.items())[:12]:
+            if _view not in VIEW_DEFAULT_MAP or not isinstance(_groups, dict):
+                continue
+            _keep: dict[str, Any] = {}
+            for _path, _sub in list(_groups.items())[:8]:
+                if _path in VIEW_DEFAULT_MAP[_view] and isinstance(_sub, dict):
+                    _keep[_path] = _sub
+            if _keep:
+                _vdc[_view] = _keep
+    ui["view_defaults"] = _vdc
+    ui["paper_lock"] = bool(ui.get("paper_lock", False))
     # Appearance: an unknown value paints the default rather than a broken shell (theme.js clamps too,
     # so the file and the page agree about what is legal).
     ui["theme"] = ui.get("theme") if ui.get("theme") in ("dark", "light", "contrast") else "dark"
@@ -953,6 +1281,81 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
         "cobalt", "teal", "green", "lime", "amber", "orange", "magenta", "violet") else "cobalt"
     ui["density"] = ui.get("density") if ui.get("density") in (
         "comfortable", "compact", "dense") else "comfortable"
+    # T11/B15: an unknown tier reads standard; T11/B14: the scale clamps to 0.75–1.5 in 0.05 steps.
+    ui["contrast"] = ui.get("contrast") if ui.get("contrast") in ("calm", "standard", "aggressive") else "standard"
+    try:
+        _ui_scale = float(ui.get("scale", 1.0))
+    except (TypeError, ValueError):
+        _ui_scale = 1.0
+    ui["scale"] = round(round(min(1.5, max(0.75, _ui_scale)) / 0.05) * 0.05, 2)
+    # T11/B17: each group’s colour is a #rrggbb or the shipped default (junk restores the default).
+    _lc_in = ui.get("link_colors") if isinstance(ui.get("link_colors"), dict) else {}
+    _lc_out = {}
+    for _lg, _lc_default in (("A", "#6ec1ff"), ("B", "#ffb454"), ("C", "#7fe0a8"), ("D", "#d49bff")):
+        _lc_value = _lc_in.get(_lg)
+        _lc_out[_lg] = _lc_value if (isinstance(_lc_value, str) and len(_lc_value) == 7
+                                     and _lc_value.startswith("#")
+                                     and all(_c in "0123456789abcdefABCDEF" for _c in _lc_value[1:])) else _lc_default
+    ui["link_colors"] = _lc_out
+    # T12/B9: per-instrument display blocks — known paths only, values the params gate would
+    # take, at most 40 instruments, symbols in the same shape the instruments block uses.
+    _isx_in = ui.get("instrument_scopes") if isinstance(ui.get("instrument_scopes"), dict) else {}
+    _isx_out = {}
+    for _isx_sym, _isx_block in list(_isx_in.items())[:40]:
+        _isx_s = str(_isx_sym).strip().upper()
+        if not _isx_s or len(_isx_s) > 24 or not all(_c.isalnum() or _c in "._-/" for _c in _isx_s):
+            continue
+        if not isinstance(_isx_block, dict):
+            continue
+        _isx_keep = {}
+        for _isx_p, _isx_v in list(_isx_block.items()):
+            if _isx_p not in SCOPED_DISPLAY_PATHS:
+                continue
+            if isinstance(_isx_v, bool):
+                _isx_keep[_isx_p] = _isx_v
+            elif isinstance(_isx_v, (int, float)) and abs(_isx_v) <= 1e9:
+                _isx_keep[_isx_p] = _isx_v
+            elif isinstance(_isx_v, str) and len(_isx_v) <= 32:
+                _isx_keep[_isx_p] = _isx_v
+        if _isx_keep:
+            _isx_out[_isx_s] = _isx_keep
+    ui["instrument_scopes"] = _isx_out
+    # T14/B6: the look-up overlay’s filters — small, known shapes, nothing that can break a paint.
+    _lk = ui.get("lookup") if isinstance(ui.get("lookup"), dict) else {}
+    ui["lookup"] = {
+        "source": _lk.get("source") if _lk.get("source") in ("all", "bybit", "mt5", "alpaca") else "all",
+        "type": (str(_lk.get("type") or "all")[:24] or "all"),
+        "text": str(_lk.get("text") or "")[:120],
+    }
+    # T14/B7: the inbox’s reading state — an integer watermark and two switches, nothing more.
+    _nt = ui.get("notifications") if isinstance(ui.get("notifications"), dict) else {}
+    try:
+        _nt_read = max(0, int(_nt.get("read_ms", 0)))
+    except (TypeError, ValueError):
+        _nt_read = 0
+    ui["notifications"] = {"read_ms": _nt_read, "dnd": bool(_nt.get("dnd", False)),
+                           "priority": bool(_nt.get("priority", False))}
+    # T15/B5: the one-table component’s record — small lists of small strings, nothing else.
+    _tc = ui.get("table_component")
+    ui["table_component"] = [str(x)[:32] for x in (_tc if isinstance(_tc, list) else [])[:8]
+                             if isinstance(x, (str, int))]
+    _tb = ui.get("tables") if isinstance(ui.get("tables"), dict) else {}
+    _tb_out = {}
+    for _tid, _tp in list(_tb.items())[:8]:
+        if not isinstance(_tp, dict):
+            continue
+        _keep_tp = {}
+        for _k2 in ("order", "hidden"):
+            if isinstance(_tp.get(_k2), list):
+                _keep_tp[_k2] = [str(x)[:32] for x in _tp[_k2][:24] if isinstance(x, (str, int))]
+        if isinstance(_tp.get("sort"), dict) and isinstance(_tp["sort"].get("key"), str):
+            _keep_tp["sort"] = {"key": str(_tp["sort"]["key"])[:32],
+                                "dir": "desc" if _tp["sort"].get("dir") == "desc" else "asc"}
+        if isinstance(_tp.get("group"), str):
+            _keep_tp["group"] = str(_tp["group"])[:32]
+        if _keep_tp:
+            _tb_out[str(_tid)[:32]] = _keep_tp
+    ui["tables"] = _tb_out
     try:
         ui["wizard_resume_step"] = max(0, int(ui.get("wizard_resume_step", 0)))
     except (TypeError, ValueError):
@@ -962,6 +1365,25 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     ui["window"] = clean_window(ui.get("window"))
     # §73: the auxiliary windows that are open — the desired set a launch restores.
     ui["windows"] = clean_windows(ui.get("windows"))
+
+    # §83: the chart and logs view state — clamped here so a hand-edited file can never park the
+    # chart on a nonsense range or leave the log filter on a level that does not exist.
+    chart = ui.get("chart") if isinstance(ui.get("chart"), dict) else {}
+    try:
+        range_s = int(chart.get("range", 0) or 0)
+    except (TypeError, ValueError):
+        range_s = 0
+    ui["chart"] = {
+        "range": range_s if 0 <= range_s <= 2_592_000 else 0,
+        "markers": bool(chart.get("markers", True)),
+        "vp": bool(chart.get("vp", True)),
+    }
+    logs_cfg = ui.get("logs") if isinstance(ui.get("logs"), dict) else {}
+    level = str(logs_cfg.get("level", "") or "").upper()
+    ui["logs"] = {
+        "auto": bool(logs_cfg.get("auto", True)),
+        "level": level if level in ("", "DEBUG", "INFO", "WARNING", "ERROR") else "",
+    }
 
     # §79: the Help Centre's own preferences. An unknown mode or dock paints the default rather
     # than a broken panel (the UI clamps too, so the file and the page agree about what is legal),

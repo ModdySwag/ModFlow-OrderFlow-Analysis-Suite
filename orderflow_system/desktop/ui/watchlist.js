@@ -207,6 +207,34 @@
             + badge + '<span class="wl-tag">' + esc(row.source) + '</span></div>';
     }
 
+    /* T15/B5: the one-table component's trial host — behind `ui.table_component`, so the
+       built-in renderer stays the default until the trial is switched on (palette: "Toggle the
+       table-component trial"). */
+    function tableModeOn() {
+        const cfg = (typeof S !== 'undefined' && S && S.config) || null;
+        const list = (cfg && cfg.ui && cfg.ui.table_component) || [];
+        return Array.isArray(list) && list.indexOf('watchlist') >= 0;
+    }
+    function renderTableMode(host, rows) {
+        if (!window.OFAPTABLE) { host.innerHTML = bodyHtml(rows); return; }
+        window.OFAPTABLE.render(host, {
+            id: 'watchlist',
+            columns: [
+                { key: 'symbol', label: 'Instrument' },
+                { key: 'price', label: 'Price', align: 'right' },
+                { key: 'ticks', label: 'Ticks', align: 'right' },
+                { key: 'volume', label: 'Volume', align: 'right' },
+                { key: 'delta', label: 'Δ', align: 'right' },
+                { key: 'phase', label: 'Phase' },
+                { key: 'source', label: 'Source' },
+            ],
+            rows: (rows || []).map((r) => ({ symbol: r.symbol, active: r.active, price: r.cells.price,
+                ticks: r.cells.ticks, volume: r.cells.volume, delta: r.cells.delta,
+                phase: r.cells.phase, source: r.source })),
+            onRow: (row) => { if (typeof searchActivateSymbol === 'function' && row.symbol) searchActivateSymbol(row.symbol, {}); },
+        });
+    }
+
     function bodyHtml(rows) {
         const notes = [];
         if (state.instrumentError) {
@@ -320,7 +348,8 @@
     function render() {
         const rows = rowsNow();
         const host = el('watchlistBody');
-        if (host) host.innerHTML = bodyHtml(rows);
+        if (host && tableModeOn()) renderTableMode(host, rows);
+        else if (host) host.innerHTML = bodyHtml(rows);
         const count = el('watchlistCount');
         if (count) count.textContent = String(rows.length);
         const sub = el('watchlistSub');

@@ -729,6 +729,10 @@ class AlpacaFeed:
         self.streams: list[AlpacaStream] = []
         self.state = "idle"
         self.market_open: Optional[bool] = None
+        #: (stamp, price, size, trade id) of the last trade each snapshot delivered — a REST
+        #: snapshot repeats its `latestTrade` until a new print exists, and re-delivering it as a
+        #: fresh tick counted phantom volume and delta into every aggregate panel.
+        self._last_snapshot_print: dict[str, tuple] = {}
         self.last_clock: Optional[dict[str, Any]] = None   # cached for the palette
         self.needs_keys = False
         self.errors: list[str] = []
@@ -889,7 +893,8 @@ class AlpacaFeed:
         if clk is not None:
             self.last_clock = clk                 # cached: the palette must not poll
         self.market_open = None if clk is None else bool(clk.get("is_open"))
-        report: dict[str, Any] = {"market_open": self.market_open, "equities": 0, "crypto": 0}
+        report: dict[str, Any] = {"market_open": self.market_open, "equities": 0, "crypto": 0,
+                                  "unchanged": 0}
         equities = self.equity_symbols
         if equities and self.market_open is not False:
             snaps = await asyncio.to_thread(self.data.snapshots, equities)
@@ -901,6 +906,11 @@ class AlpacaFeed:
                 tick = normalize_snapshot_trade(snap, symbol=alpaca_symbol)
                 quote = normalize_snapshot_quote(snap, symbol=alpaca_symbol)
                 if tick is not None:
+                    key = (tick.timestamp_ms, tick.price, tick.size, tick.trade_id)
+                    if self._last_snapshot_print.get(app) == key:
+                        report["unchanged"] += 1        # the same print as the last poll
+                        continue
+                    self._last_snapshot_print[app] = key
                     if quote is not None and quote.is_valid():
                         tick.side = Side.BUY if tick.price >= quote.mid else Side.SELL
                     self._deliver(app, tick)

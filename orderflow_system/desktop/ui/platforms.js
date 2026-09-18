@@ -8,7 +8,8 @@
 (function () {
     'use strict';
 
-    const PLAT = { data: null, plan: 'free', integrated: false, bmPlan: 'digital', bmIntegrated: false };
+    const PLAT = { data: null, plan: 'free', integrated: false, bmPlan: 'digital', bmIntegrated: false,
+                   ntPlan: 'free', ntIntegrated: false };
     const el = (id) => document.getElementById(id);
     function plEsc(t) {
         return String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -36,6 +37,9 @@
         const bm = (PLAT.data && PLAT.data.bookmap) || {};
         PLAT.bmPlan = bm.plan || 'digital';
         PLAT.bmIntegrated = !!bm.integrated;
+        const nt = (PLAT.data && PLAT.data.ninjatrader) || {};
+        PLAT.ntPlan = nt.plan || 'free';
+        PLAT.ntIntegrated = !!nt.integrated;
         plRender();
     }
 
@@ -267,6 +271,126 @@
         </div></div>`;
     }
 
+    /* ── NinjaTrader ────────────────────────────────────────────────────────────────────────
+       Same shape as the other two cards, third physics: NinjaTrader has no market-data-out API
+       either, so the suite ships a read-only bridge DLL the user copies in once — and the
+       terminal doubles as a full ENGINE data source (its instruments stream like any venue). */
+    function ntLink(id) {
+        return ((PLAT.data && PLAT.data.ninjatrader_links) || []).find((l) => l.id === id) || null;
+    }
+    function ntPlans() { return (PLAT.data && PLAT.data.ninjatrader_plans) || []; }
+
+    function ntHeader() {
+        const nt = (PLAT.data && PLAT.data.ninjatrader) || {};
+        const plans = ntPlans();
+        const chosen = plans.find((p) => p.id === PLAT.ntPlan) || plans[0] || { name: 'Free' };
+        return `<div class="card"><div class="card-head">
+            <span class="card-title">NinjaTrader integration</span>
+            <div class="spacer"></div>
+            <span class="dim">${nt.integrated ? 'loaded' : 'not loaded'}</span>
+            <label class="switch"><input type="checkbox" id="ntIntegrated" ${nt.integrated ? 'checked' : ''}> Load into my workflow</label>
+        </div><div class="card-body">
+            <p class="dim">Optional and powerful: NinjaTrader publishes no market-data-out API, so this
+            suite ships a small <b>read-only</b> bridge DLL — copy it in once, flip one NinjaTrader
+            option, restart — and the terminal\u2019s own instruments (NQ, ES, MNQ\u2026) stream into
+            every panel as a full data source. No orders, no account access, nothing leaves this
+            machine. ${plEsc((PLAT.data && PLAT.data.ninjatrader_free_note) || '')}</p>
+            <div class="field-row">
+                <label>Plan you run
+                    <select id="ntPlan">${plans.map((p) => `<option value="${p.id}" ${p.id === PLAT.ntPlan ? 'selected' : ''}>${plEsc(p.name)}${p.price === '0' ? ' — free' : ` — $${plEsc(p.price)} ${plEsc(p.period)}`}</option>`).join('')}</select>
+                </label>
+                <button class="btn small" id="ntPlanSave">Apply</button>
+                <span class="dim">now: ${plEsc(chosen.name)}</span>
+            </div>
+        </div></div>`;
+    }
+
+    function ntWorkflow() {
+        const wf = (PLAT.data && PLAT.data.ninjatrader_workflow) || { steps: [], suite_changes: [] };
+        return `<div class="card"><div class="card-head"><span class="card-title">NinjaTrader setup — ${plEsc(wf.plan_kind === 'free' ? 'free path first' : 'paid path')}</span></div>
+        <div class="card-body">
+            <ol class="pl-steps">${(wf.steps || []).map((step) => {
+                const l = ntLink(step.link);
+                return `<li><b>${plEsc(step.title)}</b><div class="dim">${plEsc(step.text)}
+                    ${l ? `<button class="pl-link" data-url="${plEsc(l.url)}">${plEsc(l.label)} \u2197</button>` : ''}</div></li>`;
+            }).join('')}</ol>
+            <div class="pl-changes"><b>What this suite changes for that plan</b>
+                <ul>${(wf.suite_changes || []).map((c) => `<li>${plEsc(c)}</li>`).join('')}</ul></div>
+        </div></div>`;
+    }
+
+    function ntPlanCards() {
+        const plans = ntPlans();
+        return `<div class="card"><div class="card-head"><span class="card-title">NinjaTrader plans — the platform is free; a plan changes commissions</span>
+            <div class="spacer"></div><span class="dim">read ${plEsc((PLAT.data && PLAT.data.ninjatrader_prices_as_of) || '')}</span></div>
+        <div class="card-body">
+            ${plans.map((p) => `<div class="pl-plan ${p.id === PLAT.ntPlan ? 'on' : ''}">
+                <div class="pl-plan-head"><b>${plEsc(p.name)}</b>
+                    <span class="pl-price">${p.price === '0' ? 'free' : `$${plEsc(p.price)} ${plEsc(p.period)}`}</span>
+                    ${p.id === PLAT.ntPlan ? '<span class="pl-badge">in use</span>' : ''}</div>
+                <ul>${(p.includes || []).map((i) => `<li>${plEsc(i)}</li>`).join('')}</ul></div>`).join('')}
+            <div class="dim">${((PLAT.data && PLAT.data.ninjatrader_caveats) || []).map((c) => plEsc(c)).join(' ')}</div>
+            <div class="field-row">
+                ${(PLAT.data && PLAT.data.ninjatrader_links || []).filter((l) => ['pricing', 'datafeeds', 'orderflow', 'dashboard', 'register'].includes(l.id))
+                    .map((l) => `<button class="pl-link" data-url="${plEsc(l.url)}">${plEsc(l.label)} \u2197</button>`).join('')}
+            </div>
+        </div></div>`;
+    }
+
+    function ntInstall() {
+        const inst = (PLAT.data && PLAT.data.installs) || {};
+        const n = inst.ninjatrader || { found: false };
+        return `<div class="card"><div class="card-head"><span class="card-title">NinjaTrader on this machine</span>
+            <div class="spacer"></div><span class="dim">${n.found ? `detected${n.version ? ' \u00b7 ' + plEsc(n.version) : ''}` : 'not detected'}</span></div>
+        <div class="card-body"><p class="dim">${n.found
+            ? `Found at ${plEsc(n.path || '')}${n.addons_present ? ` \u2014 its AddOns folder is present${n.bridge_installed ? ' and this suite\'s bridge DLL is in it.' : ', but the bridge DLL is not in it yet.'}` : ' \u2014 its AddOns folder has not been created yet.'}
+               Its account, licence, workspace and config files are never read.`
+            : 'Not installed here. The workflow above covers install and the free login; the suite works fully on its built-in free feeds meanwhile.'}</p></div></div>`;
+    }
+
+    function ntDllLine() {
+        const b = (PLAT.data && PLAT.data.ninjatrader_bridge) || {};
+        const dll = b.dll || {};
+        const state = b.ok === true ? 'ok' : (b.ok === false ? 'warn' : '');
+        const size = dll.size ? (Math.round(dll.size / 102.4) / 10) + ' KB' : '';
+        return `<div class="field-row">
+            <b>Bridge DLL:</b> <span class="${state}">${dll.exists ? 'shipped with this app' : 'missing from this install'}</span>
+            ${size ? `<span class="dim">${size}</span>` : ''}
+            <button class="btn small" id="ntDllOpen">Show the DLL folder</button>
+        </div>
+        <div class="dim" id="ntDllNote">${plEsc(b.note || '')}</div>
+        <div class="dim" id="ntDllPath" style="word-break:break-all">${plEsc(dll.path || '')}</div>`;
+    }
+
+    function ntBridgeCard() {
+        const nt = (PLAT.data && PLAT.data.ninjatrader) || {};
+        const opt = ntLink('options');
+        return `
+    <div class="card"><div class="card-head"><span class="card-title">NinjaTrader bridge (loopback)</span>
+        <div class="spacer"></div><span class="dim" id="ntBridgeState">${nt.enabled ? 'enabled' : 'disabled'}</span></div>
+        <div class="card-body">
+            <p class="dim">The bridge is the <b>server</b> inside NinjaTrader \u2014 it writes <i>listening on
+            127.0.0.1:&lt;port&gt;</i> to the platform\u2019s Log tab and to <code>%LOCALAPPDATA%\\ModFlow\\ntbridge.log</code>
+            when it loads. The bridge <b>ships as source</b>: copy <i>ModFlowBridge.cs</i>, <i>ModFlowJson.cs</i> and <i>ModFlowProbe.cs</i> into
+            <i>Documents\\NinjaTrader 8\\bin\\Custom\\AddOns</i>, press <i>F5</i> in the platform’s own NinjaScript Editor and answer the trust prompt once, then press Test connection.
+            ${opt ? `<button class="pl-link" data-url="${plEsc(opt.url)}">its settings page \u2197</button>` : ''}</p>
+            ${ntDllLine()}
+            <div class="field-row">
+                <label>Host<input id="ntHost" value="${plEsc(nt.host || '127.0.0.1')}" size="14"></label>
+                <label>Port<input id="ntPort" value="${plEsc(nt.port || 8790)}" size="7"></label>
+                <label>Test instrument<input id="ntSymbol" value="${plEsc(nt.symbol || 'NQ')}" size="10"
+                       placeholder="NQ / NQ1 / ES\u2026" title="Any name your terminal lists \u2014 NQ, NQ1, ES, MNQ 12-26\u2026"></label>
+                <label class="switch"><input type="checkbox" id="ntEnabled" ${nt.enabled ? 'checked' : ''}> Enabled</label>
+            </div>
+            <div class="field-row">
+                <button class="btn small" id="ntSave">Save</button>
+                <button class="btn small" id="ntTest">Test connection</button>
+                <span class="dim">${plEsc(((PLAT.data || {}).ninjatrader_note) || '')}</span>
+            </div>
+            <div id="ntResult"></div>
+        </div></div>`;
+    }
+
     function plRender() {
         const host = el('platformsBody');
         if (!host) return;
@@ -276,7 +400,8 @@
             return;
         }
         host.innerHTML = plHeader() + plWorkflow() + plPlans() + plInstall() + plDtcCard()
-            + bmHeader() + bmWorkflow() + bmPlanCards() + bmInstall() + bmBridgeCard();
+            + bmHeader() + bmWorkflow() + bmPlanCards() + bmInstall() + bmBridgeCard()
+            + ntHeader() + ntWorkflow() + ntPlanCards() + ntInstall() + ntBridgeCard();
         const toggle = el('plIntegrated');
         if (toggle) toggle.addEventListener('change', () => plSavePlan({ integrated: toggle.checked }));
         const save = el('plPlanSave');
@@ -297,6 +422,16 @@
         if (bTest) bTest.addEventListener('click', bmTestBridge);
         const bJar = el('bmJarOpen');
         if (bJar) bJar.addEventListener('click', bmRevealJar);
+        const nToggle = el('ntIntegrated');
+        if (nToggle) nToggle.addEventListener('change', () => ntSavePlan({ integrated: nToggle.checked }));
+        const nPlan = el('ntPlanSave');
+        if (nPlan) nPlan.addEventListener('click', () => ntSavePlan({ plan: (el('ntPlan') || {}).value }));
+        const nSave = el('ntSave');
+        if (nSave) nSave.addEventListener('click', ntSaveBridge);
+        const nTest = el('ntTest');
+        if (nTest) nTest.addEventListener('click', ntTestBridge);
+        const nDll = el('ntDllOpen');
+        if (nDll) nDll.addEventListener('click', ntRevealDll);
         host.querySelectorAll('.pl-link').forEach((b) => b.addEventListener('click', () => plOpen(b.dataset.url)));
     }
 
@@ -431,6 +566,81 @@
         }
     }
 
+    /* ── NinjaTrader actions ─────────────────────────────────────────────────────────────── */
+    function ntShowResult(res) {
+        const host = el('ntResult');
+        if (!host) return;
+        const ok = res && res.ok;
+        const detail = res && (res.error || res.note || res.detail || (ok ? 'connected' : 'no detail'));
+        const bridge = res && res.bridge && res.bridge.Addon
+            ? ` \u2014 bridge ${plEsc(res.bridge.Addon)} ${plEsc(res.bridge.Version || '')}`
+                + (res.bridge.NT ? ` on NinjaTrader ${plEsc(res.bridge.NT)}` : '')
+                + (res.bridge.Connection ? ` \u00b7 connection ${plEsc(res.bridge.Connection)} (${plEsc(res.bridge.Status || '')})` : '')
+            : '';
+        const counts = res && res.messages
+            ? ` \u2014 quotes ${res.messages.quotes}, trades ${res.messages.trades}, depth ${res.messages.depth}, heartbeats ${res.messages.heartbeats}`
+            : '';
+        const depth = res && res.depth ? `<div class="dim">${plEsc(String(res.depth))}</div>` : '';
+        const sample = res && res.sample && res.sample.kind
+            ? ` \u00b7 sample: ${plEsc(res.sample.kind)} ${plEsc(res.sample.instrument || '')}`
+                + (res.sample.price != null ? ` @ ${plEsc(res.sample.price)}` : '')
+            : '';
+        host.innerHTML = `<div class="banner ${ok ? 'ok' : 'warn'}">${plEsc(String(detail))}${bridge}${plEsc(counts)}${sample}</div>${depth}`
+            + ((res && (res.rejects || []).length)
+                ? `<div class="dim">${res.rejects.length} rejected frame(s): ${plEsc(String(res.rejects[0]))}</div>` : '');
+    }
+    async function ntSavePlan(body) {
+        try {
+            const res = await api('/api/control/platforms/plan', { method: 'POST', body: { ...body, platform: 'ninjatrader' } });
+            if (res && res.ok && res.ninjatrader) {
+                PLAT.data = Object.assign({}, PLAT.data, {
+                    ninjatrader: res.ninjatrader,
+                    ninjatrader_workflow: res.workflow,
+                    ninjatrader_plans: res.plans,
+                });
+                PLAT.ntPlan = res.ninjatrader.plan || PLAT.ntPlan;
+                PLAT.ntIntegrated = !!res.ninjatrader.integrated;
+                plRender();
+                if (window.setStatusNote) setStatusNote(`NinjaTrader integration: ${PLAT.ntIntegrated ? 'loaded' : 'off'} \u00b7 plan ${PLAT.ntPlan}`);
+            } else {
+                ntShowResult({ ok: false, error: (res && res.error) || 'could not apply the plan' });
+            }
+        } catch (err) { ntShowResult({ ok: false, error: String(err) }); }
+    }
+    function ntPayload() {
+        return {
+            host: (el('ntHost') || {}).value || '127.0.0.1',
+            port: Number((el('ntPort') || {}).value) || 8790,
+            symbol: (el('ntSymbol') || {}).value || 'NQ',
+            enabled: !!(el('ntEnabled') || {}).checked,
+        };
+    }
+    async function ntSaveBridge() {
+        try {
+            const res = await api('/api/control/platforms/bridge/ninjatrader', { method: 'POST', body: ntPayload() });
+            PLAT.data = Object.assign({}, PLAT.data, { ninjatrader: (res && res.ninjatrader) || PLAT.data.ninjatrader });
+            plRender();
+            ntShowResult({ ok: !!(res && res.ok), note: 'bridge saved' });
+        } catch (err) { ntShowResult({ ok: false, error: String(err) }); }
+    }
+    async function ntTestBridge() {
+        ntShowResult({ ok: true, note: 'probing the bridge\u2026' });
+        try {
+            ntShowResult(await api('/api/control/platforms/bridge/ninjatrader/test', { method: 'POST', body: ntPayload() }));
+        } catch (err) { ntShowResult({ ok: false, error: String(err) }); }
+    }
+    async function ntRevealDll() {
+        const note = el('ntDllNote');
+        try {
+            const res = await api('/api/control/platforms/bridge/ninjatrader/dll/open', { method: 'POST', body: {} });
+            if (note) note.textContent = res && res.ok
+                ? `opened ${res.folder} \u2014 ${res.note || ''}`
+                : `could not open it: ${(res && res.error) || 'unknown error'}`;
+        } catch (err) {
+            if (note) note.textContent = `could not open it: ${String(err)}`;
+        }
+    }
+
     function plWatch() {
         const section = document.querySelector('.view[data-view="platforms"]');
         if (!section) return;
@@ -443,19 +653,25 @@
 
     if (typeof HELP_TOPICS !== 'undefined' && !HELP_TOPICS.platforms) {
         HELP_TOPICS.platforms = {
-            title: 'Platform integrations — Sierra Chart and Bookmap',
-            lead: 'Both are optional. Sierra Chart is read over its own DTC protocol server; Bookmap is '
-                + 'read over a small read-only add-on this suite ships (Bookmap has no data-out API). '
-                + 'Each vendor\'s free path needs no payment — start there.',
+            title: 'Platform integrations — Sierra Chart, Bookmap and NinjaTrader',
+            lead: 'All three are optional. Sierra Chart is read over its own DTC protocol server; Bookmap '
+                + 'and NinjaTrader are read over small read-only bridge add-ons this suite ships '
+                + '(neither publishes a data-out API). Each vendor\'s free path needs no payment — start '
+                + 'there.',
             body: ['Sierra: install → create the account → free trial + delayed data → enable the DTC '
                 + 'protocol server (JSON) → point this suite at it → load it and pick your plan.',
                 'Bookmap: install → create the account → free tier (crypto, one instrument at a time) '
                 + '→ build and add the bridge add-on (Settings → Configure API plugins → Add) → point '
                 + 'this suite at the port it prints → load it and pick your tier.',
+                'NinjaTrader: install → create the login → free Simulated Data Feed or Kinetick End-Of-Day '
+                + '→ copy the bridge\'s .cs files into Documents\\NinjaTrader 8\\bin\\Custom\\AddOns, press F5 in its NinjaScript Editor and answer the trust prompt once, then point this suite at 127.0.0.1:8790 '
+                + '→ pick your plan. Unlike the other two, NinjaTrader is also a full engine data source: '
+                + 'add NQ / ES / MNQ from the terminal\'s own list and it streams into every panel.',
                 'Limitations are on the cards, not implied: Bookmap\'s market data is a separate '
                 + 'purchase on every tier, its free tier shows one instrument, and its API-plugins '
-                + 'dialog can be licence-locked — in which case the bridge cannot be installed at all.',
-                'No plugin of ours is installed into Sierra; nothing is stored from either platform '
+                + 'dialog can be licence-locked; NinjaTrader\'s real-time CME/EUREX data comes with a '
+                + 'funded account and level-2 depth only when the data subscription carries it.',
+                'No plugin of ours is installed into Sierra; nothing is stored from any platform '
                 + 'beyond the connection blocks, and no licence or account file is ever read.'],
         };
     }

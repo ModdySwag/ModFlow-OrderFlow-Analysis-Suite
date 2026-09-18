@@ -144,22 +144,27 @@ class BybitFeed:
                     break
                 try:
                     msg = json.loads(raw_msg)
-                    # A decoded frame is the only proof the socket works: the reconnect ladder
-                    # resets HERE and nowhere else (see data/feed_session.py for the rule).
-                    self._reconnect_delay = 1.0
-                    await self._handle_message(msg)
+                    # The ladder resets on MARKET DATA only (see data/feed_session.py): a subscribe
+                    # ack proves the socket opened, not that the venue is streaming, and resetting
+                    # on acks turns a venue stall into a 1-second reconnect hammer.
+                    if await self._handle_message(msg) is not False:
+                        self._reconnect_delay = 1.0
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid JSON: {raw_msg[:100]}")
                 except Exception as e:
                     logger.error(f"Error handling message: {e}", exc_info=True)
 
-    async def _handle_message(self, msg: dict):
+    async def _handle_message(self, msg: dict) -> bool:
+        """Parse one frame. False = no market data in it (subscribe acks, info frames)."""
         topic = msg.get("topic", "")
 
         if topic.startswith("publicTrade."):
             await self._handle_trades(msg)
-        elif topic.startswith("orderbook."):
+            return True
+        if topic.startswith("orderbook."):
             await self._handle_orderbook(msg)
+            return True
+        return False
 
     async def _handle_trades(self, msg: dict):
         """
@@ -213,7 +218,13 @@ class BybitFeed:
         msg_type = msg.get("type", "")
         topic = msg.get("topic", "")
         symbol = topic.split(".")[-1] if "." in topic else ""
-        ts = data.get("u", int(time.time() * 1000))
+        # NB: data["u"] is an update *sequence id*, not a clock (feed_extras.py carries the same
+        # note after the same bug): a snapshot stamped with it reads as 1995. Use the envelope
+        # timestamp, and only fall back to the wall clock when the frame really has none.
+        try:
+            ts = int(msg.get("ts") or 0) or int(time.time() * 1000)
+        except (TypeError, ValueError):
+            ts = int(time.time() * 1000)
 
         if msg_type == "snapshot":
             raw_bids = data.get("b") or []

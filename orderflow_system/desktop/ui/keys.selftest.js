@@ -234,6 +234,24 @@ function boot(opts) {
         && K.map().filter((b) => b.inField).length === 1);
 }
 
+/* ── the armed gate (T3) ─────────────────────────────────────────────────── */
+
+{
+    const { K, doc } = boot();
+    let fired = 0;
+    K.bind({ id: 'selftest-danger', keys: ['alt+j'], scope: 'Global', danger: true,
+             label: 'a dangerous test action', run: () => { fired += 1; } });
+    const press = () => doc.listeners.forEach((fn) => fn(keyEv('j', { alt: true })));
+    press();
+    check('armed gate: a danger row never fires while disarmed', fired === 0);
+    K.setArmed(true);
+    press();
+    check('armed gate: the same row fires once armed', fired === 1 && K.armed() === true);
+    K.setArmed(false);
+    press();
+    check('armed gate: disarming takes it inert again', fired === 1);
+}
+
 console.log('keys selftest: ' + ok + ' ok, ' + failures.length + ' failed');
 for (const f of failures) console.log('  FAIL', f);
 process.exit(failures.length ? 1 : 0);

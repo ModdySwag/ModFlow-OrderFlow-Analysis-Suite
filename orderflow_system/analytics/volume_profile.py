@@ -281,3 +281,45 @@ class VolumeProfileEngine:
             return "b_shape", poc_pct     # Sellers aggressive, POC at bottom
         else:
             return "d_shape", poc_pct     # Balanced / normal
+
+
+# ── Shape stories (the Profile view's badge copy) ─────────────────────────────
+#
+# Every value `_classify_shape` can return gets a human read.
+# `test_htf_confluence.py` source-scans the classifier and fails when a shape exists in the
+# code without words here — the badge can never fall behind the maths.
+
+SHAPE_STORIES: dict[str, dict[str, str]] = {
+    "p_shape": {
+        "label": "P-shape",
+        "story": ("Buyers in control: the POC sits high in the range and volume was built at "
+                  "the top — sellers who needed out had to lift into it. Pullbacks toward the "
+                  "POC are where the position-builders defend."),
+    },
+    "b_shape": {
+        "label": "b-shape",
+        "story": ("Sellers in control: the POC sits low and volume was built at the bottom — "
+                  "the session was distributed from below. Rallies back to the POC are where "
+                  "the shorts defend."),
+    },
+    "d_shape": {
+        "label": "D-shape",
+        "story": ("Balance: the POC is near the middle of a two-sided rotation and no side owns "
+                  "the range. The value-area edges are the levels in play."),
+    },
+    "double_dist": {
+        "label": "Double distribution",
+        "story": ("Two separate value areas with a thin middle — the session transitioned "
+                  "between two accepted prices. Which edge price accepts on a revisit decides "
+                  "the next leg."),
+    },
+    "unknown": {
+        "label": "Unclassified",
+        "story": "Not enough traded structure to name a shape yet.",
+    },
+}
+
+
+def shape_story(shape: str) -> dict[str, str]:
+    """The words for one classified shape; anything unrecognised reads as 'Unclassified'."""
+    return SHAPE_STORIES.get(str(shape or "").lower(), SHAPE_STORIES["unknown"])

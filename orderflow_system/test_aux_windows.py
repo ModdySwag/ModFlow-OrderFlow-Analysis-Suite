@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 import pytest
 
@@ -301,3 +302,61 @@ def test_close_all_closes_everything(host, store):
 def test_an_unknown_action_is_a_refusal(host):
     out = asyncio.run(api.windows_post({"action": "detonate"}))
     assert out["ok"] is False and "unknown action" in out["error"]
+
+
+# ── §94: the quit sweep — the ghost-frame fix ──────────────────────────────────────────
+
+class _FakeWindow:
+    def __init__(self):
+        self.destroyed = False
+
+    def destroy(self):
+        self.destroyed = True
+
+
+def test_close_all_takes_every_aux_window_down_and_keeps_the_records(monkeypatch):
+    """A widget window alive while the process exits = a ghost frame on the desktop."""
+    from orderflow_system.desktop import launcher
+
+    host = launcher.NativeWindowHost(1, "t")
+    windows = {"a": _FakeWindow(), "b": _FakeWindow(), "c": _FakeWindow()}
+    host._windows.update(windows)
+
+    dropped = []
+    monkeypatch.setattr(windows_mod, "drop_record", lambda wid: dropped.append(wid))
+
+    closed = host.close_all()
+    assert closed == 3
+    assert all(w.destroyed for w in windows.values())
+    assert host._windows == {}
+    assert dropped == [], "quit-time destroys must NOT drop the store's records"
+
+
+def test_the_launcher_sweeps_on_quit_both_ways():
+    code = (Path(__file__).resolve().parent / "desktop" / "launcher.py").read_text(encoding="utf-8")
+    assert "host = restore_windows(port, restore=not args.safe)" in code, "main() must hold the host"
+    assert "host.close_all()" in code, "the main window's close must sweep the aux windows"
+    assert "def close_all(self)" in code
+
+def test_resetting_a_window_brings_it_home_and_keeps_it_in_the_set(store, host):
+    """T2’s rescue: a window stored on a monitor that is gone comes back to the primary.
+
+    The stored geometry is dropped (that is the point — it is stale), the window is re-placed on
+    screen 0, and it stays in the restore set with the new placement written back.
+    """
+    store.save_config({"ui": {"windows": [{"id": "wback01", "view": "ofx",
+        "screen_key": "2560x1440@1", "x": 2600, "y": 40, "width": 1200, "height": 800}]}})
+    opened = asyncio.run(api.windows_post({"action": "open", "id": "wback01", "view": "ofx"}))
+    assert opened["ok"] and "wback01" in opened["open"]
+    res = asyncio.run(api.windows_post({"action": "reset", "id": "wback01"}))
+    assert res["ok"] and res["action"] == "reset" and res["reset"] == "wback01"
+    assert "wback01" in res["open"], "the reset window must come back open"
+    assert "wback01" in host.closed, "an open window is closed before it is re-placed"
+    placed = host.opened["wback01"]
+    assert placed["x"] < SECOND["x"], "the window did not come home to the primary screen"
+    assert any(r["id"] == "wback01" for r in res["windows"]), "the record left the set"
+
+
+def test_resetting_an_unknown_window_is_refused_with_its_reason(store, host):
+    res = asyncio.run(api.windows_post({"action": "reset", "id": "wnope"}))
+    assert res["ok"] is False and "no window" in res["error"]

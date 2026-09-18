@@ -204,12 +204,69 @@
         };
     }
 
+    /* T4/A19: the Settings card. The test button plays the buy sample at the CURRENT volume even
+       while the master switch is off — that is what a test is for. Every write goes through the
+       same single-path config merge the tape's menu uses, and the accepted value is adopted
+       straight back into the player. */
+    var paintControls = null;
+    function testSound() { return play('buy', 1); }
+    function wireControls() {
+        if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return false;
+        var on = document.getElementById('sndEnabled');
+        var vol = document.getElementById('sndVolume');
+        var btn = document.getElementById('sndTest');
+        var out = document.getElementById('sndResult');
+        if (!on && !vol && !btn) return false;
+        function paint() {
+            var c = clone(cfg);
+            if (on) on.value = c.enabled ? 'on' : 'off';
+            if (vol) vol.value = String(Math.round(c.volume * 100));
+            if (out) {
+                out.textContent = c.enabled
+                    ? ('alerts on · volume ' + Math.round(c.volume * 100) + '%')
+                    : 'silent — the master switch is off (test still works)';
+            }
+            return true;
+        }
+        function save(patch) {
+            if (typeof window.api !== 'function') { paint(); return; }
+            window.api('/api/control/config', { method: 'POST', body: { audio: patch } })
+                .then(function (r) {
+                    if (r && r.config && r.config.audio) configure(r.config.audio);
+                    paint();
+                })
+                .catch(function () {
+                    if (out) out.textContent = 'the save failed — the player keeps its current settings';
+                });
+        }
+        if (on) on.onchange = function () { save({ enabled: on.value === 'on' }); };
+        if (vol) vol.onchange = function () {
+            save({ volume: Math.max(0, Math.min(1, Number(vol.value) / 100)) });
+        };
+        if (btn) btn.onclick = function () {
+            var ok = testSound();
+            if (out && !ok) out.textContent = 'no audio device answered the test';
+        };
+        paintControls = paint;
+        paint();
+        return true;
+    }
+
     window.OFAPAUDIO = {
         DEFAULTS: DEFAULTS, SAMPLES: SAMPLES,
         configure: configure, config: function () { return clone(cfg); },
-        decide: decide, onTick: onTick, play: play,
+        decide: decide, onTick: onTick, play: play, test: testSound, wireControls: wireControls,
         setSymbol: setSymbol, setParam: setParam, load: load, status: status, state: state
     };
 
-    load();          // adopt whatever the config already says (silent until it says `enabled`)
+    var wiredNow = wireControls();
+    if (!wiredNow && typeof document !== 'undefined' && document.addEventListener) {
+        // the card markup can arrive after this script — adopt it when the DOM is ready
+        document.addEventListener('DOMContentLoaded', wireControls);
+    }
+    var booted = load();            // null in a shim with no fetch (the selftest's Node)
+    if (booted && typeof booted.then === 'function') {
+        booted.then(function () { if (paintControls) paintControls(); });
+    }
+    // adopt whatever the config already says (silent until it says `enabled`)
 })();

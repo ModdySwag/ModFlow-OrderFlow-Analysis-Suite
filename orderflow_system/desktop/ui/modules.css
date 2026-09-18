@@ -299,9 +299,46 @@ textarea.mb-input { min-width: 300px; resize: vertical; }
 .mb-btn.primary { background: rgba(var(--of-link-rgb),.55); border-color: rgb(var(--of-link-rgb)); color: var(--of-white); }
 .mb-unit { color: var(--of-ink-dim2); font: 500 10.5px ui-monospace, monospace; }
 /* View-menu chrome toggles */
+.app.menubar-hidden .menubar { display: none; }
 .app.rail-hidden .rail { display: none; }
 .app.status-hidden .statusbar { display: none; }
 .app.zen .rail, .app.zen .topbar, .app.zen .menubar { display: none; }
+
+/* §92 — the physical controls for the chrome: each bar hides itself, and its reveal twin exists
+   only while the bar is hidden, so no control is ever dead and none is ever missing. */
+.mb-grow { flex: 1 1 auto; }
+/* The persistent in/out toggles in the topbar (rail + menu bar): always visible — a control
+   must never vanish with the bar it controls — quiet until hovered, pressed-face while hidden. */
+.chrome-toggle { align-self: center; margin-left: 6px; width: 22px; height: 22px; padding: 0;
+  background: rgba(var(--of-steel-rgb),.14); color: var(--of-ink-3); border: 1px solid rgba(var(--of-steel-rgb),.3);
+  border-radius: 5px; font-size: 12px; line-height: 1; cursor: pointer; }
+.chrome-toggle:hover { color: var(--of-ink-hi); border-color: rgba(var(--of-steel-rgb),.55); }
+.chrome-toggle.on { color: var(--of-ink-hi); background: rgba(var(--of-steel-rgb),.3); }
+/* §93: the menu-bar toggle now stands with the top-right status controls and wears its name —
+   beside Instrument a bare caret read as decoration, and the way back must be plain once the bar
+   is gone. Chip face in the pause control's family; the pressed state says the bar is hidden. */
+.chrome-toggle.mb-toggle { width: auto; height: 24px; padding: 0 11px; margin-left: 8px;
+  display: inline-flex; align-items: center; gap: 6px; border-radius: 999px;
+  font: 600 11px ui-monospace, monospace; letter-spacing: .02em;
+  border: 1px solid rgba(var(--of-steel-rgb),.45); background: rgba(var(--of-steel-rgb),.12); color: var(--of-ink-2); }
+.chrome-toggle.mb-toggle:hover { border-color: rgba(var(--of-steel-hi-rgb),.7); color: var(--of-ink-hi); }
+.chrome-toggle.mb-toggle.on { border-color: rgba(var(--of-steel-hi-rgb),.6); background: rgba(var(--of-steel-rgb),.32);
+  color: var(--of-ink-bright); }
+.chrome-toggle.mb-toggle .ct-face { font-size: 12px; line-height: 1; }
+.rail-reveal { display: none; position: fixed; left: 0; top: 50%; transform: translateY(-50%);
+  z-index: 60; width: 22px; height: 84px; align-items: center; justify-content: center;
+  background: rgba(var(--of-float-rgb),.92); color: var(--of-ink-2); border: 1px solid rgba(var(--of-steel-rgb),.5);
+  border-left: 0; border-radius: 0 9px 9px 0; cursor: pointer; font-size: 15px; }
+.rail-reveal:hover { color: var(--of-ink-hi); background: rgba(var(--of-float-rgb),1); }
+.app.rail-hidden .rail-reveal { display: flex; }
+/* The rail's hide control: discreet by the logo — quiet until the pointer is near it. */
+.rail-collapse { margin-left: auto; align-self: center; width: 20px; height: 20px; padding: 0;
+  background: transparent; color: var(--of-ink-dim2); border: 0; border-radius: 4px;
+  font-size: 15px; line-height: 1; cursor: pointer; opacity: .45; }
+.rail-collapse:hover { opacity: 1; background: rgba(var(--of-steel-rgb),.2); color: var(--of-ink-hi); }
+.mb-hide { margin-left: 6px; background: transparent; color: var(--of-ink-dim2); border: 0;
+  font: 500 11px system-ui, sans-serif; cursor: pointer; padding: 2px 8px; border-radius: 4px; }
+.mb-hide:hover { color: var(--of-ink-hi); background: rgba(var(--of-steel-rgb),.18); }
 
 /* ═══ Drawing layer ═══════════════════════════════════════════════════════════════════════════
    A canvas overlay plus a compact tool strip, cloned from the reference program's workflow: pick a
@@ -325,6 +362,71 @@ textarea.mb-input { min-width: 300px; resize: vertical; }
 .draw-menu-item { display: block; width: 100%; text-align: left; background: transparent; border: 0;
   color: var(--of-ink-hi); font: 500 11.5px/1.3 system-ui, sans-serif; padding: 5px 10px; cursor: pointer; }
 .draw-menu-item:hover { background: rgba(var(--of-link-rgb),.30); }
+
+/* T14/B4: the columns rail on the Map view. */
+.hm-split { display: flex; align-items: stretch; }
+.hm-split .heat-canvas { flex: 1 1 auto; min-width: 0; }
+.hm-rail { width: 208px; border-left: 1px solid var(--of-line); display: flex; flex-direction: column;
+  background: rgba(var(--of-surface-2-rgb), .6); }
+.hm-rail-head { padding: 6px 8px; border-bottom: 1px solid var(--of-line); color: var(--of-ink-head); font-size: 12px; }
+.hm-rail-ctl { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--of-line); }
+.hm-rail-ctl select, .hm-rail-ctl input { max-width: 100%; font-size: 11px; }
+.hm-rail-rows { overflow: auto; flex: 1 1 auto; padding: 4px 8px; }
+.hm-rail-row { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0;
+  border-bottom: 1px solid rgba(var(--of-line-rgb), .5); font-size: 12px; }
+.hm-rail-row:hover { background: rgba(var(--of-line-rgb), .25); }
+.hm-rail-t { color: var(--of-ink-dim); }
+.hm-rail-v { color: var(--of-ink); }
+.hm-rail-v.pos { color: var(--of-up, var(--of-ink)); }
+.hm-rail-v.neg { color: var(--of-err); }
+
+/* T15/B5: the one-table component. */
+.oft { display: flex; flex-direction: column; }
+.oft-head, .oft-row { display: flex; gap: 10px; padding: 5px 8px; }
+.oft-head { border-bottom: 1px solid var(--of-line-strong); color: var(--of-ink-head); font-size: 12px;
+  text-transform: uppercase; letter-spacing: .03em; position: sticky; top: 0;
+  background: rgba(var(--of-float-rgb), .95); }
+.oft-th { cursor: pointer; user-select: none; flex: 1 1 0; }
+.oft-th:hover { color: var(--of-ink-bright); }
+.oft-td { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--of-ink); font-size: 13px; }
+.oft-row { border-bottom: 1px solid rgba(var(--of-line-rgb), .6); cursor: pointer; }
+.oft-row:hover { background: rgba(var(--of-line-rgb), .2); }
+.oft-row.on { border-left: 3px solid var(--of-accent); }
+.oft-group { padding: 4px 8px; color: var(--of-ink-dim); font-size: 12px; text-transform: uppercase;
+  letter-spacing: .04em; }
+
+/* T14/B7: the notifications inbox. */
+.inb-tile { display: flex; gap: 10px; align-items: flex-start; padding: 7px 8px;
+  border: 1px solid var(--of-line); border-radius: 8px; margin: 6px 0; cursor: pointer; }
+.inb-tile:hover { border-color: var(--of-line-strong); }
+.inb-tile.unread { border-left: 3px solid var(--of-accent); }
+.inb-sev { width: 6px; height: 6px; border-radius: 50%; margin-top: 7px; background: var(--of-ink-muted); }
+.inb-sev.warning { background: var(--of-warn); }
+.inb-sev.critical { background: var(--of-err); }
+.inb-main { flex: 1; min-width: 0; }
+.inb-msg { color: var(--of-ink); }
+.inb-meta { color: var(--of-ink-dim); font-size: 12px; }
+.inb-cat { font-size: 11px; color: var(--of-ink-muted); border: 1px solid var(--of-line);
+  border-radius: 999px; padding: 1px 8px; }
+
+/* T14/B6: the instrument look-up overlay. */
+.lk-overlay { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,.45);
+  display: flex; align-items: flex-start; justify-content: center; padding: 7vh 16px 16px; }
+.lk-panel { width: min(900px, 96vw); max-height: 82vh; display: flex; flex-direction: column; }
+.lk-body { overflow: auto; max-height: 56vh; margin-top: 6px; }
+.lk-sec { margin: 10px 0 4px; font-weight: 600; color: var(--of-ink-2); }
+.lk-group { margin: 6px 0 2px; color: var(--of-ink-dim); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.lk-row { display: flex; align-items: center; gap: 10px; padding: 4px 2px; border-bottom: 1px solid var(--of-line); }
+.lk-row .lk-sym { min-width: 190px; color: var(--of-ink); }
+.lk-row .lk-detail { flex: 1; color: var(--of-ink-dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lk-row .lk-chip { font-size: 11px; color: var(--of-ink-muted); border: 1px solid var(--of-line); border-radius: 999px; padding: 1px 8px; }
+.lk-row .lk-chip.on { color: var(--of-ink-head); border-color: var(--of-steel); }
+
+/* T13/B11: the consequence chip — the paper account's own unit (ticks) under a drag. */
+.risk-chip { position: absolute; z-index: 55; pointer-events: none; padding: 3px 8px; border-radius: 6px;
+  background: rgba(var(--of-float-rgb), .94); border: 1px solid var(--of-line-strong);
+  color: var(--of-ink); font-size: 11px; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
 /* §56: the in-place text field (draw menu + floating at the click point) */
 .draw-inline-text { display: flex; gap: 4px; align-items: center; padding: 4px 6px; }
 .draw-inline-text.is-float { position: absolute; z-index: 65; padding: 5px 6px;
@@ -337,3 +439,81 @@ textarea.mb-input { min-width: 300px; resize: vertical; }
   border: 1px solid rgba(var(--of-steel-rgb),.45); border-radius: 5px;
   font: 600 11px/1 system-ui, sans-serif; padding: 4px 7px; cursor: pointer; }
 .draw-inline-apply:hover, .draw-inline-cancel:hover { background: rgba(var(--of-link-rgb),.30); }
+
+/* ── T1: contextual help — the per-panel "?" and inline help links ───────────────────────── */
+.view-head .panel-help { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px;
+    font-weight: 600; line-height: 1; }
+.help-link { color: var(--accent); text-decoration: none; border-bottom: 1px dotted currentColor; cursor: pointer; }
+.help-link:hover { border-bottom-style: solid; }
+
+/* ── T2: Windows & layouts — the master list and its rescue actions ───────────────────────── */
+.winmgr-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 4200;
+    display: flex; align-items: center; justify-content: center; }
+.winmgr-card { width: min(640px, 94vw); max-height: 82vh; display: flex; flex-direction: column;
+    background: var(--of-elevated); border: 1px solid var(--of-line); border-radius: 10px;
+    box-shadow: 0 18px 60px rgba(0,0,0,.5); }
+.winmgr-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    border-bottom: 1px solid rgba(var(--of-line-rgb), .55); }
+.winmgr-title { font-weight: 600; }
+.winmgr-body { padding: 10px 14px 14px; overflow: auto; }
+.winmgr-sec { margin: 8px 0 14px; }
+.winmgr-sec-title { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--text-secondary); margin-bottom: 6px; }
+.winmgr-screen { padding: 3px 0; }
+.winmgr-row { display: flex; align-items: center; gap: 10px; padding: 4px 0;
+    border-bottom: 1px solid rgba(var(--of-line-rgb), .3); }
+.winmgr-view { min-width: 110px; }
+.winmgr-id { flex: 1; }
+.winmgr-foot { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+
+/* ── T3: armed order keys and the paper ticket's danger row ──────────────────────────────── */
+.status-armed { color: var(--of-warn); border: 1px solid rgba(var(--of-warn-rgb), .55);
+    border-radius: 3px; padding: 0 6px; }
+.danger-row { border-top: 1px solid rgba(255,90,80,.30); padding-top: 6px; }
+.danger-row .btn { border-color: rgba(255,120,110,.35); }
+#ppLock.on { border-color: var(--of-warn); color: var(--of-warn); }
+
+/* ── T4/A5: the delayed-data badge in the ambient strip ───────────────────────── */
+.status-delay { color: var(--of-warn); border: 1px solid rgba(var(--of-warn-rgb), .55);
+    border-radius: 3px; padding: 0 6px; }
+
+/* ── T4/A7+A9: freeze-on-hover and the canvas watermark ──────────────────── */
+.view.ofap-frozen canvas { outline: 1px solid rgba(var(--of-warn-rgb), .45); outline-offset: -1px; }
+.ofap-freeze-chip { color: var(--of-warn); border: 1px solid rgba(var(--of-warn-rgb), .55);
+    border-radius: 3px; padding: 0 6px; font-size: 11px; }
+.ofap-watermark { position: absolute; right: 10px; bottom: 8px; opacity: .30; font-size: 11px;
+    letter-spacing: .04em; pointer-events: none; user-select: none; }
+
+/* ── T5/A10: minimal mode (heatmap) + the collapsed card ─────────────────── */
+.view[data-view="heatmap"].hm-minimal .view-head .field { display: none; }
+.view[data-view="heatmap"].hm-minimal .hm-pro-bar > *:not([data-hm-pro="minimal"]):not([data-hm-pro-info="1"]) { display: none; }
+.hm-pro-bar [data-hm-pro="minimal"].on { border-color: var(--of-warn); color: var(--of-warn); }
+.card.card-collapsed .card-body { display: none; }
+.card.card-collapsed .card-head { opacity: .72; }
+.card.card-collapsed .card-head::after { content: ' \25b8'; color: var(--text-secondary); }
+
+/* ── T7/B1: the settings search surface ──────────────────────────────── */
+.set-search { min-width: 320px; flex: 1; }
+.set-results { margin-top: 10px; max-height: 46vh; overflow: auto; }
+.set-group-title { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--text-secondary); margin: 10px 0 4px; }
+.set-row { display: flex; align-items: center; gap: 10px; padding: 3px 4px;
+    border-bottom: 1px solid rgba(var(--of-line-rgb), .22); }
+.set-row .set-name { min-width: 240px; }
+.set-row .set-ctl { min-width: 120px; }
+.set-row input[type="number"] { width: 104px; }
+.set-row.staged { background: rgba(var(--of-warn-rgb), .08); border-left: 2px solid var(--of-warn); }
+.set-row.is-changed .set-name::before { content: '● '; color: var(--of-warn); }
+.set-default { display: none; color: var(--text-secondary); font-size: 11px; }
+.set-results.show-original .set-default { display: inline; }
+.set-results.show-original .set-row.is-changed .set-default,
+.set-row.staged .set-default { display: inline; }
+.set-row .set-path { margin-left: auto; color: var(--text-secondary); font-size: 11px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 34%; }
+
+/* ── T8/B8: the template gallery ──────────────────────────────────────── */
+.tpl-grid { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.tpl-row { display: flex; align-items: center; gap: 10px; padding: 4px 6px;
+    border-bottom: 1px solid rgba(var(--of-line-rgb), .22); }
+.tpl-row .tpl-name { flex: 1; }
+.tpl-row .tpl-kind { text-transform: uppercase; font-size: 10px; letter-spacing: .05em; }

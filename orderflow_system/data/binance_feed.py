@@ -324,20 +324,26 @@ class BinanceFeed:
             logger.warning("Binance socket closed: %s", exc)
 
     # ── frames ───────────────────────────────────────────────
-    async def _on_frame(self, raw: Any) -> None:
+    async def _on_frame(self, raw: Any) -> bool:
+        """Parse one frame. False = no market data (acks, list responses, server pings): the
+        session's reconnect ladder only resets on data, so a venue that accepts, acks and then
+        stalls keeps escalating instead of hammering at 1 s."""
         try:
             msg = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             logger.warning("Binance: invalid JSON (%s)", str(raw)[:120])
-            return
+            return False
         if not isinstance(msg, dict):
-            return
+            return False
         kind = msg.get("e")
         if kind in ("trade", "aggTrade"):
             await self._handle_trade(msg)
-        elif kind == "depthUpdate":
+            return True
+        if kind == "depthUpdate":
             await self._handle_depth(msg)
+            return True
         # subscribe/unsubscribe acks carry `result`/`id` and nothing to do
+        return False
 
     async def _handle_trade(self, msg: dict) -> None:
         symbol = str(msg.get("s") or "").upper()

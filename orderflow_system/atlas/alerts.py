@@ -24,6 +24,15 @@ KINDS = (
     # the depth map's own kind (P1-6): a level that keeps holding. It is what a heatmap level alert
     # creates with "alert: if this level holds", and `wall_age` events carry `held_ms`.
     "wall_age",
+    # level reads (fold-in plan §3): unfinished auctions + node runs, fed from closed bars
+    "unfinished_business", "node_zone",
+    # the area profile's hand-off (fold-in plan §3 / A3): "watch this level" — the engine fires
+    # when price RETURNS into the rule's own at_price band. Emitted by `evaluate_touch`, which
+    # the hub's tick path calls; no detector payload is involved.
+    "level_touch",
+    # the level radar (fold-in plan §4 / G1): every tracker transition — armed, approaching,
+    # defended, confirmed, spent, failed — dispatches as this kind from `hub.on_tick`.
+    "radar_level",
 )
 
 DEFAULT_RULES: list[dict[str, Any]] = [
@@ -60,6 +69,15 @@ DEFAULT_RULES: list[dict[str, Any]] = [
      "params": {"min_size": 0.0, "max_distance_ticks": 10.0}, "cooldown_s": 30, "channels": ["ui"]},
     {"id": "intent-trap", "name": "Break failed — side trapped", "kind": "trapped_traders", "enabled": True,
      "params": {"min_beyond_ticks": 3.0}, "cooldown_s": 60, "channels": ["ui"]},
+    # level reads (fold-in plan §3): context, not noise — UI-only by default
+    {"id": "unfinished", "name": "Unfinished business", "kind": "unfinished_business", "enabled": True,
+     "params": {"min_arms": 1}, "cooldown_s": 60, "channels": ["ui"]},
+    {"id": "nodes", "name": "Node formed", "kind": "node_zone", "enabled": True,
+     "params": {"min_count": 2}, "cooldown_s": 60, "channels": ["ui"]},
+    # level radar (fold-in plan §4 / G1): the transition worth interrupting for is a level that
+    # held — arming and approach chatter stays in the Radar column and the Alerts log.
+    {"id": "radar-held", "name": "Radar level held", "kind": "radar_level", "enabled": True,
+     "params": {"states": ["defended", "confirmed"]}, "cooldown_s": 60, "channels": ["ui"]},
 ]
 
 
@@ -150,6 +168,9 @@ class AlertEngine:
         # automation service. Anything with "webhook" in its channels is POSTed.
         self.webhook_url = webhook_url or ""
         self.webhook_stats = {"sent": 0, "failed": 0, "last_error": ""}
+        # price-touch alerts (`level_touch`): per-rule band state, so a rule fires on the
+        # outside-to-inside transition and re-arms once price leaves the band again.
+        self._touch_inside: dict[str, bool] = {}
 
     # ── rule management ───────────────────────────────────────
     def set_rules(self, rules: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -173,6 +194,7 @@ class AlertEngine:
 
     def remove(self, rule_id: str) -> list[dict[str, Any]]:
         self.rules = [r for r in self.rules if r.id != rule_id]
+        self._touch_inside.pop(rule_id, None)
         return [r.to_dict() for r in self.rules]
 
     # ── evaluation ────────────────────────────────────────────
@@ -215,6 +237,44 @@ class AlertEngine:
             fired.append(alert)
             self.history.append(alert)
         if len(self.history) > self._history_max:
+            self.history = self.history[-self._history_max:]
+        return fired
+
+    def evaluate_touch(self, symbol: str, price: float, ts_ms: Optional[int] = None) -> list[Alert]:
+        """Price-touch alerts: a ``level_touch`` rule fires when price RETURNS into its band.
+
+        The area profile's "watch this level" hand-off writes these rules. The event is the
+        transition — outside the band to inside it — so price resting at the level fires once,
+        not once per tick; leaving the band re-arms it, and the rule's own cooldown still applies.
+        The band is the rule's own ``at_price ± at_tol`` (the same scope every rule carries); a
+        rule without a level can never fire and is skipped rather than guessed at.
+        """
+        ts = int(ts_ms or time.time() * 1000)
+        fired: list[Alert] = []
+        for rule in self.rules:
+            if not rule.enabled or rule.kind != "level_touch":
+                continue
+            params = rule.params or {}
+            level = params.get("at_price")
+            if level is None:
+                continue
+            tol = float(params.get("at_tol", 0) or 0)
+            inside = abs(float(price) - float(level)) <= tol
+            was_inside = self._touch_inside.get(rule.id, False)
+            self._touch_inside[rule.id] = inside
+            if not inside or was_inside:
+                continue
+            if rule.cooldown_s and rule.last_fired_ms and ts - rule.last_fired_ms < rule.cooldown_s * 1000:
+                continue
+            data = {"price": float(level), "last": float(price), "at_tol": tol}
+            alert = Alert(rule_id=rule.id, name=rule.name, kind="level_touch", symbol=symbol, ts_ms=ts,
+                          message=self._message(rule, symbol, data), severity="info",
+                          data=data, channels=list(rule.channels))
+            rule.last_fired_ms = ts
+            rule.fired += 1
+            fired.append(alert)
+            self.history.append(alert)
+        if fired and len(self.history) > self._history_max:
             self.history = self.history[-self._history_max:]
         return fired
 
@@ -336,6 +396,22 @@ class AlertEngine:
                 float(get("distance_ticks", 99) or 99) <= float(params.get("max_distance_ticks", 99) or 99)
         if kind == "trapped_traders":
             return float(get("beyond_ticks", 0) or 0) >= float(params.get("min_beyond_ticks", 0) or 0)
+        if kind == "unfinished_business":
+            sides = params.get("sides") or []
+            if sides and str(get("side", "")).lower() not in [s.lower() for s in sides]:
+                return False
+            return int(get("arms", 1) or 1) >= int(params.get("min_arms", 0) or 0)
+        if kind == "node_zone":
+            return int(get("count", 0) or 0) >= int(params.get("min_count", 0) or 0)
+        if kind == "level_touch":
+            # its threshold IS the level (at_price ± at_tol, checked generically) and the event
+            # is the touch itself, so this kind has no knob of its own to read.
+            return True
+        if kind == "radar_level":
+            states = params.get("states") or []
+            if states and str(get("state", "")) not in [str(s) for s in states]:
+                return False
+            return True
         return True
 
     @staticmethod
@@ -387,6 +463,33 @@ class AlertEngine:
         if k == "trapped_traders":
             return (f"{symbol}: {get('side')} trapped — break past {get('level')} failed, "
                     f"reclaimed in {round((get('reclaim_ms') or 0) / 1000)}s")
+        if k == "unfinished_business":
+            side = "high" if str(get("side", "")) == "above" else "low"
+            finish = "bid" if side == "high" else "ask"
+            return (f"{symbol}: unfinished {side} at {get('price')} — the auction never finished "
+                    f"(no zero-on-{finish} completion); it clears when price returns")
+        if k == "node_zone":
+            count = int(get("count", 0) or 0)
+            label = {2: "double", 3: "triple"}.get(count, f"{count}-bar")
+            return f"{symbol}: {label} node at {get('price')} ({count} consecutive bars at one price)"
+        if k == "level_touch":
+            return f"{symbol}: price came back to the watched level {get('price')} (±{get('at_tol')})"
+        if k == "radar_level":
+            state = str(get("state", ""))
+            source = str(get("source", "level")).replace("_", " ")
+            price = get("price")
+            if state == "armed":
+                return f"{symbol}: new {source} level armed at {price}"
+            if state in ("defended", "confirmed"):
+                extra = " — first test" if get("first_test") else (
+                    f" (test {get('touches')})" if get("touches") else "")
+                return (f"{symbol}: {source} level {price} "
+                        f"{'confirmed' if state == 'confirmed' else 'held'}{extra}")
+            if state == "spent":
+                return f"{symbol}: {source} level {price} spent — traded through"
+            if state == "failed":
+                return f"{symbol}: {source} level {price} failed — held once, then broken through"
+            return f"{symbol}: {source} level {price} {state}"
         return f"{symbol}: {rule.name}"
 
 

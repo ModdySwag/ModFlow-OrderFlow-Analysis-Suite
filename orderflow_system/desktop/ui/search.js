@@ -56,12 +56,29 @@ const SEARCH_TIMING = {
 
 const SEARCH_VIEWS_DEFAULT = 'orderflow';
 
+/* T12/B18: the typed overlay selector — '@TAG' tokens open any of these surfaces with the
+   instrument pre-loaded, through the same activate path the symbol rows use. */
+const LAUNCH_TARGETS = [
+    { view: 'ofx', label: 'Engine' },
+    { view: 'heatmap', label: 'Heatmap' },
+    { view: 'chart', label: 'Chart' },
+    { view: 'replay', label: 'Replay' },
+    { view: 'depth', label: 'Depth' },
+];
+/* '@TAG': letters/digits . - _ / up to 18 chars (BTCUSDT, NQ1!, ESZ5, BTC/USD…) */
+const LAUNCH_TAG_RE = /@([A-Za-z0-9][A-Za-z0-9._/-]{0,17})/g;
+
 /* ── what the program can do, in words ─────────────────────────── */
 function searchActions() {
     const st = vwapState();
     return [
         { cat: 'Actions', title: 'Start the engine', desc: 'Begin streaming the enabled instruments from the selected data source.',
           keywords: 'run launch feed live begin', run: () => api('/api/control/engine/start', { method: 'POST', body: {} }) },
+        {
+          id: 'lookup', title: 'Instrument look-up \u2014 why won\u2019t my symbol stream?',
+          keywords: 'nq nq1 crypto only mt5 broker symbol data missing not streaming enable instrument',
+          run: () => { if (window.OFAPHINT) OFAPHINT.run('lookup'); },
+        },
         { cat: 'Actions', title: 'Stop the engine', desc: 'Stop streaming; everything already collected stays on screen and on disk.',
           keywords: 'halt pause end', run: () => api('/api/control/engine/stop', { method: 'POST', body: {} }) },
         { cat: 'Actions', title: 'Restart the engine', desc: 'Re-read the configuration and rebuild the pipelines (needed after changing instruments).',
@@ -97,6 +114,28 @@ function searchActions() {
           keywords: 'option chain calls puts strike expiry options contract', run: () => searchChainOpen() },
         { cat: 'Actions', title: 'Compare two feeds', desc: 'IEX vs SIP (or Alpaca crypto vs the exchange) side by side, with the discrepancy.',
           keywords: 'compare feed iex sip delayed discrepancy arbitrage', run: () => searchCompareOpen(S.symbol) },
+        { cat: 'Actions', title: 'Toggle the table-component trial (Watchlist)',
+          desc: 'Render the Watchlist through the shared table component — sortable headers, a column chooser, drag-reorder and grouping; the layout is remembered per table.',
+          keywords: 'table component one table sort columns group reorder trial watchlist migrate',
+          run: () => {
+                const cfg = S.config || (S.config = {});
+                cfg.ui = cfg.ui || {};
+                const list = Array.isArray(cfg.ui.table_component) ? cfg.ui.table_component.slice() : [];
+                const at = list.indexOf('watchlist');
+                if (at >= 0) list.splice(at, 1); else list.push('watchlist');
+                cfg.ui.table_component = list;
+                void api('/api/control/config', { method: 'POST', body: { ui: { table_component: list } } });
+                if (typeof toast === 'function') toast(document.body,
+                    'the one-table component for the Watchlist is ' + (at >= 0 ? 'OFF' : 'ON') + ' — reopen the Watchlist', 'info');
+            } },
+        { cat: 'Actions', title: 'Open the instrument look-up across feeds',
+          desc: 'One overlay over every connection: search Bybit, MetaTrader 5 and Alpaca together, and add what the venue confirms.',
+          keywords: 'instrument lookup find symbol across feeds venue mt5 bybit alpaca search add enable',
+          run: () => { if (window.OFAPLOOKUP && OFAPLOOKUP.open) OFAPLOOKUP.open(); else if (window.OFAPHINT) OFAPHINT.run('lookup'); } },
+        { cat: 'Actions', title: 'Forget this instrument’s display settings',
+          desc: 'Drop the remembered heat recipe for the instrument on screen — the next visit starts from the last-used values again.',
+          keywords: 'instrument scope reset forget per symbol heat settings remembered',
+          run: () => { if (window.OFAPSCOPES && OFAPSCOPES.forgetCurrent) OFAPSCOPES.forgetCurrent(); } },
     ];
 }
 
@@ -529,6 +568,16 @@ function searchActivateSymbol(symbol, opts) {
             }
         }
     }
+    /* T12/B18: deep-launching the Engine also pre-loads its own symbol control (the Engine's
+       select is the authority for what it streams), through its own change path. */
+    if (o.view === 'ofx') {
+        const engineSel = document.getElementById('ofxSymbol');
+        if (engineSel) {
+            const known = !engineSel.options.length
+                || Array.from(engineSel.options).some((opt) => opt.value === app);
+            if (known) { engineSel.value = app; engineSel.dispatchEvent(new Event('change')); }
+        }
+    }
     window.showView && window.showView(o.view || searchDefaultView());
     searchPushActive();
     return app;
@@ -799,7 +848,8 @@ function searchRender(q, opts) {
             ${SEARCH.rows.map((r, i) => searchSymbolRowHTML({ symbol: r.symbol, source: 'recent' }, i)).join('')
               || '<div class="search-empty">No recents yet — type a ticker, a view or an action.</div>'}
             <div class="search-empty">Type to search the whole program — try <b>heatmap</b>, <b>stop run</b>,
-                <b>vwap</b>, <b>scanner</b>, <b>replay</b>, or a ticker like <b>AAPL</b>.</div>
+                <b>vwap</b>, <b>scanner</b>, <b>replay</b>, a ticker like <b>AAPL</b>, or <b>@BTCUSDT</b>
+                to open a panel pre-loaded (the typed overlay selector).</div>
             ${searchOpsHint(parsed)}`;
         panel.classList.add('open');
         SEARCH.open = true;
@@ -810,9 +860,25 @@ function searchRender(q, opts) {
     }
 
     searchBuildIndex(false);
-    const indexRows = searchQuery(parsed.text || text);
+    const indexRows = searchQuery((parsed.text || text).replace(LAUNCH_TAG_RE, ' ').trim());
     const symbolRows = o.symbolsPending ? (SEARCH.symbolRows || []) : (SEARCH.symbolRows || []);
-    SEARCH.rows = [...symbolRows, ...indexRows];
+    /* T12/B18: '@TAG' tokens become deep-launch rows — the typed overlay selector. */
+    const tags = [];
+    LAUNCH_TAG_RE.lastIndex = 0;
+    let tagMatch;
+    while ((tagMatch = LAUNCH_TAG_RE.exec(text)) && tags.length < 3) {
+        if (tags.indexOf(tagMatch[1]) < 0) tags.push(tagMatch[1]);
+    }
+    const launchRows = [];
+    tags.forEach((tag) => {
+        const app = searchAppSymbol(tag);
+        LAUNCH_TARGETS.forEach((target) => {
+            launchRows.push({ launch: { symbol: app, view: target.view }, cat: 'Deep launch',
+                title: 'Open ' + target.label + ' — ' + app,
+                desc: 'opens the panel with the instrument pre-loaded (typed @ selector)' });
+        });
+    });
+    SEARCH.rows = [...launchRows, ...symbolRows, ...indexRows];
     SEARCH.active = Math.min(SEARCH.active, Math.max(SEARCH.rows.length - 1, 0));
 
     if (!SEARCH.rows.length) {
@@ -897,6 +963,12 @@ async function searchRun(opts) {
     const o = opts || {};
     const item = SEARCH.rows[SEARCH.active];
     if (!item) return;
+    if (item.launch) {
+        /* T12/B18: a deep-launch row — activate the instrument with the surface pre-loaded. */
+        searchClose();
+        searchActivateSymbol(item.launch.symbol, { view: item.launch.view });
+        return;
+    }
     if (item.symbol) {
         searchClose();
         if (o.chain) { await searchChainOpen(item.symbol); return; }

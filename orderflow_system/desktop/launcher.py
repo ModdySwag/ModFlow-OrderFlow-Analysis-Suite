@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import socket
 import sys
 import threading
@@ -328,6 +329,7 @@ class NativeWindowHost(windows_mod.WindowHost):
 
     def __init__(self, port: int, title: str = "") -> None:
         self.port = int(port)
+        self._quitting = False      # §94: a sweep is in progress — keep the store's records
         self.title = title or "ModFlow OrderFlow Analysis Suite"
         self._windows: dict = {}
 
@@ -390,6 +392,9 @@ class NativeWindowHost(windows_mod.WindowHost):
 
         def forget(*_args) -> None:
             self._windows.pop(wid, None)
+            if self._quitting:
+                return                              # §94: quit-time destroy keeps the record —
+                                                    # the widgets come back next start
             try:
                 windows_mod.drop_record(wid)       # closed from either side, it leaves the set
             except Exception:
@@ -409,6 +414,25 @@ class NativeWindowHost(windows_mod.WindowHost):
             return False
         window.destroy()
         return True
+
+    def close_all(self) -> int:
+        """Close every auxiliary window, called when the MAIN window closes (§94).
+
+        Without this sweep the widget windows were still alive while the process exited; a window
+        whose owner is gone survives as a ghost frame on the desktop — the stuck "Close" remnant
+        the owner photographed after quitting. Records are KEPT (``_quitting`` suppresses the
+        drop), so the windows come back where they were on the next start.
+        """
+        self._quitting = True
+        closed = 0
+        for wid, window in list(self._windows.items()):
+            try:
+                window.destroy()
+                closed += 1
+            except Exception:
+                logger.debug("aux close during quit failed", exc_info=True)
+            self._windows.pop(wid, None)
+        return closed
 
     def focus(self, wid: str) -> bool:
         window = self._windows.get(wid)
@@ -430,8 +454,11 @@ class NativeWindowHost(windows_mod.WindowHost):
         return True
 
 
-def restore_windows(port: int, title: str = "") -> NativeWindowHost:
+def restore_windows(port: int, title: str = "", restore: bool = True) -> NativeWindowHost:
     """Install the host and bring back the auxiliary windows that were open (§73).
+
+    ``restore=False`` (a safe start, T2) installs the host and brings nothing back — windows can
+    still be opened by hand, and a window that was stranded off-screen cannot return.
 
     Restored *before* ``webview.start()`` so every window exists when the GUI comes up; a window
     whose stored monitor is gone is re-placed on the primary by `windows.place_aux`, and the
@@ -439,6 +466,8 @@ def restore_windows(port: int, title: str = "") -> NativeWindowHost:
     """
     host = NativeWindowHost(port, title)
     windows_mod.set_host(host)
+    if not restore:
+        return host
     for record in windows_mod.records():
         try:
             placement = windows_mod.place_aux(record, host.screens(), count=len(host.open_ids()))
@@ -460,7 +489,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--headless", action="store_true", help="run the server only (no window)")
     parser.add_argument("--port", type=int, default=0, help="override the configured port")
     parser.add_argument("--view", default="", help="open a specific view (overview/chart/orderflow/depth/tape/signals/strategy/performance/instruments/settings/logs)")
+    parser.add_argument("--safe", action="store_true", help="safe start: restore no auxiliary windows and boot Classic regardless of the stored layout")
     args = parser.parse_args(argv)
+
+    # T2: a safe start is the rescue path — nothing that was arranged on screen comes back by
+    # itself, and the browser boots Classic whatever the store says. The server reads this flag.
+    if args.safe:
+        os.environ["OFAP_SAFE_START"] = "1"
 
     cfg = config_store.load_config()
     logs.install(cfg.get("logging", {}).get("level", "INFO"))
@@ -550,7 +585,12 @@ def main(argv: list[str] | None = None) -> int:
     remember_window(window, window_cfg)                           # §72: written back when it closes
     # §73: the auxiliary windows that were open come back where they were — before start(), so
     # every window exists when the GUI comes up.
-    restore_windows(port)
+    host = restore_windows(port, restore=not args.safe)
+    # §94: when the MAIN window closes, take the auxiliary windows down FIRST — no widget window
+    # may be mid-flight while the process exits (that leaves ghost frames on the desktop).
+    _closed = getattr(getattr(window, "events", None), "closed", None)
+    if _closed is not None:
+        _closed += lambda: host.close_all()
     try:
         webview.start(icon=str(_icon) if _icon.is_file() else None)   # blocks on the main thread (required on macOS)
     except Exception as exc:                # missing WebView2 / no display → browser fallback
@@ -561,6 +601,7 @@ def main(argv: list[str] | None = None) -> int:
                 time.sleep(1)
         except KeyboardInterrupt:
             pass
+    host.close_all()                             # idempotent — the closed-event sweep may have run
     return 0
 
 

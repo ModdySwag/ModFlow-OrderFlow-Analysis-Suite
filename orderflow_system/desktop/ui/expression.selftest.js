@@ -45,7 +45,7 @@ check('the module exposes its whole surface', () => {
         'legendLines', 'simulate', 'deltaE', 'separation', 'splitVolumes', 'legibility']) {
         assert.strictEqual(typeof E[fn], 'function', fn + ' is missing');
     }
-    assert.deepStrictEqual(E.MODE_KEYS, ['default', 'delta', 'split', 'heat', 'wick']);
+    assert.deepStrictEqual(E.MODE_KEYS, ['default', 'delta', 'split', 'heat', 'wick', 'candles']);
     assert.deepStrictEqual(E.PALETTE_KEYS, ['theme', 'deutan', 'protan', 'tritan']);
 });
 
@@ -146,7 +146,7 @@ for (const key of E.PALETTE_KEYS) {
     });
 }
 
-/* ── the five modes ─────────────────────────────────────────────────────── */
+/* ── the six modes ─────────────────────────────────────────────────────── */
 
 check('every mode names itself, its encoding and how the sign is carried', () => {
     for (const k of E.MODE_KEYS) {
@@ -250,6 +250,26 @@ check('wick mode: no body, no chrome, badges kept', () => {
     assert.strictEqual(p.chrome.zones, false);
     assert.strictEqual(p.chrome.badges, true, 'the badge is the text carrier and must survive');
     assert.ok(p.wick.rgba && p.wick.lineWidth >= 1);
+});
+
+check('candles: a saturated body by direction, no cells, no chrome', () => {
+    const p = E.barPaint(upBar, { mode: 'candles', theme: SHIPPED });
+    assert.ok(p.body && p.body.fill && p.body.stroke, 'candles draw a body');
+    assert.strictEqual(p.split, null);
+    assert.strictEqual(p.chrome.cells, false, 'the cells are off — the body is the encode');
+    assert.strictEqual(p.chrome.framing, false);
+    assert.strictEqual(p.chrome.poc, false);
+    assert.strictEqual(p.chrome.badges, false);
+    assert.ok(p.wick && p.wick.lineWidth >= 1);
+});
+check('candles: direction rides the glyph and the wick tint', () => {
+    const up = E.barPaint(upBar, { mode: 'candles', theme: SHIPPED });
+    const dn = E.barPaint(downBar, { mode: 'candles', theme: SHIPPED });
+    assert.ok(up.glyph && dn.glyph && up.glyph !== dn.glyph, 'direction needs a second carrier');
+    assert.notStrictEqual(up.wick.rgba, dn.wick.rgba);
+});
+check('candles: the chart view declares support', () => {
+    assert.strictEqual(E.CHART_SUPPORT.candles, true);
 });
 
 check('the default mode changes nothing about today\'s chrome', () => {

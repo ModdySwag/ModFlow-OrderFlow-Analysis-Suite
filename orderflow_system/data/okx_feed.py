@@ -473,33 +473,38 @@ class OkxFeed:
             logger.warning("OKX socket closed: %s", exc)
 
     # ── frames ───────────────────────────────────────────────
-    async def _on_frame(self, raw: Any) -> None:
+    async def _on_frame(self, raw: Any) -> bool:
+        """Parse one frame. False = no market data (acks, pongs, errors): the session's reconnect
+        ladder only resets on data, so a venue that acks and then stalls keeps escalating."""
         if isinstance(raw, (bytes, bytearray)):
             # Every channel this adapter subscribes to is JSON on a text frame; the venue's binary
             # (SBE) variants are separate channels, so a binary frame is not something we asked for.
             logger.warning("OKX: unexpected binary frame (%d bytes)", len(raw))
-            return
+            return False
         if raw == "pong":
             # The heartbeat's answer: the venue replies to a bare text "ping" with a bare "pong",
             # which is not JSON and must not be logged as a parse error.
             self.pongs += 1
-            return
+            return False
         try:
             msg = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             logger.warning("OKX: invalid JSON (%s)", str(raw)[:120])
-            return
+            return False
         if not isinstance(msg, dict):
-            return
+            return False
         if "event" in msg:
             self._on_event(msg)
-            return
+            return False
         channel = str((msg.get("arg") or {}).get("channel") or "")
         if channel == TRADES_CHANNEL:
             await self._handle_trade(msg)
-        elif channel == BOOKS_CHANNEL:
+            return True
+        if channel == BOOKS_CHANNEL:
             await self._handle_books(msg)
+            return True
         # anything else is a channel we did not subscribe to
+        return False
 
     def _on_event(self, msg: dict) -> None:
         event = str(msg.get("event") or "")

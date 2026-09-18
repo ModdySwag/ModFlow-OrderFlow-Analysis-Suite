@@ -43,6 +43,9 @@
           blurb: 'The files this program writes, how long ticks are kept, and how it is exposed.' },
         { id: 'under', label: 'Under the hood', mode: 'advanced',
           blurb: 'How the pieces fit together, the HTTP surface, the build, diagnostics.' },
+        { id: 'method', label: 'Reading the market', mode: 'both',
+          blurb: 'The decision order the order-flow workflow follows: profile first, then a '
+              + 'confirmation at a level you chose \u2014 and which read in this program is which.' },
         { id: 'fix', label: 'Fixes and support', mode: 'both',
           blurb: 'When something looks wrong: the system check, the common causes, how to report it.' },
     ];
@@ -242,6 +245,13 @@
                     + 'engine restarts itself so the change is real immediately. Which instruments a '
                     + 'source can actually serve is checked against the venue itself — Instruments '
                     + 'greys out the rest instead of streaming silence.' },
+                { h: 'An exchange feed is crypto-only — by nature', p: 'Bybit, Binance, OKX and '
+                    + 'Hyperliquid list crypto perpetuals. **No keyless venue carries indices, FX, '
+                    + 'metals or CFDs**: a name like NQ1! or US100 needs MetaTrader 5 with your broker '
+                    + 'signed in, and US equities need Alpaca. When a source cannot serve a symbol the '
+                    + 'app says exactly that — and the **instrument look-up** (the symbol chip in the '
+                    + 'Engine view, **Instrument look-up…** in the Data menu, or the button at the '
+                    + 'top of Instruments) turns the refusal into the next step.' },
             ],
             actions: [
                 { label: 'Switch source (☰ menu)', kind: 'menu', value: '' },
@@ -346,7 +356,10 @@
             aliases: ['order flow engine', 'the engine view', 'heat behind the matrix'],
             summary: 'The deepest panel in the program: a split-candle footprint matrix painted over '
                 + 'a live depth heat, with execution sweeps, a CVD ribbon locked to the same time '
-                + 'axis, and a crosshair HUD that reads out the level under your cursor.',
+                + 'axis, and a crosshair HUD that reads out the level under your cursor. The '
+                + 'panel’s symbol chip opens a picker grouped **streaming now → enabled → '
+                + 'configured → off**: choosing an instrument switches the engine to it (with '
+                + 'the engine running, the same apply path the Instruments toggles use).',
             blocks: [
                 { h: 'The three layers behind the matrix', list: [
                     '**Depth heat** — resting liquidity as a heat map behind the bars. Alpha decays '
@@ -374,11 +387,30 @@
                 { h: 'Controls worth knowing', list: [
                     '**Snap to live** (● live) follows the newest bar; scrolling away releases it and a '
                     + 'floating chip brings you back. Double-clicking the stage fits the whole session.',
+                    '**symbol** takes any name — a market name, a broker spelling or the suite’s own row — '
+                    + 'and the chip beside it says what the server makes of it: **streaming**, **enabled**, '
+                    + '**not enabled**, **available from your broker**, or **unknown**. `find` (or the chip) '
+                    + 'opens the look-up: the reason, the close matches, and the button that fixes it '
+                    + '(enable & restart, start the engine, map the broker symbol on MT5). A symbol nothing '
+                    + 'can stream is answered there instead of leaving an empty stage.',
                     '**VA %** sets the share of a bar that counts as its value area.',
                     '**bars** chooses the expression (default · delta tint · split candle · heat body · '
-                    + 'wick + footprint), **palette** the colour vocabulary (theme or a measured '
+                    + 'wick + footprint · candles), **palette** the colour vocabulary (theme or a measured '
                     + 'colour-blind-safe pair) and **ramp** the depth-heat ramp — both ramps are '
                     + 'monotone in luminance, so magnitude never rides on hue alone.',
+                    '**scheme** writes the whole heat recipe in one go — *balanced depth* (as shipped), '
+                    + '*wall hunt* (only the top 2% saturate, the small orders unpainted), *thin-book '
+                    + 'detail* (the middle lifted), *quiet book* (the bottom 15% unpainted) — then '
+                    + '**contrast** and **floor** dial the result; a hand-edited dial reads *custom*. '
+                    + '**⇉ global** writes these dials to every heat surface; the shared colour ceiling '
+                    + 'lives in Settings ▸ Depth heat.',
+                    '**smooth** adds vertical smoothing while the rows compress (auto · manual · '
+                    + 'none, display only), and **auto-candles** degrades the matrix to plain '
+                    + 'candles once a column falls under the text threshold — the saved bar mode '
+                    + 'is untouched either way.',
+                    '**The value scale is an object** — right-click it for *Auto* / *Free* (drag '
+                    + 'the rail to move prices) / *Reset scales*; **Ctrl+Shift+R** resets price + '
+                    + 'time from the keyboard.',
                     '**LOD** names the level of detail in use: when too many rows or bars are in view, '
                     + 'ticks group before profiles are dropped, so the panel stays honest about what '
                     + 'it is showing.',
@@ -422,6 +454,15 @@
                     ['spoof/stack', 'The event markers on or off.'],
                     ['auto', 'Follows the newest column; turning it off freezes the view so you can '
                         + 'study what just happened.'],
+                    ['Heat (scheme · contrast · floor)', 'The depth-heat recipe: a named scheme '
+                        + '(balanced · wall hunt · thin-book · quiet) writes the ceiling, floor and '
+                        + 'contrast together, and the dials then tune it — a hand-edited dial reads '
+                        + '*custom*. The **floor** hides sizes below it, so the map draws where size '
+                        + 'IS instead of a speckle of everything.'],
+                    ['Smooth', 'Vertical smoothing while the map’s rows compress (auto · manual · '
+                        + 'none); display only — *none* keeps the raw cells.'],
+                    ['⇉ global', 'Writes this view’s heat dials to every heat surface — the Engine '
+                        + 'and the Heatmap.'],
                 ] },
                 { h: 'Selected regions are measurements', p: 'Drag a rectangle over the map and the '
                     + 'selection carries its own readout: volume traded inside it, how much was pulled, '
@@ -438,6 +479,27 @@
                 { label: 'Trackers', kind: 'view', value: 'trackers' },
             ],
             related: ['view.ofx', 'view.depth', 'view.trackers', 'view.alerts'],
+        },
+        {
+            id: 'view.inbox', group: 'panels', mode: 'both',
+            title: 'Inbox',
+            tags: ['inbox', 'notifications', 'alert history', 'do not disturb', 'unread', 'tiles'],
+            summary: 'Every alert the engine fired, kept as tiles \u2014 categorised, filterable and '
+                + 'act-on-click: opening a tile marks it read and opens the panel that can show its evidence.',
+            blocks: [
+                { h: 'How it differs from Alerts', p: 'Alerts is the routing table \u2014 which rules exist '
+                    + 'and where each one pushes. The Inbox is the record \u2014 what actually fired, newest '
+                    + 'first, with its kind, instrument and message. Both read the same firings; nothing '
+                    + 'is duplicated and nothing is invented.' },
+                { h: 'Categories, priority, do not disturb', p: 'Chips filter by what the rule watches '
+                    + '\u2014 tape, book, structure, execution. "Priority first" sorts critical above warning '
+                    + 'above info. Do not disturb keeps the record running but silences the badge.' },
+            ],
+            actions: [
+                { label: 'Open the Inbox', kind: 'view', value: 'inbox' },
+                { label: 'Open Alerts', kind: 'view', value: 'alerts' },
+            ],
+            related: ['view.alerts', 'view.heatmap', 'view.tape'],
         },
         {
             id: 'view.depth', group: 'panels', mode: 'both',
@@ -486,6 +548,50 @@
                 { label: 'Trackers', kind: 'view', value: 'trackers' },
             ],
             related: ['view.trackers', 'view.ofx', 'work.cursor'],
+        },
+        {
+            id: 'view.marketwatch', group: 'panels', mode: 'both',
+            title: 'Market Watch',
+            tags: ['market watch', 'bid', 'ask', 'daily change', 'board', 'quotes', 'spread',
+                'symbols', 'live', 'real time', 'pause', 'freeze'],
+            aliases: ['the board', 'quote board', 'all symbols'],
+            summary: 'The source’s own board: every instrument it lists, with live bid, ask and daily '
+                + 'change — the platform’s Market Watch. On MetaTrader 5 this panel mirrors the '
+                + 'terminal’s **own** Market Watch (the symbols you keep visible there), read-only.',
+            blocks: [
+                { h: 'What each source shows', table: [
+                    ['Bybit', 'The whole perpetual board from one cached snapshot — hundreds of '
+                        + 'symbols, refreshed every few seconds.'],
+                    ['MetaTrader 5', 'The terminal’s own Market Watch, mirrored: exactly the symbols '
+                        + 'visible in your terminal (35 on the demo account) with live quotes off the '
+                        + 'running terminal. The panel never writes to the terminal — browsing it '
+                        + 'cannot change your watch list.'],
+                    ['NinjaTrader 8', 'The terminal’s master instrument list; live bid/ask arrives for '
+                        + 'the instruments the bridge is subscribed to (open one from the Engine panel).'],
+                ] },
+                { h: 'Reading it', list: [
+                    '**Arrows and colour** — a green ↗ or red ↘ with the day’s change in percent, the '
+                    + 'same reading as the terminal’s own Market Watch.',
+                    '**— instead of a price** — that source does not quote this row (yet); the footer '
+                    + 'sentence always says which venue answered and what it could not give.',
+                    '**The board is live** — it re-reads about every 1.5 seconds while the panel '
+                        + 'is visible; a price cell tints green or red with its last move (and flashes), '
+                        + 'and the badge beside the title shows how fresh the read is.',
+                    '**Pause** freezes the board exactly as it stands — a read that lands while '
+                        + 'paused is dropped — and **Resume** snaps it current; **Refresh** takes one '
+                        + 'fresh read even while paused. **Filter** narrows as you type.',
+'**Right-click a row** — the same look-up verdict the Instruments table gives, '
+                    + 'without leaving the board.',
+                ] },
+                { note: 'The source picker defaults to the engine’s source; switching it here only '
+                    + 'changes what this board mirrors, never what the engine streams.' },
+            ],
+            actions: [
+                { label: 'Open Market Watch', kind: 'view', value: 'marketwatch' },
+                { label: 'Instruments (what the engine streams)', kind: 'view', value: 'instruments' },
+                { label: 'MetaTrader 5', kind: 'topic', value: 'connect.mt5' },
+            ],
+            related: ['view.instruments', 'connect.mt5', 'view.overview'],
         },
         {
             id: 'view.trackers', group: 'panels', mode: 'both',
@@ -692,6 +798,66 @@
             related: ['view.signals', 'view.alerts', 'view.replay'],
         },
         {
+            id: 'view.journal', group: 'panels', mode: 'both',
+            title: 'Journal',
+            tags: ['journal', 'trades', 'statistics', 'statement', 'win rate', 'profit factor', 'sharpe'],
+            aliases: ['trade journal', 'performance report', 'statement'],
+            summary: 'The trades the app has recorded — simulated sessions and anything else that '
+                + 'writes the journal table — with their statistics, a note per trade, and a '
+                + 'broker-style statement you can write out and send.',
+            blocks: [
+                { h: 'The figures', list: [
+                    'Trades, win rate, profit factor, average R and the maximum drawdown, all '
+                    + 'computed server-side from the journal table (nothing here is estimated).',
+                    'The daily table is P&L in **ticks** — points of the instrument — because that is '
+                    + 'the unit the app records; multiply by your own value per tick.',
+                ] },
+                { h: 'Working with it', list: [
+                    'Click a row to select it, write a note, then **Save note**.',
+                    '**Export HTML statement** writes a self-contained file (summary, daily table, '
+                    + 'every trade) into your exports folder — the shape brokers send, and readable '
+                    + 'in any browser with nothing installed.',
+                    'A simulated session from the Replay view lands here through **End & save to journal**.',
+                ] },
+            ],
+            actions: [
+                { label: 'Open Journal', kind: 'view', value: 'journal' },
+                { label: 'Open the exports folder', kind: 'folder', value: 'exports' },
+            ],
+            related: ['view.replay', 'view.performance'],
+        },
+        {
+            id: 'view.calendar', group: 'panels', mode: 'both',
+            title: 'Economic calendar',
+            tags: ['calendar', 'events', 'news', 'macro', 'alerts', 'impact'],
+            aliases: ['economic calendar', 'releases', 'macro events'],
+            summary: 'This week\'s scheduled releases by currency and impact — and, if you switch it '
+                + 'on, an alert before the high-impact ones reach the market.',
+            blocks: [
+                { h: 'What you are looking at', list: [
+                    'One keyless source: **Forex Factory\'s public weekly calendar JSON**. It is '
+                    + 'cached for four hours; when it cannot be reached the panel says so and shows '
+                    + 'the last good copy marked **STALE** rather than inventing dates.',
+                    'The **window** and **minimum impact** filters are yours; the currency box takes '
+                    + 'a list like `USD,EUR`.',
+                ] },
+                { h: 'Alerts', list: [
+                    'Switch on **alerts ahead of high-impact events** and set the lead time; the '
+                    + 'engine checks every five minutes and sends through the channels already '
+                    + 'configured in Settings (Telegram, ntfy, email).',
+                    'Each event alerts **once**: the key is remembered, so a restart does not repeat '
+                    + 'yesterday\'s news.',
+                ] },
+                { note: 'A calendar is a schedule, not a promise: times are the venue\'s own and '
+                    + 'revisions happen. The panel never edits the feed.' },
+            ],
+            actions: [
+                { label: 'Open Calendar', kind: 'view', value: 'calendar' },
+                { label: 'Alert channels', kind: 'view', value: 'settings' },
+            ],
+            related: ['view.news', 'view.alerts'],
+        },
+        {
             id: 'view.replay', group: 'panels', mode: 'both',
             title: 'Replay',
             tags: ['replay', 'recorded', 'backtest', 'speed', 'seek', 'play'],
@@ -711,6 +877,14 @@
                     'The position slider seeks anywhere in the loaded session; the KPI row shows '
                     + 'events loaded, position, the replay clock and the mode.',
                     '**Space** plays and pauses, **,** and **.** seek back and forward 2%.',
+                ] },
+                { h: 'The simulated account', list: [
+                    'Place **market, limit or stop** orders with an optional stop loss and take '
+                    + 'profit. The account consumes the same prints the replay delivers: a market '
+                    + 'order fills at the next print, a limit when a print trades through it — the '
+                    + 'fills are the tape\'s, never an invented price.',
+                    '**Flatten** closes at the last print; **End & save to journal** writes the '
+                    + 'closed trades into the Journal view.',
                 ] },
                 { note: 'Replay feeds the Heatmap, Trackers, CVD, Profile and Frames views while it '
                     + 'runs — the point of replaying through the same pipeline is that the panels '
@@ -759,7 +933,9 @@
             tags: ['instruments', 'symbols', 'enable', 'tick size', 'subscription', 'validate'],
             aliases: ['symbol list', 'what is streaming'],
             summary: 'What the engine subscribes to. Tick the instruments you want; unsupported feeds '
-                + 'are greyed out rather than silently streaming nothing.',
+                + 'are greyed out rather than silently streaming nothing — and **Look up an '
+                + 'instrument…** answers any name you type (a market name, a broker spelling, or '
+                + 'one of the suite’s own rows) before you tick anything. Ticking **On** saves itself and applies — with the engine running the panel restarts it right then (the same path as **Enable & restart**), so nothing here waits for a save button.',
             blocks: [
                 { h: 'The controls', table: [
                     ['Validate against Bybit', 'Asks the venue which of these symbols it actually lists, '
@@ -768,15 +944,32 @@
                         + 'way to a broad watchlist.'],
                     ['Clear', 'Un-ticks everything. The engine then streams nothing, which the system '
                         + 'check will tell you about.'],
+                    ['The On toggle', 'Saves the choice to your config the moment it flips. '
+                        + 'With the engine running, the panel restarts it and narrates when the '
+                        + 'change is live; with the engine stopped, the tick waits for the next '
+                        + 'Start — either way you never hunt for a save.'],
                 ] },
                 { h: 'Tick size matters', p: 'Every analytics module works in price ticks. Instruments '
                     + 'imported from a venue carry the venue\'s real tick size; a guessed one would '
                     + 'make "three ticks away" mean the wrong distance in every detector.' },
-                { note: 'A change here takes effect on the engine\'s next start — the panel tells you '
-                    + 'when a restart is needed, and the top bar\'s ⟳ does it.' },
+                { h: 'Look a name up before you tick it', steps: [
+                    { t: 'Type the name you know', d: 'NQ1!, US100, USTEC, GOLD — the look-up '
+                        + 'translates market names and broker spellings onto the suite’s own rows.' },
+                    { t: 'Read the sentence', d: 'It says whether the symbol is streaming, enabled, '
+                        + 'switched off, available from your venue, or impossible on the current '
+                        + 'source — in the same words the engine uses.' },
+                    { t: 'Press the button it offers', d: '**Enable & restart** / **Add & restart** '
+                        + 'writes the config and rebuilds the engine; **Open Instruments** takes you '
+                        + 'to the table. Nothing is ever added without the venue confirming it.' },
+                ] },
+                { note: 'A change here **saves itself**: with the engine running the panel restarts '
+                    + 'it and says when the change is live — with it stopped the tick is written '
+                    + 'and waits for Start. **Enable & restart** stays for the look-up lane, and '
+                    + 'the top bar\'s ⟳ does a full restart any time.' },
             ],
             actions: [
                 { label: 'Open Instruments', kind: 'view', value: 'instruments' },
+                { label: 'Open the Engine (the look-up lives there)', kind: 'view', value: 'ofx' },
                 { label: 'Data sources', kind: 'topic', value: 'start.sources' },
             ],
             related: ['view.instruments', 'connect.mt5_map', 'start.engine'],
@@ -803,6 +996,18 @@
                 { p: 'The step-by-step for creating the keys is in the walkthrough: **Linking an Alpaca '
                     + 'account**. Keys live in your local config file, are never displayed back, and are '
                     + 'sent only to Alpaca.' },
+                { h: 'Your keys stay saved — nothing to re-enter', list: [
+                    'Once **Validate & save** reports the account linked, the key pair is stored. After '
+                    + 'a restart the card shows the stored key id (masked) and the secret field says '
+                    + '*“saved — type to replace”*: leave both fields empty and nothing is '
+                    + 'changed.',
+                    '**Test saved keys** asks Alpaca to confirm the stored pair without retyping '
+                    + 'anything — that is the button to press when you only want to check.',
+                    'Saving re-checks the keys and **keeps every other setting**; the environment '
+                    + '(paper/live) and the feed selector are stored the same way.',
+                    'To remove the pair entirely use **Remove stored keys** — that is the only '
+                    + 'action that clears them.',
+                ] },
             ],
             actions: [
                 { label: 'Open Alpaca', kind: 'view', value: 'alpaca' },
@@ -846,7 +1051,9 @@
                     ['Appearance', 'Theme (dark · light · contrast), accent and density.'],
                     ['Engine', 'Data source, signal cooldown, minimum composite score, log level.'],
                     ['Telegram', 'Bot token and chat id, with a **Send test message** button that '
-                        + 'posts a real message so you know it works before you rely on it.'],
+                        + 'posts a real message so you know it works before you rely on it. The '
+                        + '**route order-flow alerts to Telegram** switch is stored with them — '
+                        + 'the pill in the top bar says when it is off.'],
                     ['Extra streams', 'The venue\'s 200-level book, liquidations and block flags — '
                         + 'what makes the heatmap and the trackers richer.'],
                     ['Pattern thresholds', 'The numbers behind absorption, initiative, sweep, '
@@ -1057,7 +1264,8 @@
         {
             id: 'work.menubar', group: 'workflow', mode: 'both',
             title: 'The menu bar and the ☰ menu',
-            tags: ['menu', 'menu bar', 'file menu', 'tools', 'view menu', 'commands'],
+            tags: ['menu', 'menu bar', 'file menu', 'tools', 'view menu', 'commands', 'run',
+                'headless server', 'cli pipeline', 'desktop app'],
             aliases: ['top nav', 'nav bar', 'main menu'],
             summary: 'Two front doors with the same aim. The menu bar across the top holds the '
                 + 'program\'s commands by category; the ☰ button (or **/**) opens a menu of panels '
@@ -1069,6 +1277,13 @@
                         + 'drawing tools, and the settings of the chart you are on — the Chart menu is '
                         + 'the active panel\'s own variables, so it cannot drift from the panel.'],
                     ['Data', 'The source, the extra streams, and the instruments.'],
+                    ['Run', 'The three ways the program runs — this desktop window, a '
+                        + 'headless server on port 8099, or the CLI pipeline (feeds → '
+                        + 'detectors → Telegram) — each launched in its own console. Below the '
+                        + 'divider: the optional add-ons (MT5, NinjaTrader) and the dev gates.'],
+                    ['Keys', 'The shortcut helper: every binding from the program\'s own map, '
+                        + 'grouped by scope; clicking a row runs its action. **B** hides/shows the '
+                        + 'bar, **R** the side rail.'],
                     ['Tools', 'The command palette, the hotkey sheet, render telemetry, the '
                         + 'diagnostics copy, and the client-error log.'],
                     ['Help', 'The Help Centre, the mode switch, the setup assistant, the hotkey map '
@@ -1077,7 +1292,9 @@
                 { h: 'Driving it from the keyboard', p: '**Alt** focuses the bar, ← → walk the menus, '
                     + 'Enter opens one, ↑ ↓ walk its items, and typing a letter jumps to the next item '
                     + 'starting with it. Every item shows its accelerator on the right; an item that is '
-                    + 'not built yet is greyed out with the reason in its tooltip rather than silently '
+                    + '**B hides or shows the top menu bar and R the side rail** (the View menu carries the '
+                    + 'same toggles; both choices are remembered, and B always brings the bar back). An '
+                    + 'item that is not built yet is greyed out with the reason in its tooltip rather than silently '
                     + 'doing nothing.' },
             ],
             actions: [
@@ -1122,12 +1339,22 @@
         {
             id: 'work.keys', group: 'workflow', mode: 'both',
             title: 'Keyboard shortcuts',
-            tags: ['shortcuts', 'hotkeys', 'keyboard', 'keys', 'accelerators'],
+            tags: ['shortcuts', 'hotkeys', 'keyboard', 'keys', 'accelerators', 'keys menu',
+                'hover', 'prompts'],
             aliases: ['hotkey map', 'key map'],
             summary: 'The list below is generated from the program\'s own shortcut map, so every key '
                 + 'it honours is here and no key is listed that does nothing. **?** opens it as an '
-                + 'overlay at any time.',
+                + 'overlay at any time, and the top bar\'s **Keys** menu is the same list grouped by '
+                + 'scope — a row with a shortcut key on the right runs its action when clicked.',
             blocks: [
+                { h: 'Where to find them', list: [
+                    '**The Keys menu** (top menu bar) — the whole map, grouped by scope; click a '
+                    + 'dispatched row to run that action right there.',
+                    '**Hover any control** — controls that carry a shortcut say so: the tooltip '
+                    + 'ends with it and the hover card adds a "\u2328 Shortcut …" line.',
+                    '**The sheet** (**?**) — the same registry as an overlay; it cannot drift '
+                    + 'from what the keyboard honours.',
+                ] },
                 { keys: true },
                 { note: 'A key never fires while your cursor is in a text field, with two deliberate '
                     + 'exceptions: **Esc** closes the open menu or overlay even mid-typing, and **F1** '
@@ -1189,21 +1416,34 @@
         {
             id: 'work.pause', group: 'workflow', mode: 'both',
             title: 'Pausing the live updates',
-            tags: ['pause', 'freeze', 'hold updates', 'quiet'],
-            aliases: ['stop refreshing', 'freeze the screen'],
-            summary: '**P** (or the ▶ live button in the status bar) holds every background refresh '
-                + 'while you work on the board, so the numbers stop moving under your hands.',
+            tags: ['pause', 'freeze', 'hold updates', 'quiet', 'per panel', 'hold', 'study', 'resume'],
+            aliases: ['stop refreshing', 'freeze the screen', 'park a panel'],
+            summary: '**P** (or the ▶ live button in the top bar) holds every background refresh — '
+                + 'and every live panel carries its own **Pause** beside its title, so one chart, the '
+                + 'tape or the whole book can be parked for study while the rest of the board keeps '
+                + 'moving.',
             blocks: [
-                { p: 'Ingest never stops: the engine keeps streaming and recording, the panels simply '
-                    + 'stop repainting. Coming out of pause repaints everything at once, so nothing '
-                    + 'you missed is lost — it was only the drawing that was held.' },
+                { h: 'The two levels', table: [
+                    ['The ▶ live chip (top bar) · P', 'Holds everything at once: the whole board '
+                        + 'freezes exactly as it stands. The chip names what is held and how many '
+                        + 'updates are waiting.'],
+                    ['A panel\'s own **Pause**', 'Parks just that panel. Its updates are **queued**, '
+                        + 'never dropped — the chip counts them — and they apply the moment you '
+                        + 'resume: a parked tape snaps current, a parked board re-reads.'],
+                ] },
+                { p: 'Ingest never stops either way: the engine keeps streaming and recording, the '
+                    + 'socket keeps feeding; it is the drawing that is held. That is what makes a '
+                    + 'frozen panel safe to study — and why resuming loses nothing. Panels with the '
+                    + 'button: Overview, Chart, Order Flow, the Engine, Market depth, Time & Sales, '
+                    + 'Market Watch, Signals and Trackers.' },
                 { note: 'Being in a text field, a drag or a menu holds the affected panel '
-                    + 'automatically; pause is for the deliberate, program-wide case.' },
+                    + 'automatically; the buttons are for the deliberate case. A parked panel stays '
+                    + 'parked across a reload, and its button always shows Resume while it is held.' },
             ],
             actions: [
                 { label: 'Open the Help Centre search', kind: 'search', value: 'pause' },
             ],
-            related: ['work.keys', 'fix.slow'],
+            related: ['work.keys', 'fix.slow', 'view.marketwatch'],
         },
         {
             id: 'work.appearance', group: 'workflow', mode: 'both',
@@ -1274,9 +1514,12 @@
                         + 'crypto tape from becoming a drone.'],
                     ['hard multiple', 'A harder, higher tone for prints this many times above the '
                         + 'threshold: normal tension and real tension sound different.'],
-                    ['volume', 'Its own level, independent of the system volume.'],
+                    ['volume', 'Its own level, independent of the system volume — set it in '
+                        + 'Settings ▸ Sound, where **Test sound** plays the buy sample at the '
+                        + 'current level even while the switch is off.'],
                 ] },
-                { note: 'Audio is generated locally — no sound files to ship, nothing downloaded.' },
+                { note: 'The four alert samples ship with the app (four small WAVs) — nothing '
+                    + 'is downloaded and nothing is generated at runtime.' },
             ],
             actions: [
                 { label: 'Open Settings', kind: 'view', value: 'settings' },
@@ -1285,8 +1528,38 @@
             related: ['view.alerts', 'view.settings'],
         },
         {
-            id: 'work.exports', group: 'workflow', mode: 'both',
-            title: 'Exports and screenshots',
+            id: 'work.updates', group: 'workflow', mode: 'both',
+            title: 'Updates never block',
+            tags: ['update', 'updater', 'upgrade', 'new version', 'release notes', 'changelog',
+                'what changed'],
+            aliases: ['update policy', 'what changed'],
+            summary: 'Checking for a newer build never interrupts: the app asks **when you are not '
+                + 'typing**, shows what is new, and downloads only if you ask it to. Nothing restarts '
+                + 'itself and no window ever stands in your way.',
+            blocks: [
+                { h: 'How it behaves', list: [
+                    '**The check** — on load and on a timer (Settings ▸ Updates sets the interval and '
+                        + 'the channel: stable or pre-releases). A found update waits for a quiet moment '
+                        + 'before it says so.',
+                    '**The note** — the release’s own notes are shown beside the update (“What’s in X”), '
+                        + 'so a moved button is never a mystery.',
+                    '**The download** — fetch it yourself with **Update** in the top bar, or let the app '
+                        + 'fetch the installer in the background; the choice is a setting.',
+                    '**The verification** — a downloaded installer is checked against the release’s own '
+                        + 'SHA-256 when GitHub publishes one.',
+                    '**The failure path** — offline or a broken channel simply means no update today; '
+                        + 'the check retries later and never nags.',
+                ] },
+                { note: 'Written down as policy in `docs/UPDATE_POLICY.md`: an update never blocks the '
+                    + 'app, never restarts it, and never needs an account.' },
+            ],
+            actions: [
+                { label: 'Open Settings', kind: 'view', value: 'settings' },
+            ],
+            related: ['view.settings', 'work.exports'],
+        },
+        {
+            id: 'work.exports', group: 'workflow', mode: 'both',            title: 'Exports and screenshots',
             tags: ['export', 'csv', 'png', 'clipboard', 'screenshot', 'save image'],
             aliases: ['save a picture', 'download data'],
             summary: 'Panels that show measurements can hand them over: a region of the heatmap or the '
@@ -1393,6 +1666,118 @@
             related: ['connect.mt5_map', 'start.sources', 'view.instruments'],
         },
         {
+            id: 'connect.ninjatrader', group: 'connect', mode: 'both',
+            title: 'NinjaTrader 8 in this program',
+            tags: ['ninjatrader', 'nt8', 'futures', 'nq', 'es', 'mnq', 'cme', 'bridge', 'dll',
+                   'ninjascript editor'],
+            aliases: ['ninjatrader setup', 'nt bridge'],
+            summary: 'NinjaTrader is the futures data source: the terminal\'s own instruments — NQ, ES, '
+                + 'MNQ and everything else your data subscription carries — stream into every panel '
+                + 'through a small read-only bridge add-on this program ships.',
+            blocks: [
+                { h: 'You will need', list: [
+                    '**Windows**.',
+                    'NinjaTrader Desktop installed (free) and its **account** — version 8.1+ asks you '
+                    + 'to log in on every start and exits if the log-in window is closed.',
+                    'The **bridge add-on**, installed once: a file copy, one platform option, one '
+                    + 'restart — the suite ships the DLL, no compiler needed.',
+                ] },
+                { h: 'Steps', steps: [
+                    { t: 'Install NinjaTrader and log in', d: 'From ninjatrader.com; installing and '
+                        + 'running it in simulation is free.' },
+                    { t: 'Get data flowing in the platform', d: 'The **Simulated Data Feed** needs no '
+                        + 'payment and is complete (quotes, trades, depth) — ideal to verify this whole '
+                        + 'path. A funded NinjaTrader brokerage account adds complimentary real-time '
+                        + 'CME/EUREX Level I while funded; Kinetick End-Of-Day is free to everyone.' },
+                    { t: 'Install the bridge add-on (once)', d: 'Open the bridge folder from '
+                        + '**Platforms ▸ NinjaTrader ▸ Show the DLL folder**, copy **ModFlowBridge.cs**, **ModFlowJson.cs** and **ModFlowProbe.cs** '
+                        + 'into Documents\\NinjaTrader 8\\bin\\Custom\\AddOns, then press **F5** in '
+                        + 'its own NinjaScript Editor and answer the trust prompt once. Its Log tab then shows the bridge listening on '
+                        + '127.0.0.1:8790.' },
+                    { t: 'Test the bridge', d: 'The Platforms card\'s **Test connection** (and the '
+                        + 'walkthrough\'s own panel) connects, subscribes to one instrument and reports '
+                        + 'the NinjaTrader build, the live connection and what actually streamed — '
+                        + 'quotes, trades, and depth if your feed carries it.' },
+                    { t: 'Add instruments from the terminal\'s own list', d: 'Type **NQ** (or NQ1, or a '
+                        + 'full name like MNQ 12-26) in the Instruments panel\'s look-up — it offers '
+                        + 'the front-month contract the terminal itself would use and stamps it so the '
+                        + 'engine streams it like any other venue.' },
+                    { t: 'Pick NinjaTrader as the data source', d: 'In the setup assistant\'s Data '
+                        + 'source step, or ☰ ▸ sources. The tape, footprint, delta, profiles and ladder '
+                        + 'then read your terminal.' },
+                ] },
+                { warn: 'Honest limits: **level-2 depth arrives only when your data subscription '
+                    + 'carries it** — the bridge card reports what actually arrived instead of '
+                    + 'promising a ladder. Order Flow+ ($59/month standalone; complimentary while an '
+                    + 'account is funded; included with the Lifetime plan) changes NinjaTrader\'s own '
+                    + 'charts — this program computes its own footprint/delta from the raw trades and '
+                    + 'depth the bridge republishes and does not need it. The bridge is read-only and '
+                    + 'loopback-only: no orders, no account details, nothing beyond host/port/plan is '
+                    + 'stored.' },
+            ],
+            actions: [
+                { label: 'Open Platforms', kind: 'view', value: 'platforms' },
+                { label: 'Open Instruments', kind: 'view', value: 'instruments' },
+                { label: 'Run the setup assistant', kind: 'wizard', value: '' },
+            ],
+            links: [{ label: 'NinjaTrader — plans and pricing', url: 'https://ninjatrader.com/pricing/' },
+                    { label: 'Subscribing to market data (their article)',
+                      url: 'https://support.ninjatrader.com/s/article/How-do-I-register-for-data-feeds-for-my-account' }],
+            related: ['under.nt_bridge', 'view.platforms', 'start.sources'],
+        },
+        {
+            id: 'under.nt_bridge', group: 'under', mode: 'advanced',
+            title: 'The NinjaTrader bridge — install and diagnose',
+            tags: ['ninjatrader bridge', 'ntbridge log', 'addon folder', 'custom assembly loading',
+                   '8790', 'troubleshoot ninjatrader'],
+            summary: 'The bridge is a small read-only add-on that runs inside NinjaTrader, subscribes to '
+                + 'the platform\'s own market-data callbacks and republishes them on loopback. This is '
+                + 'how to install it, what it writes, and what to check when it stays silent.',
+            blocks: [
+                { h: 'What it is, precisely', list: [
+                    'A DLL built against NinjaTrader\'s own assemblies (verified against 8.1.8.2), '
+                    + 'shipped with this suite; the source and its build script travel beside it.',
+                    'It binds **127.0.0.1:8790** only, accepts **one reader at a time** (this program), '
+                    + 'and speaks NUL-terminated JSON frames.',
+                    'It reads: quotes, trades, level-2 depth, the instrument database and historical '
+                    + 'bars. It cannot place, modify or cancel an order — the protocol has no write '
+                    + 'verbs and the DLL never touches account files.',
+                ] },
+                { h: 'Install, in order', steps: [
+                    { t: 'Copy the bridge source', d: 'Platforms ▸ NinjaTrader ▸ **Show the DLL folder**→ copy the three bridge files '
+                        + 'into Documents\\NinjaTrader 8\\bin\\Custom\\AddOns (create the AddOns folder if it is missing).' },
+                    { t: 'Compile it + trust it once', d: 'In NinjaTrader: New ▸ NinjaScript Editor → **F5**. The first load asks you to trust the newly compiled add-on — answer **Yes**. That prompt is how the platform gates third-party code, its own replacement for the old settings toggle.' },
+                    { t: 'Watch the platform Log tab', d: 'The bridge starts as soon as the compile finishes; the Log tab shows *[ModFlow Bridge] listening on 127.0.0.1:8790*.' },
+                    { t: 'Verify from this program', d: 'Platforms ▸ NinjaTrader ▸ **Test connection** '
+                        + 'names the NinjaTrader build, the connection and the message counts.' },
+                ] },
+                { h: 'When it stays silent', list: [
+                    '**ntbridge.log** in `%LOCALAPPDATA%\\ModFlow` — every bind, accept, subscribe and '
+                    + 'error the bridge writes. A bind failure (port taken) is recorded here.',
+                    '**ntbridge-probe.log** in the same folder — a diagnostics companion that dumps the '
+                    + 'platform facts (loaded assemblies, accounts, instrument look-ups) on every '
+                    + 'start; if even this file is absent, NinjaTrader is not loading the DLL at all '
+                    + '(recheck the folder and the platform option).',
+                    'The port: 8790 is this suite\'s convention. If something else owns it, rebuild '
+                    + 'the bridge from the source folder with another `Port` value and set the same '
+                    + 'port on the card.',
+                    'Only the connection the platform is on matters — a terminal showing Kinetick '
+                    + 'End-Of-Day carries no live stream to republish.',
+                ] },
+                { note: 'The deliverables live in the app folder under '
+                    + '`orderflow_system/data/ninjatrader_bridge/`: the DLL, the C# source, '
+                    + '`build.ps1` (needs only the free .NET SDK — no Visual Studio) and the README '
+                    + 'with the full wire format.' },
+            ],
+            actions: [
+                { label: 'Open Platforms', kind: 'view', value: 'platforms' },
+                { label: 'Open Logs', kind: 'view', value: 'logs' },
+            ],
+            links: [{ label: 'General options page (where the platform option lives)',
+                      url: 'https://ninjatrader.com/support/helpguides/nt8/general_section.htm' }],
+            related: ['connect.ninjatrader', 'connect.bridges', 'fix.no_data'],
+        },
+        {
             id: 'connect.mt5_map', group: 'connect', mode: 'both',
             title: 'Mapping MT5 symbols',
             tags: ['mt5 symbols', 'mapping', 'broker symbol', 'symbol name'],
@@ -1406,6 +1791,10 @@
                     + 'engine cannot subscribe a symbol your broker does not list.',
                     'The Instruments view shows the mapping the engine is using, and the system check '
                     + 'flags any enabled MT5 instrument with no broker symbol at all.',
+                    'Broker names are **case-sensitive** and differ per broker (“US500M” on one '
+                    + 'terminal, “US500m” on another). The instrument look-up offers the '
+                    + 'spelling your own broker lists, and **Add & restart** writes it and restarts the '
+                    + 'engine in one step.',
                 ] },
                 { p: 'To find your broker\'s name for an instrument: in the terminal, right-click the '
                     + 'Market Watch and choose **Symbols**, then search. The exact spelling is what '
@@ -1858,6 +2247,10 @@
                     ['Source cannot serve it', 'The venue does not list that symbol — Validate against '
                         + 'the venue in Instruments catches it. Symbols skipped at start are named in '
                         + 'the log.'],
+                    ['The market itself needs another source', 'An exchange feed is crypto-only: a name '
+                        + 'like NQ, US100 or GOLD can never stream from Bybit/Binance/OKX/Hyperliquid. '
+                        + 'Type it into the Engine view\'s symbol box and press **find** — the look-up '
+                        + 'says which source can serve it and how to switch.'],
                     ['Depth-only panels on a bookless source', 'Alpaca publishes no order book: the '
                         + 'heatmap and the ladder need the venue feed.'],
                     ['Engine running, no prints', 'A quiet market, a blocked network, or the venue '
@@ -1917,6 +2310,13 @@
                         + 'cause; see *Mapping MT5 symbols*.',
                     '**The venue may have delisted it** — a symbol that exists in your config but no '
                         + 'longer exists at the venue will be skipped every start until you remove it.',
+                ] },
+                { list: [
+                    '**A start that skips something says so** — the banner names the first symbol '
+                    + 'and its reason, with a button straight into the look-up.',
+                    '**The look-up answers the name you typed** (Engine view ▸ symbol chip / find, '
+                    + 'or Data ▸ Instrument look-up…): it names the row, the reason and the '
+                    + 'action — enable, remap the broker symbol, or switch source.',
                 ] },
                 { p: 'The system check lists the skipped symbols and points at the log for each '
                     + 'reason, so this is a two-click diagnosis rather than a hunt.' },
@@ -2065,6 +2465,215 @@
             ],
             related: ['fix.no_data', 'fix.engine_error', 'data.config_file'],
         },
+
+        /* ═══════════ Reading the market ═══════════ */
+        {
+            id: 'method.reading_order', group: 'method', mode: 'both',
+            title: 'The reading order: profile first, then order flow',
+            tags: ['reading order', 'workflow', 'how to trade', 'method', 'profile first',
+                   'confirmation', 'playbook'],
+            aliases: ['how to read this', 'trading workflow'],
+            summary: 'The order-flow workflow this program follows: direction and levels come from the '
+                + 'profile, a level is chosen before any order flow is read, and only then does a '
+                + 'confirmation at that level mean anything. Every panel is arranged around it.',
+            blocks: [
+                { h: 'The three steps', p: '**First, the profile decides.** The session\u2019s volume '
+                    + 'profile \u2014 its shape (P, b, D, thin) and its value area \u2014 says who is '
+                    + 'in control and where the heavy prices are; that is the bias the Profile view '
+                    + 'and its shape read show. **Second, choose one level** \u2014 POC, value-area '
+                    + 'edge, a node, an unfinished extreme, a band: see \u201cThe level sources\u201d. '
+                    + '**Third, wait for order flow at that level** \u2014 absorption, a wall, a '
+                    + 'failed break \u2014 which the confirmations topic describes.' },
+                { list: [
+                    '**Profile first** \u2014 Profile view: shape badge, story, POC / VAH / VAL, the '
+                    + 'weekly and monthly POC ladder.',
+                    '**Choose the level** \u2014 the level-sources topic lists every family and which '
+                    + 'panel draws it.',
+                    '**Confirm at the level** \u2014 the confirmations topic; the Rules card scopes any '
+                    + 'alert to a single level with \u201cat this price\u201d.',
+                    '**One test per level** \u2014 the first-test topic, and the radar states that '
+                    + 'count tests for you.',
+                ] },
+                { warn: 'Reversed, the order turns noise into reasons: order flow is interesting '
+                    + 'everywhere, and only meaningful where you had already decided to watch.' },
+            ],
+            actions: [
+                { label: 'Open the Profile view', kind: 'view', value: 'profile' },
+                { label: 'The level sources', kind: 'topic', value: 'method.levels' },
+            ],
+            related: ['method.levels', 'method.confirmations', 'view.profile'],
+        },
+        {
+            id: 'method.confirmations', group: 'method', mode: 'both',
+            title: 'Confirmations at a level you chose',
+            tags: ['absorption', 'limit orders', 'confirmation', 'walls', 'depth', 'intent',
+                   'side convention'],
+            aliases: ['how to confirm', 'absorption read'],
+            summary: 'The two confirmations the workflow waits for at a chosen level \u2014 resting '
+                + 'liquidity (limit orders) and absorption \u2014 and the side convention that makes '
+                + 'them readable.',
+            blocks: [
+                { h: 'The side convention', p: 'Aggressive (market) orders show on the side they hit: '
+                    + 'buys on the ask, sells on the bid. **Limit orders sit on the opposite side of '
+                    + 'their intent**: a large limit sell rests on the ask at resistance, a large '
+                    + 'limit buy rests on the bid at support. When you look for a wall at a level, '
+                    + 'look on that side of the ladder.' },
+                { h: 'Resting liquidity', p: 'Size that stays at a level \u2014 refuses to be eaten, '
+                    + 'refills after a bite, or simply holds for minutes \u2014 is liquidity '
+                    + 'defending it. In the app: the Heatmap\u2019s walls and its \u201cif this '
+                    + 'level holds\u201d alert, and the Eaten / Refilled columns in the Scanner.' },
+                { h: 'Absorption', p: 'Unusually heavy volume printing on **both** sides at the '
+                    + 'level while price stops moving is aggression being absorbed \u2014 the turn '
+                    + 'read. In the app: the Absorb column, the absorption score card, and the '
+                    + 'absorption alert kind.' },
+                { note: 'Scope it: a confirmation only counts at the level you chose. The Rules card '
+                    + 'takes \u201cat this price\u201d, so an alert can watch one level and ignore '
+                    + 'the same print everywhere else.' },
+            ],
+            actions: [
+                { label: 'Open the Heatmap', kind: 'view', value: 'heatmap' },
+                { label: 'Open Alerts', kind: 'view', value: 'alerts' },
+            ],
+            related: ['method.reading_order', 'method.first_test', 'view.heatmap'],
+        },
+        {
+            id: 'method.first_test', group: 'method', mode: 'both',
+            title: 'Trade a level once',
+            tags: ['first test', 'spent level', 'virgin poc', 'retest', 'level discipline'],
+            aliases: ['one test', 'second test'],
+            summary: 'The first test of a level carries the edge; re-tests are worth less. The '
+                + 'program keeps the counters for you \u2014 virgin POCs, first-test alerts, and '
+                + 'spent levels that stay visible only as context.',
+            blocks: [
+                { p: 'A level\u2019s first revisit is where the resting orders and the trapped '
+                    + 'positions are; by the second and third test both sides have seen it. The '
+                    + 'discipline is to trade the first test and read the rest as information.' },
+                { list: [
+                    '**Virgin POCs** \u2014 the Profile view flags POCs no later session has traded '
+                    + 'through: the cleanest untested levels.',
+                    '**First test, counted** \u2014 when a radar level is defended on its first '
+                    + 'test the alert says so: \u201cheld \u2014 first test\u201d.',
+                    '**Spent levels** \u2014 traded through, they dim and then expire from the '
+                    + 'radar instead of pulling you back in: \u201cspent \u2014 traded '
+                    + 'through\u201d.',
+                    '**A level that held once and then broke** is a *failed* level, and the radar '
+                    + 'says exactly that \u2014 the classic second-test break.',
+                ] },
+            ],
+            actions: [
+                { label: 'Open the Profile view', kind: 'view', value: 'profile' },
+                { label: 'The level radar', kind: 'topic', value: 'method.radar' },
+            ],
+            related: ['method.radar', 'method.levels', 'view.profile'],
+        },
+        {
+            id: 'method.levels', group: 'method', mode: 'both',
+            title: 'The level sources, and which is which',
+            tags: ['levels', 'poc', 'node', 'unfinished business', 'vwap bands', 'stacked imbalance',
+                   'confluence'],
+            aliases: ['what is a level', 'level types'],
+            summary: 'Every family of level this program computes \u2014 POCs, nodes, unfinished '
+                + 'extremes, bands, stacked zones, area POCs \u2014 what each one means, and the one '
+                + 'list they all feed.',
+            blocks: [
+                { list: [
+                    '**POC and value area** \u2014 the session\u2019s heaviest price and the band '
+                    + 'holding the bulk of its volume: acceptance. A virgin POC has not been '
+                    + 're-tested yet.',
+                    '**The POC ladder** \u2014 the same computation over weeks and months; where '
+                    + 'daily, weekly and monthly POCs coincide, that is the strongest kind of level.',
+                    '**Node runs** \u2014 consecutive bars whose heaviest price is the same: repeat '
+                    + 'acceptance, drawn as double (2) and triple (3) bands.',
+                    '**Unfinished business** \u2014 an extreme that never completed its auction (no '
+                    + 'zero on the finishing side): a magnet price tends to revisit, and the line '
+                    + 'clears itself when it does.',
+                    '**VWAP bands and stacked zones** \u2014 fair value \u00b1 k\u03c3, and runs of '
+                    + 'same-direction imbalance: where the book showed its hand.',
+                    '**Area POCs** \u2014 profile any region you box on the Engine and watch its '
+                    + 'point of control: the trend leg\u2019s cluster, or the rotation\u2019s heavy '
+                    + 'line.',
+                ] },
+                { h: 'Confluence is the strong read', p: 'When two independent families sit at the '
+                    + 'same price within a tick or two, the level is stronger than either alone '
+                    + '\u2014 a band stacking on a POC, a node on an unfinished extreme. The radar '
+                    + 'counts the sources for you, and marks a held level with two or more as '
+                    + '*confirmed*.' },
+                { shot: 'help/area-profile.png',
+                  caption: 'Boxing a region on the Engine profiles it and hands its POC to the watch list.' },
+            ],
+            actions: [
+                { label: 'Open the Engine', kind: 'view', value: 'ofx' },
+                { label: 'The level radar', kind: 'topic', value: 'method.radar' },
+            ],
+            related: ['method.radar', 'method.first_test', 'view.ofx'],
+        },
+        {
+            id: 'method.radar', group: 'method', mode: 'both',
+            title: 'The level radar: armed, held, spent',
+            tags: ['radar', 'level lifecycle', 'armed', 'approaching', 'defended', 'spent',
+                   'failed', 'scanner column'],
+            aliases: ['level states', 'what is arming where'],
+            summary: 'Every tracked level on every instrument: the Scanner\u2019s Radar column and '
+                + 'the lifecycle behind it \u2014 what each state means and what to do with it.',
+            blocks: [
+                { h: 'The states', p: '**Armed** \u2014 registered, price away from it. '
+                    + '**Approaching** \u2014 price inside the approach band; the level is live. '
+                    + '**Defended** \u2014 price tested it and left on the side it came from: the '
+                    + 'level held. **Confirmed** \u2014 the same hold where two or more sources '
+                    + 'agree. **Spent** \u2014 traded straight through without holding. '
+                    + '**Failed** \u2014 it held once, then broke: the second-test break.' },
+                { h: 'Reading the Scanner\u2019s Radar column', p: 'Each row shows that '
+                    + 'instrument\u2019s levels in plain counts \u2014 e.g. \u201c2 armed '
+                    + '\u00b7 1 approaching \u00b7 1 held\u201d \u2014 and sorts by what is '
+                    + 'arming where. A quiet market reads \u201c0 armed \u00b7 0 approaching '
+                    + '\u00b7 0 held\u201d; a busy one walks you to the instrument that needs '
+                    + 'eyes.' },
+                { h: 'The alerts, and the watch hand-off', p: 'Transitions fire as sentences into '
+                    + 'the Inbox and Alerts: \u201cnew node level armed at \u2026\u201d, '
+                    + '\u201c\u2026 held \u2014 first test\u201d, \u201c\u2026 spent \u2014 '
+                    + 'traded through\u201d. The default rule interrupts only for held or '
+                    + 'confirmed levels. And the Engine\u2019s area profile can hand one over: '
+                    + '**Watch this level** turns the area POC into a watched level that fires '
+                    + 'when price simply returns to it.' },
+                { shot: 'help/scanner-radar.png',
+                  caption: 'The Radar column on the Scanner: what every instrument is arming.' },
+            ],
+            actions: [
+                { label: 'Open the Scanner', kind: 'view', value: 'scanner' },
+                { label: 'Open Alerts', kind: 'view', value: 'alerts' },
+            ],
+            related: ['method.levels', 'method.first_test', 'method.reading_order'],
+        },
+        {
+            id: 'method.vwap', group: 'method', mode: 'both',
+            title: 'VWAP: fair value and the band playbook',
+            tags: ['vwap', 'bands', 'deviation', 'rotation', 'trend', 'fair value'],
+            aliases: ['vwap bands', 'deviation bands'],
+            summary: 'VWAP as the magnet and the \u00b1k\u03c3 bands as the traded tool: flat bands '
+                + 'mean rotation, sloped bands mean trend, and a band stacking on a profile level is '
+                + 'the confluence read.',
+            blocks: [
+                { p: 'VWAP is the volume-weighted fair price of the session \u2014 the line price '
+                    + 'tends to rotate around. The traded tool is the first (and second) deviation '
+                    + 'band, \u00b1k\u03c3 away from it.' },
+                { list: [
+                    '**Flat bands \u2192 rotation** \u2014 sideways sessions: fade the band edges '
+                    + 'back toward VWAP, which is the natural take-profit.',
+                    '**Sloped bands \u2192 trend** \u2014 a trending session walks its band: enter '
+                    + 'pullbacks *to* the band in the trend direction, exit at the line.',
+                    '**Confluence** \u2014 a band sitting on a profile level (POC, value edge, '
+                    + 'node) is the strongest version of either read.',
+                ] },
+                { note: 'The app computes session, anchored and \u00b1k\u03c3 bands (the Studies '
+                    + 'panel\u2019s VWAP suite); the band pair also feeds the level radar, and the '
+                    + 'VWAP-cross alert kind watches the line itself.' },
+            ],
+            actions: [
+                { label: 'Open the Studies panel', kind: 'view', value: 'studies' },
+                { label: 'Open the Scanner', kind: 'view', value: 'scanner' },
+            ],
+            related: ['method.levels', 'method.reading_order', 'view.studies'],
+        },
     ];
 
     /* The coverage contract: every view the shell has, and the topic that explains it.
@@ -2079,6 +2688,7 @@
         ofx: 'view.ofx',
         depth: 'view.depth',
         tape: 'view.tape',
+        marketwatch: 'view.marketwatch',
         trackers: 'view.trackers',
         cvd: 'view.cvd',
         profile: 'view.profile',
@@ -2086,8 +2696,11 @@
         signals: 'view.signals',
         strategy: 'view.strategy',
         performance: 'view.performance',
+        journal: 'view.journal',
+        calendar: 'view.calendar',
         replay: 'view.replay',
         alerts: 'view.alerts',
+        inbox: 'view.inbox',
         instruments: 'view.instruments',
         alpaca: 'view.alpaca',
         platforms: 'view.platforms',

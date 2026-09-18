@@ -99,6 +99,9 @@ check('cell height: tick step x price scale', math.cellHeightPx(0.5, 2.05) > 1.0
 check('cell height: a session-wide BTC fit is unreadable as cells', math.textFits(math.cellHeightPx(0.5, 2.05)) === false);
 check('cell height: zooming the price axis restores legibility', math.textFits(math.cellHeightPx(0.5, 26)) === true);
 check('text: the threshold is configurable', math.textFits(11, 14) === false && math.textFits(14, 14) === true);
+check('degrade: engages below the text threshold', math.degradeDecision(44, 45, 15, false) === true && math.degradeDecision(46, 45, 15, false) === false);
+check('degrade: holds across the hysteresis band', math.degradeDecision(46, 45, 15, true) === true && math.degradeDecision(52, 45, 15, true) === true);
+check('degrade: releases past the band', math.degradeDecision(53, 45, 15, true) === false);
 
 /* ── viewport state machine ──────────────────────────────────────────────── */
 check('viewport: right edge at newest data is live', math.viewportMode(0, 100, 100) === 'live');
@@ -335,6 +338,32 @@ check('selection: a range with no bars is null, not an empty strip',
 const selOne = math.selectionStats({ bars: selBars, levels: selLevels, prints: [], i0: 1, i1: 1, p0: 100, p1: 101 });
 check('selection: a single-bar range is legal (its own bar, no neighbours required)',
     selOne.bars === 1 && selOne.t0 === 1060 && selOne.t1 === 1060, JSON.stringify([selOne.bars, selOne.t0]));
+
+/* ── Phase 3 / A3: the area's volume profile, pinned ─────────────────────── */
+const area = math.areaVolumeProfile({ bars: selBars, levels: selLevels, i0: 0, i1: 2, p0: 100, p1: 101, pct: 0.7 });
+check('area: one row per price, bid+ask summed across the window', area.rows.length === 2 && area.total === 27,
+    JSON.stringify([area.rows.length, area.total]));
+check('area: the POC is the heaviest row and carries its share',
+    area.poc === 100 && area.pocVolume === 15 && near(area.pocShare, 15 / 27), JSON.stringify([area.poc, area.pocVolume]));
+check('area: the value area is the heaviest rows up to the share', area.val === 100 && area.vah === 101,
+    JSON.stringify([area.val, area.vah]));
+check('area: the row step is the smallest positive gap', area.step === 1, String(area.step));
+check('area: a one-bar window profiles only that bar',
+    math.areaVolumeProfile({ bars: selBars, levels: selLevels, i0: 0, i1: 0, p0: 100, p1: 101 }).total === 20);
+const areaBand = math.areaVolumeProfile({ bars: selBars, levels: selLevels, i0: 0, i1: 2, p0: 100, p1: 100 });
+check('area: the price band restricts the rows', areaBand.total === 15 && areaBand.rows.length === 1,
+    JSON.stringify([areaBand.total, areaBand.rows.length]));
+check('area: a one-row area has no step', areaBand.step === 0, String(areaBand.step));
+check('area: an empty ladder is null, never a zero profile',
+    math.areaVolumeProfile({ bars: selBars, levels: new Map(), i0: 0, i1: 2, p0: 100, p1: 101 }) === null);
+check('area: a band with no rows is null too',
+    math.areaVolumeProfile({ bars: selBars, levels: selLevels, i0: 0, i1: 2, p0: 500, p1: 600 }) === null);
+check('area: the VA share clamps to the same bounds rowShares uses',
+    math.areaVolumeProfile({ bars: selBars, levels: selLevels, i0: 0, i1: 2, p0: 100, p1: 101, pct: 0.02 }).vaPct === 0.1);
+check('area: tied rows keep a deterministic POC (the lower price wins)',
+    math.areaVolumeProfile({ bars: [{ time: 1 }, { time: 2 }],
+        levels: new Map([[1, [{ price: 100, bid: 5, ask: 5 }]], [2, [{ price: 101, bid: 5, ask: 5 }]]]),
+        i0: 0, i1: 1, p0: 100, p1: 101 }).poc === 100);
 
 /* ── P1-9: keyboard zoom — the wheel's own arithmetic, pinned ────────────── */
 check('zoom: the time scale clamps at both limits',
@@ -772,6 +801,44 @@ check('zoom: the price scale clamps at both limits',
         OFX.math.decodeHeatBin(new ArrayBuffer(4)) === null
         && OFX.math.adaptHeatBin(null, bt, 60) === null);
 }
+
+/* ── T5/A11: the auto-fit verdict ─────────────────────────────────── */
+
+check('fit: no tolerance always refits', math.fitDecision({ lo: 100, hi: 200 }, { lo: 120, hi: 180 }, 0) === 'refit');
+check('fit: a band with slack at both edges holds',
+    math.fitDecision({ lo: 100, hi: 200 }, { lo: 130, hi: 175 }, 0.25) === 'hold');
+check('fit: the band reaching the bottom edge refits',
+    math.fitDecision({ lo: 100, hi: 200 }, { lo: 120, hi: 160 }, 0.25) === 'refit');
+check('fit: the band reaching the top edge refits',
+    math.fitDecision({ lo: 100, hi: 200 }, { lo: 140, hi: 180 }, 0.25) === 'refit');
+check('fit: a view far emptier than the band refits',
+    math.fitDecision({ lo: 100, hi: 400 }, { lo: 240, hi: 260 }, 0.25) === 'refit');
+check('fit: junk tolerance behaves as always-refit',
+    math.fitDecision({ lo: 100, hi: 200 }, { lo: 140, hi: 160 }, 'junk') === 'refit');
+
+/* ── §3 level reads: unfinished magnets + node bands (fold-in plan) ──────── */
+
+const rbars = [{ time: 1000 }, { time: 1060 }, { time: 1120 }, { time: 1180 }];
+const seg = OFX.levelReadSegments(rbars, {
+    unfinished: [{ price: 100.5, side: 'above', bar_ts_ms: 1_060_000, active: true, arms: 2 },
+                 { price: 99.5, side: 'below', bar_ts_ms: 1_120_000, active: false },
+                 { price: 100.2, side: 'above', bar_ts_ms: 999_000, active: true }],
+    nodes: [{ price: 100.5, count: 2, start_ts_ms: 1_000_000, last_ts_ms: 1_060_000 },
+            { price: 101.0, count: 1, start_ts_ms: 1_120_000, last_ts_ms: 1_120_000 }],
+});
+check('level reads: an open magnet maps to its bar and runs to the right edge',
+    seg.unfinished.length === 1 && seg.unfinished[0].from === 1 && seg.unfinished[0].to === -1,
+    JSON.stringify(seg.unfinished));
+check('level reads: a resolved magnet is not drawn',
+    !seg.unfinished.some((l) => l.price === 99.5));
+check('level reads: a magnet whose bar rolled out of the payload is counted, not guessed',
+    seg.dropped === 1, String(seg.dropped));
+check('level reads: node bands need two bars',
+    seg.nodes.length === 1 && seg.nodes[0].count === 2 && seg.nodes[0].from === 0 && seg.nodes[0].to === 1,
+    JSON.stringify(seg.nodes));
+check('level reads: empty reads are an empty answer, not a throw',
+    OFX.levelReadSegments(rbars, null).unfinished.length === 0
+    && OFX.levelReadSegments([], {}).nodes.length === 0);
 
 console.log(`ofx selftest: ${ok} ok, ${failures.length} failed`);
 for (const f of failures) console.log('  FAIL', f);

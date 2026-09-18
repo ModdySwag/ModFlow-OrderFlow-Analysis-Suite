@@ -38,11 +38,59 @@
         style: { line: '#4f8cff', fill: 'rgba(79,140,255,.14)', width: 2, dash: 'solid', fontSize: 12 },
         adapter: null, host: null, canvas: null, ctx: null, overlay: null, toolbar: null,
         dragging: null, draft: null, menu: null, seq: 0, tickSize: 0.1, dirty: false, loading: false,
+        /* T13/B12: the multi-selection and the bounded undo history (the primary stays
+           `selected`); T13/B11: the consequence chip element. */
+        multiIds: [], undoStack: [], tip: null,
     };
 
     const el = (id) => document.getElementById(id);
     const toolsById = Object.fromEntries(KINDS.map((t) => [t.id, t]));
     function uid() { state.seq += 1; return `d${Date.now().toString(36)}${state.seq.toString(36)}`; }
+
+    /* T13/B12: the undo history — one entry per reversible edit, newest last, bounded; the
+       entries are closures over what was there, which is all a local edit needs. */
+    const UNDO_MAX = 50;
+    function pushUndo(entry) {
+        if (!entry || typeof entry.undo !== 'function') return;
+        state.undoStack.push(entry);
+        if (state.undoStack.length > UNDO_MAX) state.undoStack.shift();
+    }
+    function undo() {
+        const entry = state.undoStack.pop();
+        if (!entry) return false;
+        entry.undo();
+        state.multiIds = state.multiIds.filter((id) => state.drawings.some((d) => d.id === id));
+        if (state.selected && !state.drawings.some((d) => d.id === state.selected)) state.selected = null;
+        paint(); save();
+        refreshToolbar();
+        return true;
+    }
+    /* Pure, so the selftest can pin the shift-click toggle. */
+    function toggleMember(list, id) {
+        const out = (list || []).slice();
+        const at = out.indexOf(id);
+        if (at >= 0) out.splice(at, 1); else out.push(id);
+        return out;
+    }
+    function isSelected(id) {
+        return state.selected === id || state.multiIds.indexOf(id) >= 0;
+    }
+    function selectionIds() {
+        const ids = state.multiIds.slice();
+        if (state.selected && ids.indexOf(state.selected) < 0) ids.push(state.selected);
+        return ids.filter((id) => state.drawings.some((d) => d.id === id));
+    }
+    /* T13/B11: the consequence chip — created once per host, moved with the pointer. */
+    function ensureTip() {
+        if (state.tip && state.tip.isConnected) return state.tip;
+        if (!state.host) return null;
+        const tip = document.createElement('div');
+        tip.className = 'risk-chip';
+        tip.hidden = true;
+        state.host.appendChild(tip);
+        state.tip = tip;
+        return tip;
+    }
 
     /* ── coordinates ──────────────────────────────────────────────────────── */
     function toPx(point) {
@@ -310,25 +358,76 @@
         state.tool = id;
         const armed = id !== 'select';
         armOverlay(armed);
-        if (!armed) state.selected = null;
+        if (!armed) { state.selected = null; state.multiIds = []; }
         paint();
         refreshToolbar();
         if (window.OFAPDRAW.onTool) window.OFAPDRAW.onTool(id);
     }
-    function select(id) {
-        state.selected = id;
+    function select(id, opts) {
+        if (opts && opts.add) {
+            /* T13/B12: shift-click extends the selection instead of replacing it — the old
+               primary folds into the set, and the clicked drawing becomes the primary. */
+            if (state.selected === id) {
+                state.selected = null;
+                state.multiIds = state.multiIds.filter((m) => m !== id);
+            } else if (state.multiIds.indexOf(id) >= 0) {
+                state.multiIds = toggleMember(state.multiIds, id);
+            } else if (state.selected) {
+                state.multiIds = toggleMember(state.multiIds.concat(state.selected), id);
+                state.selected = id;
+            } else {
+                state.selected = id;
+            }
+        } else {
+            state.selected = id;
+            state.multiIds = [];
+        }
         paint();
         refreshToolbar();
     }
     function remove(id) {
-        state.drawings = state.drawings.filter((d) => d.id !== id);
+        const at = state.drawings.findIndex((d) => d.id === id);
+        if (at < 0) return;
+        const gone = state.drawings.splice(at, 1)[0];
         if (state.selected === id) state.selected = null;
+        state.multiIds = state.multiIds.filter((m) => m !== id);
+        pushUndo({ label: 'remove ' + gone.kind,
+            undo: () => { state.drawings.splice(Math.min(at, state.drawings.length), 0, gone); } });
         paint(); save();
+        refreshToolbar();
+    }
+    /* T13/B12: the Del key removes the WHOLE selection, in one undoable step. */
+    function deleteSelection() {
+        const ids = selectionIds();
+        if (!ids.length) return false;
+        const ats = ids.map((id) => ({ draw: state.drawings.find((d) => d.id === id),
+            at: state.drawings.findIndex((d) => d.id === id) })).filter((s) => s.draw);
+        state.drawings = state.drawings.filter((d) => ids.indexOf(d.id) < 0);
+        if (ids.indexOf(state.selected) >= 0) state.selected = null;
+        state.multiIds = state.multiIds.filter((m) => ids.indexOf(m) < 0);
+        pushUndo({ label: 'remove ' + ats.length + ' marking(s)', undo: () => {
+            ats.slice().sort((x, y) => x.at - y.at).forEach((s) => {
+                state.drawings.splice(Math.min(s.at, state.drawings.length), 0, s.draw);
+            });
+        } });
+        paint(); save();
+        refreshToolbar();
+        return true;
+    }
+    function selectAll() {
+        if (!state.drawings.length) return false;
+        state.selected = null;
+        state.multiIds = state.drawings.map((d) => d.id);
+        paint(); refreshToolbar();
+        return true;
     }
     function clearAll() {
         if (!state.drawings.length) return;
+        const gone = state.drawings.slice();
         state.drawings = [];
         state.selected = null;
+        state.multiIds = [];
+        pushUndo({ label: 'clear', undo: () => { state.drawings = gone; } });
         paint(); save(true);
     }
     function hideAll(flag) {
@@ -341,6 +440,8 @@
         copy.a.p += (state.tickSize || 0.1) * 5;
         copy.b.p += (state.tickSize || 0.1) * 5;
         state.drawings.push(copy);
+        pushUndo({ label: 'duplicate ' + draw.kind,
+            undo: () => { state.drawings = state.drawings.filter((d) => d.id !== copy.id); } });
         paint(); save();
         return copy;
     }
@@ -394,6 +495,8 @@
             mk('Widen channel', () => { draw.offset = (draw.offset || 40) + 12; paint(); save(); });
             mk('Narrow channel', () => { draw.offset = Math.max(6, (draw.offset || 40) - 12); paint(); save(); });
         }
+        mk('Undo last edit', () => undo());
+        mk('Select all markings', () => selectAll());
         mk('Duplicate', () => duplicate(draw));
         mk(`Style: ${styleOf(draw).dash} · ${styleOf(draw).width}px`, () => cycleStyle(draw));
         mk('Delete', () => remove(draw.id));
@@ -469,6 +572,8 @@
                 const data = toData(x, y);
                 const draw = { id: uid(), kind: 'text', a: data, b: data, text: '' };
                 state.drawings.push(draw);
+                pushUndo({ label: 'add text',
+                    undo: () => { state.drawings = state.drawings.filter((d) => d.id !== draw.id); } });
                 select(draw.id);
                 const host = (state.canvas && state.canvas.parentElement) || document.body;
                 const hrect = host.getBoundingClientRect();
@@ -509,6 +614,8 @@
             const draw = { ...state.draft, id: uid() };
             if (spec.needs === 'two' || spec.needs === 'one') {
                 state.drawings.push(draw);
+                pushUndo({ label: 'add ' + draw.kind,
+                    undo: () => { state.drawings = state.drawings.filter((d) => d.id !== draw.id); } });
                 select(draw.id);
             }
             state.draft = null;
@@ -518,7 +625,10 @@
             paint();
         };
         canvas.addEventListener('mouseup', finish);
-        canvas.addEventListener('mouseleave', (ev) => { if (state.draft) finish(ev); });
+        canvas.addEventListener('mouseleave', (ev) => {
+            if (state.draft) finish(ev);
+            if (state.tip) state.tip.hidden = true;
+        });
 
         /* Idle / select: hit-test in the capture phase so a hit claims the gesture but a miss lets
            the host pan and zoom as if the layer were not there. */
@@ -527,29 +637,64 @@
             const rect = state.canvas.getBoundingClientRect();
             const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
             const found = hit(x, y);
-            if (!found) { if (state.selected) { state.selected = null; paint(); } return; }
+            if (!found) { if (state.selected || state.multiIds.length) { state.selected = null; state.multiIds = []; paint(); } return; }
             ev.preventDefault();
             ev.stopPropagation();
-            select(found.draw.id);
+            /* T13/B12: shift-click extends the selection; a drag on a selected member moves
+               the WHOLE selection. The handles still act on the grabbed drawing alone. */
+            select(found.draw.id, { add: ev.shiftKey });
             const mode = found.handle ? 'handle' : 'move';
+            const group = (mode === 'move' && isSelected(found.draw.id) && selectionIds().length > 1)
+                ? state.drawings.filter((d) => selectionIds().indexOf(d.id) >= 0)
+                : [found.draw];
+            const starts = group.map((d) => ({ draw: d, a: { ...d.a }, b: { ...d.b } }));
             const startA = { ...found.draw.a }, startB = { ...found.draw.b };
             const origin = toData(x, y);
+            const tip = ensureTip();
+            let movedFlag = false;
             const move = (mv) => {
+                movedFlag = true;
                 const now = toData(mv.clientX - rect.left, mv.clientY - rect.top);
                 const dt = now.t - origin.t, dp = now.p - origin.p;
                 if (mode === 'move') {
-                    found.draw.a = { t: startA.t + dt, p: startA.p + dp };
-                    found.draw.b = { t: startB.t + dt, p: startB.p + dp };
+                    starts.forEach((s) => {
+                        s.draw.a = { t: s.a.t + dt, p: s.a.p + dp };
+                        s.draw.b = { t: s.b.t + dt, p: s.b.p + dp };
+                    });
                 } else if (found.handle === 'a') {
                     found.draw.a = now;
                 } else {
                     found.draw.b = now;
+                }
+                /* T13/B11: the consequence of the price under the pointer, in the paper
+                   account's own unit — or an honest distance when there is no position. */
+                if (tip) {
+                    const px = toPx({ t: now.t, p: now.p });
+                    const text = window.OFAPRISK ? OFAPRISK.text(now.p) : '';
+                    if (text) {
+                        tip.textContent = text;
+                        tip.style.left = (px.x + 14) + 'px';
+                        tip.style.top = Math.max(4, px.y - 30) + 'px';
+                        tip.hidden = false;
+                    } else tip.hidden = true;
                 }
                 paint();
             };
             const up = () => {
                 document.removeEventListener('mousemove', move, true);
                 document.removeEventListener('mouseup', up, true);
+                if (tip) tip.hidden = true;
+                if (movedFlag && mode === 'move') {
+                    pushUndo({ label: 'move', undo: () => {
+                        starts.forEach((s) => { s.draw.a = { ...s.a }; s.draw.b = { ...s.b }; });
+                    } });
+                } else if (movedFlag && mode === 'handle') {
+                    const isA = found.handle === 'a';
+                    pushUndo({ label: 'reshape', undo: () => {
+                        if (isA) found.draw.a = { ...startA };
+                        else found.draw.b = { ...startB };
+                    } });
+                }
                 save();
             };
             document.addEventListener('mousemove', move, true);
@@ -581,12 +726,17 @@
             if (ev.key === 'Escape') {
                 if (state.draft) { state.draft = null; paint(); return; }
                 if (state.tool !== 'select') { setTool('select'); return; }
-                if (state.selected) { state.selected = null; paint(); }
+                if (state.selected || state.multiIds.length) { state.selected = null; state.multiIds = []; paint(); }
                 return;
             }
-            if ((ev.key === 'Delete' || ev.key === 'Backspace') && state.selected) {
-                ev.preventDefault();
-                remove(state.selected);
+            if (ev.key === 'Delete' || ev.key === 'Backspace') {
+                if (selectionIds().length) {
+                    ev.preventDefault();
+                    deleteSelection();
+                }
+            }
+            if ((ev.key === 'z' || ev.key === 'Z') && (ev.ctrlKey || ev.metaKey)) {
+                if (state.undoStack.length) { ev.preventDefault(); undo(); }
             }
         });
         /* The tool's keys stay local (scoped to the drawing selection and the draft in progress);
@@ -595,6 +745,8 @@
             OFAPKEYS.document([
                 { keys: 'Esc', label: 'close the drawing menu, cancel the draft, drop the tool, deselect', scope: 'Drawings' },
                 { keys: 'Del / Backspace', label: 'remove the selected drawing', scope: 'Drawings' },
+                { keys: 'Ctrl+Z', label: 'undo the last marking edit', scope: 'Drawings' },
+                { keys: 'shift+click', label: 'add a drawing to the selection (drag moves the set)', scope: 'Drawings' },
             ]);
         }
         document.addEventListener('mousedown', (ev) => {
@@ -614,6 +766,8 @@
             + '<span class="draw-sep"></span>'
             + '<button class="draw-tool draw-mode" data-mode="single" title="Single figure mode — return to Select after each figure">1×</button>'
             + '<button class="draw-tool draw-mode" data-mode="hide" title="Hide or show all drawings on this view">👁</button>'
+            + '<button class="draw-tool draw-mode" data-mode="all" title="Select every drawing on this view — shift-click adds to the set, a drag moves it">▣</button>'
+            + '<button class="draw-tool draw-mode" data-mode="undo" title="Undo the last marking edit (Ctrl+Z)">↶</button>'
             + '<button class="draw-tool draw-mode" data-mode="clear" title="Clear all drawings on this view">⌫</button>';
         bar.addEventListener('click', (ev) => {
             const tool = ev.target.closest('.draw-tool');
@@ -627,6 +781,8 @@
                     || window.confirm(`Clear ${state.drawings.length} drawing(s) on this view?`);
                 if (ok) clearAll();
             }
+            if (mode === 'all') selectAll();
+            if (mode === 'undo') undo();
         });
         host.appendChild(bar);
         state.toolbar = bar;
@@ -641,6 +797,8 @@
         if (single) single.classList.toggle('on', !!state.single);
         const hide = state.toolbar.querySelector('[data-mode="hide"]');
         if (hide) hide.classList.toggle('on', !!state.hidden);
+        const undoBtn = state.toolbar.querySelector('[data-mode="undo"]');
+        if (undoBtn) undoBtn.classList.toggle('dim', !state.undoStack.length);
     }
 
     /* ── attach ───────────────────────────────────────────────────────────── */
@@ -679,7 +837,10 @@
     root.OFAPDRAW = {
         TOOLS: KINDS, state, attach, resize, paint, setTool, select, remove, clearAll, hideAll,
         duplicate, save, load, serialize,
+        undo, deleteSelection, selectAll, isSelected,
+        undoDepth: () => state.undoStack.length,
         get selected() { return state.selected; },
+        get multiIds() { return state.multiIds.slice(); },
         get drawings() { return state.drawings; },
     };
 

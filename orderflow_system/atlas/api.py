@@ -17,8 +17,11 @@ Mounted by the desktop launcher as part of the control router family:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
@@ -199,6 +202,13 @@ async def profile(symbol: str, levels: int = Query(default=160, le=400)) -> dict
             from orderflow_system.atlas.profiles import developing_value_area, virgin_pocs
             snap["developing_value_area"] = developing_value_area(profiles)
             snap["virgin_pocs"] = virgin_pocs(profiles)
+            if profiles:
+                from orderflow_system.analytics.volume_profile import shape_story
+                latest = profiles[-1]
+                words = shape_story(getattr(latest, "shape", "") or "")
+                snap["shape"] = {"value": getattr(latest, "shape", "") or "unknown",
+                                 "label": words["label"], "story": words["story"],
+                                 "session": getattr(latest, "session_date", "")}
     except Exception:
         pass
     return snap
@@ -429,6 +439,18 @@ async def scanner(sort: str = Query(default="score"), limit: int = Query(default
     return get_hub().snapshot_scanner(sort=sort, limit=limit)
 
 
+@router.get("/radar")
+async def radar_all() -> dict[str, Any]:
+    """The level radar across every streaming instrument (fold-in plan §4 / G1)."""
+    return get_hub().snapshot_radar()
+
+
+@router.get("/radar/{symbol}")
+async def radar_symbol(symbol: str) -> dict[str, Any]:
+    """One instrument's tracked levels and their lifecycle states."""
+    return get_hub().snapshot_radar(symbol)
+
+
 # ── durable history ─────────────────────────────────────────────────────────
 
 @router.get("/history/{symbol}")
@@ -476,6 +498,53 @@ async def clear_alerts() -> dict[str, Any]:
     h = get_hub()
     h.alerts.history.clear()
     return {"ok": True, "stats": h.alerts.stats()}
+
+
+# ── notifications (T14/B7): the inbox reading the engine's own firings ──
+
+@router.get("/notifications")
+async def notifications(limit: int = Query(default=200, le=500)) -> dict[str, Any]:
+    """The inbox: the engine's recent firings + the reading state the config keeps.
+
+    Nothing new is recorded here — this is the same AlertEngine.history the Alerts view
+    exports, sliced for the tiles and paired with the read watermark.
+    """
+    h = get_hub()
+    cfg = config_store.load_config()
+    prefs = ((cfg.get("ui") or {}).get("notifications") or {})
+    read_ms = int(prefs.get("read_ms") or 0)
+    items = h.alerts.recent(limit=limit)
+    unread = len([a for a in items if int(a.get("ts_ms") or 0) > read_ms])
+    return {"ok": True, "items": items, "unread": unread,
+            "prefs": {"read_ms": read_ms, "dnd": bool(prefs.get("dnd", False)),
+                      "priority": bool(prefs.get("priority", False))}}
+
+
+@router.post("/notifications")
+async def notifications_update(payload: dict = Body(default={})) -> dict[str, Any]:
+    """read_all | read(ts_ms) | dnd(bool) | priority(bool) — all of it config, clamped by the store."""
+    data = payload or {}
+    action = str(data.get("action") or "")
+    cfg = config_store.load_config()
+    prefs = dict((cfg.get("ui") or {}).get("notifications") or {})
+    if action == "read_all":
+        items = get_hub().alerts.recent(limit=500)
+        prefs["read_ms"] = max([int(a.get("ts_ms") or 0) for a in items] + [int(time.time() * 1000)])
+    elif action == "read":
+        try:
+            ts = int(data.get("ts_ms") or 0)
+        except (TypeError, ValueError):
+            ts = 0
+        if ts > int(prefs.get("read_ms") or 0):
+            prefs["read_ms"] = ts
+    elif action == "dnd":
+        prefs["dnd"] = bool(data.get("dnd"))
+    elif action == "priority":
+        prefs["priority"] = bool(data.get("priority"))
+    else:
+        return {"ok": False, "error": f"unknown action {action!r}"}
+    config_store.merge_config({"ui": {"notifications": prefs}})
+    return {"ok": True, "prefs": prefs}
 
 
 @router.get("/alert-rules")
@@ -534,6 +603,19 @@ async def replay_play(payload: dict = Body(default={})) -> dict[str, Any]:
     async def feed(tick) -> None:
         h = get_hub()
         h.on_tick(rp.status()["symbol"], tick)
+        # R9: the simulated account rides the same prints the views do, so a fill is a real print
+        # from the tape being replayed (or the live stream) — never an invented price.
+        _paper["last_price"] = float(tick.price)
+        account = _paper.get("account")
+        if account is not None:
+            try:
+                fills = account.on_trade(float(tick.price), float(tick.size),
+                                         str(as_value(tick.side)), int(tick.timestamp_ms))
+                for fill in fills or []:
+                    _paper["fills"].append(fill)
+                del _paper["fills"][:-40]
+            except Exception:                     # noqa: BLE001 - a paper fill must never stop replay
+                logger.debug("the simulated account refused a print", exc_info=True)
         try:
             from orderflow_system.dashboard.app import ws_manager
             await ws_manager.broadcast_tick(rp.status()["symbol"], tick.price, tick.size,
@@ -565,6 +647,150 @@ async def replay_seek(payload: dict = Body(default={})) -> dict[str, Any]:
     if "fraction" in payload:
         return {"ok": True, "status": rp.seek_fraction(float(payload["fraction"]))}
     return {"ok": True, "status": rp.seek(int(payload.get("index", 0)))}
+
+
+# ── replay: the simulated account (R9) ─────────────────────────────────────
+
+_paper: dict[str, Any] = {"account": None, "fills": [], "last_price": 0.0}
+
+
+def _paper_state() -> dict[str, Any]:
+    """The session's account as the panel reads it: position, marks, orders, fills, closed."""
+    account = _paper.get("account")
+    if account is None:
+        return {"running": False, "symbol": "", "position": {"side": "flat", "size": 0},
+                "stats": {}, "orders": [], "fills": [], "closed": [], "last_price": _paper["last_price"]}
+    return {"running": True, "symbol": account.symbol, "position": account.position(),
+            "mark": account.mark(float(_paper["last_price"] or 0)),
+            "stats": account.stats(), "orders": account.open_orders(),
+            "fills": list(_paper["fills"]), "closed": account.closed_trades(),
+            "last_price": _paper["last_price"]}
+
+
+@router.post("/replay/paper/start")
+async def paper_start(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Open a simulated account on the replaying instrument — no broker, no money, no risk.
+
+    The account consumes the prints the replay already delivers, so its fills are the tape's: a
+    market order fills at the next print, a limit fills when a print trades through its price.
+    Nothing here touches an exchange.
+    """
+    from orderflow_system.desktop import paper as paper_mod
+
+    symbol = str(payload.get("symbol") or (get_replay().status() or {}).get("symbol") or "").strip().upper()
+    try:
+        tick_size = float(payload.get("tick_size") or 0.01)
+        balance = float(payload.get("balance") or 100_000.0)
+    except (TypeError, ValueError):
+        tick_size, balance = 0.01, 100_000.0
+    _paper["account"] = paper_mod.PaperAccount(symbol=symbol, tick_size=max(1e-8, tick_size),
+                                               starting_balance=balance)
+    _paper["fills"] = []
+    return {"ok": True, "state": _paper_state()}
+
+
+@router.get("/replay/paper/state")
+async def paper_get_state() -> dict[str, Any]:
+    return {"ok": True, "state": _paper_state()}
+
+
+@router.post("/replay/paper/order")
+async def paper_order(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Place a simulated order: market, limit or stop, with an optional stop loss / take profit."""
+    import time as _time
+
+    account = _paper.get("account")
+    if account is None:
+        return {"ok": False, "error": "no simulated account — start one with /replay/paper/start"}
+    body = dict(payload or {})
+
+    def _number(key: str) -> Any:
+        value = body.get(key)
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"{key} is not a number: {value!r}") from None
+
+    try:
+        size = float(body.get("size") or 0)
+        price = _number("price")
+        stop_loss = _number("stop_loss")
+        take_profit = _number("take_profit")
+    except HTTPException:
+        raise
+    order = account.submit(str(body.get("side") or "").lower(), size,
+                           kind=str(body.get("kind") or "market").lower(), price=price,
+                           stop_loss=stop_loss, take_profit=take_profit,
+                           ts_ms=int(_time.time() * 1000))
+    return {"ok": order.get("status") != "rejected", "order": order,
+            "error": str(order.get("reason") or ""), "state": _paper_state()}
+
+
+@router.post("/replay/paper/cancel")
+async def paper_cancel(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Cancel one working order by id, or every working order when none is named."""
+    account = _paper.get("account")
+    if account is None:
+        return {"ok": False, "error": "no simulated account"}
+    order_id = str((payload or {}).get("order_id") or "")
+    if order_id:
+        return {"ok": bool(account.cancel(order_id)), "cancelled": [order_id], "state": _paper_state()}
+    cancelled = [order["id"] for order in account.open_orders() if account.cancel(order["id"])]
+    return {"ok": True, "cancelled": cancelled, "state": _paper_state()}
+
+
+@router.post("/replay/paper/flatten")
+async def paper_flatten() -> dict[str, Any]:
+    """Close the open position at the last printed price."""
+    import time as _time
+
+    account = _paper.get("account")
+    if account is None:
+        return {"ok": False, "error": "no simulated account"}
+    price = float(_paper.get("last_price") or 0)
+    if price <= 0:
+        return {"ok": False, "error": "no print has arrived yet — play the session first"}
+    fills = account.flatten(price, int(_time.time() * 1000))
+    for fill in fills or []:
+        _paper["fills"].append(fill)
+    return {"ok": True, "fills": fills, "state": _paper_state()}
+
+
+@router.post("/replay/paper/close")
+async def paper_close() -> dict[str, Any]:
+    """End the session; its closed trades are written into the journal (the app's own table)."""
+    import sqlite3
+
+    account = _paper.get("account")
+    if account is None:
+        return {"ok": False, "error": "no simulated account to close"}
+    rows = account.closed_trades()
+    written = 0
+    if rows:
+        conn = sqlite3.connect(str(config_store.db_path()), timeout=15)
+        try:
+            conn.execute("PRAGMA busy_timeout=15000")
+            for row in rows:
+                conn.execute(
+                    "INSERT INTO trade_journal (instrument, direction, entry_time_ms, exit_time_ms, "
+                    "entry_price, exit_price, stop_loss, take_profit, pnl_ticks, rr_ratio, "
+                    "signals_json, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (row.get("instrument") or account.symbol, row.get("direction") or "",
+                     row.get("entry_time_ms"), row.get("exit_time_ms"), row.get("entry_price"),
+                     row.get("exit_price"), row.get("stop_loss"), row.get("take_profit"),
+                     row.get("pnl_ticks"), row.get("rr_ratio"), '{"source": "paper"}',
+                     "simulated session"))
+                written += 1
+            conn.commit()
+        finally:
+            conn.close()
+        logger.info("[paper] session closed: %d trade(s) saved to the journal", written)
+    _paper["account"] = None
+    _paper["fills"] = []
+    return {"ok": True, "saved": written, "trades": [dict(r) for r in rows],
+            "note": ("saved to the Journal view" if written else "nothing was closed — the session had no completed trades")}
 
 
 @router.post("/replay/speed")
@@ -803,3 +1029,59 @@ async def notify_test(body: dict[str, Any] = Body(default={})) -> dict[str, Any]
     result["started"] = started
     result["configured"] = sorted(notifier.channels)
     return result
+
+
+# ── level reads (fold-in plan §3): unfinished magnets, node runs, confluence ──
+
+@router.get("/levels/{symbol}")
+async def atlas_levels(symbol: str, tol_ticks: float = Query(default=2.0, ge=0.1, le=50.0)) -> dict[str, Any]:
+    """The level-lifecycle reads: open unfinished-business magnets, node runs, and where the
+    level sources agree (confluence).
+
+    ``unfinished`` / ``nodes`` are the live trackers' snapshots — the same objects alerts
+    evaluate against, so the drawn line and the alert can never disagree about a level. When
+    the engine has not fed this symbol yet, both are ``None`` and ``note`` says so instead of
+    inventing levels; ``confluence`` combines them with the stored profiles' virgin POCs and
+    the weekly / monthly POC ladder at one tolerance.
+    """
+    from orderflow_system.atlas.confluence import (
+        find_confluences,
+        refs_from_nodes,
+        refs_from_pocs,
+        refs_from_unfinished,
+    )
+
+    h = get_hub()
+    symbols = getattr(h, "symbols", None) or {}
+    feats = symbols.get(symbol) if hasattr(symbols, "get") else None
+    if feats is None:
+        return {"ok": True, "symbol": symbol,
+                "note": "no live readings yet — the level trackers fill while the engine runs",
+                "unfinished": None, "nodes": None, "confluence": []}
+
+    tick = float(getattr(feats, "tick_size", 0.0) or 0.0)
+    unfinished = feats.unfinished.snapshot()
+    nodes = feats.nodes.snapshot()
+
+    refs: list[Any] = []
+    refs.extend(refs_from_unfinished(unfinished.get("open") or []))
+    node_rows = [n for n in (([nodes.get("current")] if nodes.get("current") else [])
+                             + (nodes.get("completed") or []))
+                 if int(n.get("count") or 0) >= 2]
+    refs.extend(refs_from_nodes(node_rows))
+    try:
+        from orderflow_system.desktop import engine as engine_mod
+        system = engine_mod.engine.system
+        if system is not None:
+            profiles = await system.db.get_volume_profiles(symbol, days=30)
+            from orderflow_system.atlas.profiles import period_pocs, virgin_pocs
+            refs.extend(refs_from_pocs(virgin_pocs(profiles), source="virgin_poc"))
+            refs.extend(refs_from_pocs(period_pocs(profiles, "week"), source="poc_week"))
+            refs.extend(refs_from_pocs(period_pocs(profiles, "month"), source="poc_month"))
+    except Exception:
+        pass
+
+    tol = (tick * float(tol_ticks)) if tick > 0 else 0.0
+    confluence = find_confluences(refs, tol=tol, min_distinct=2) if tol > 0 else []
+    return {"ok": True, "symbol": symbol, "tick": tick, "tol": tol,
+            "unfinished": unfinished, "nodes": nodes, "confluence": confluence}

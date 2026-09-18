@@ -220,7 +220,7 @@
         };
     }
 
-    /* ── the five modes ──────────────────────────────────────────────────────────────────────
+    /* ── the six modes ──────────────────────────────────────────────────────────────────────
        `chrome` is what the mode keeps of the default bar furniture; `says` is the legend's own
        sentence for the encoding, so the picture and its description come from one place. */
     const MODES = {
@@ -253,6 +253,12 @@
             says: 'no body \u2014 the high/low wick and the footprint cells only',
             pairing: 'the cells\u2019 own split (left/right) and digits carry every side',
             chrome: { framing: false, ground: false, zones: false, poc: false, badges: true },
+        },
+        candles: {
+            label: 'candles',
+            says: 'classic candle \u2014 body = open\u2192close, the wick to high/low, colour by direction',
+            pairing: 'direction also rides the \u25b2/\u25bc glyph on the body',
+            chrome: { framing: false, ground: false, zones: false, poc: false, badges: false, cells: false },
         },
     };
 
@@ -354,6 +360,14 @@
             out.wick.rgba = rgbaOf(colors.pos, 0.28);
         } else if (out.mode === 'wick') {
             out.glyph = '';
+        } else if (out.mode === 'candles') {
+            /* T10/B13: the classic candle \u2014 a saturated body by direction, the wick to the
+               bar's range. This is also what the Engine draws on its own when the zoom pushes a
+               column under the text threshold (`atlas.ofx.degrade`). */
+            const tint = dir < 0 ? colors.neg : colors.pos;
+            out.body = { fill: rgbaOf(tint, 0.85), stroke: rgbaOf(tint, 1), lineWidth: 1 };
+            out.wick = { rgba: rgbaOf(tint, 0.8), lineWidth: 1 };
+            out.glyph = glyphFor(dir);
         }
         return out;
     }
@@ -362,7 +376,7 @@
        Lightweight Charts takes per-bar overrides on a candlestick: `color` (body), `borderColor`
        (outline), `wickColor`. One function so the chart view never re-derives a colour the engine
        decided differently. `split` has no vendor equivalent (see `CHART_SUPPORT`). */
-    const CHART_SUPPORT = { default: true, delta: true, heat: true, wick: true, split: false };
+    const CHART_SUPPORT = { default: true, delta: true, heat: true, wick: true, split: false, candles: true };
 
     function chartBars(bars, opts) {
         const o = opts || {};

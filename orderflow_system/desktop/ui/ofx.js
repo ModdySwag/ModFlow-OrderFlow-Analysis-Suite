@@ -175,6 +175,13 @@
             return math.heatColor01(Math.log1p(s) / Math.log1p(Math.max(sc, 1)), state.params.ramp);
         },
 
+        /* B2: the ramp position after the user's contrast dial. `ramp.js` owns the maths (one home
+           for both surfaces); with the module absent — a bare node run — it is the identity. */
+        rampT(t, gamma) {
+            const m = root.OFAPRAMP;
+            return m ? m.contrastT(t, gamma) : Math.min(1, Math.max(0, Number(t) || 0));
+        },
+
         /* Execution sweep bubble: r = c * cbrt(volume). */
         sweepRadius(volume, c = 1.15, min = 2, max = 40) {
             const v = Math.max(0, Number(volume) || 0);
@@ -565,6 +572,16 @@
             return { mode: 'footprint', text: true, labelAlpha: Math.min(1, (w - textPx) / Math.max(1, fadePx)) };
         },
 
+        /* T10/B13: the candle-degrade verdict — engage once a column drops below the text
+           threshold, release only after it widens past the threshold plus half the fade ramp
+           (hysteresis, so a wheel-rocking zoom does not flicker). Pure. */
+        degradeDecision(columnWidth, textPx = 45, fadePx = 15, engaged = false) {
+            const w = Number(columnWidth) || 0;
+            const t = Number(textPx) || 0;
+            const hi = t + Math.max(1, Number(fadePx) || 0) * 0.5;
+            return engaged ? w < hi : w < t;
+        },
+
         /* Viewport state machine: the view is historical the moment its right edge sits left
            of the newest data. */
         viewportMode(offX, viewWidth, maxPresentX) {
@@ -612,12 +629,14 @@
            string, rebuilt only when the scale or the ramp changes. The old path called
            heatColor + template-string per cell per pass — 8.3 ms per repaint at 30k cells, all
            of it allocation. Cells now index this table. */
-        heatPalette(scale, ramp, buckets = 64, alphaSteps = 16) {
+        heatPalette(scale, ramp, buckets = 64, alphaSteps = 16, gamma = 1) {
             const sc = Number(scale) > 0 ? Number(scale) : 1;
             const logMax = Math.log1p(Math.max(sc, 1));
             const out = [];
             for (let b = 0; b < buckets; b += 1) {
-                const rgb = math.heatColor01(b / (buckets - 1), ramp);
+                /* B2: the contrast dial rides the colour table itself — the size-to-bucket mapping
+                   stays linear in luminance; only where each bucket sits on the ramp moves. */
+                const rgb = math.heatColor01(math.rampT(b / (buckets - 1), gamma), ramp);
                 for (let a = 0; a < alphaSteps; a += 1) {
                     const alpha = (a + 1) / alphaSteps;
                     out.push('rgba(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ',' + alpha.toFixed(3) + ')');
@@ -658,6 +677,7 @@
             imSell: '255,64,196',       // diagonal imbalance, sell side
             poc: '255,214,102',         // point of control of the bar
             hvn: '255,182,77',          // high-volume node row within the bar
+            unfinished: '255,193,117',  // unfinished-business magnet (fold-in §3 level reads)
             vaGround: '120,150,190',    // value-area ground shading
             vaEdge: '150,175,215',      // VAH / VAL edges
             sweepTwo: '140,170,210',    // sweep block that took both sides
@@ -701,6 +721,24 @@
             else if (abs >= 0.01) text = n.toFixed(3);
             else text = n.toFixed(4).replace(/0+$/, '');
             return width ? text.padStart(width) : text;
+        },
+        /* T5/A11 — the anti-fit verdict, the study's hysteresis shape: hold while the data
+           band sits inside the visible range with slack at both edges and the view is not far
+           emptier than the band; refit only when it reaches an edge or shrinks away. factor 0
+           keeps the old always-refit behaviour. Pure — pinned in ofx.selftest.js. */
+        fitDecision(view, band, factor) {
+            const f = Math.max(0, Math.min(0.9, Number(factor) || 0));
+            if (!(f > 0)) return 'refit';
+            const vSpan = Number(view.hi) - Number(view.lo);
+            const bSpan = Number(band.hi) - Number(band.lo);
+            if (!(vSpan > 0) || !(bSpan > 0)) return 'refit';
+            const slack = vSpan * f;
+            if (Number(band.lo) < Number(view.lo) + slack) return 'refit';
+            if (Number(band.hi) > Number(view.hi) - slack) return 'refit';
+            /* Deliberately not tied to factor: a view three times emptier than the band is
+               wasteful whatever the slack is — the data shrank, tighten onto it. */
+            if (bSpan * 3 < vSpan) return 'refit';
+            return 'hold';
         },
         niceStep(span, target = 6) {
             const raw = Math.abs(Number(span) || 0) / Math.max(1, Number(target) || 6);
@@ -793,11 +831,11 @@
            bucket - the same log1p mapping the colour table uses - so a pulled wall leaves a strong
            ghost and a thin level leaves a faint one. A uniform 0.92 said every level held the same
            liquidity, which is exactly the claim the picture must not make. */
-        peakAlpha(size, scale, floor, top) {
+        peakAlpha(size, scale, floor, top, gamma = 1) {
             const sc = Number(scale) > 0 ? Number(scale) : 1;
             const v = Math.max(0, Number(size) || 0);
             const span = Math.max(1e-9, Math.log1p(Math.max(sc, 1)));
-            const t = Math.min(1, Math.log1p(v) / span);
+            const t = math.rampT(Math.min(1, Math.log1p(v) / span), gamma);
             const lo = Number(floor) > 0 ? Number(floor) : 0.32;
             const hi = Number(top) > 0 ? Number(top) : 0.92;
             return Math.min(hi, lo + (hi - lo) * Math.sqrt(Math.max(0, t)));
@@ -868,6 +906,61 @@
                 printRows: rows,
             };
         },
+
+        /* ── Phase 3 / A3: the area's volume profile, pure ──────────────────────────────────────
+           Volume-at-price over the boxed region: every drawn row inside [i0..i1] x [p0..p1] carries
+           its bid+ask into the area's total. POC = the heaviest row; the value area is the heaviest
+           rows until `pct` of the area's volume is covered — the same rule the footprint's per-bar
+           band uses (`math.rowShares`), applied to the area instead of one candle. `step` is the
+           smallest positive gap between drawn rows (the watch hand-off tolerances from it). An
+           area with no depth rows returns null: no ladder means no profile, never an invented one. */
+        areaVolumeProfile({ bars, levels, i0, i1, p0, p1, pct }) {
+            const list = (bars || []).slice(Math.max(0, i0 | 0), (i1 | 0) + 1);
+            const lo = Math.min(Number(p0), Number(p1)), hi = Math.max(Number(p0), Number(p1));
+            if (!list.length || levels == null || typeof levels.get !== 'function') return null;
+            const byPrice = new Map();
+            for (const b of list) {
+                const rows = levels.get(b.time) || [];
+                for (const r of rows) {
+                    const price = Number(r.price);
+                    if (!Number.isFinite(price) || price < lo || price > hi) continue;
+                    const vol = (Number(r.bid) || 0) + (Number(r.ask) || 0);
+                    if (vol <= 0) continue;
+                    byPrice.set(price, (byPrice.get(price) || 0) + vol);
+                }
+            }
+            if (!byPrice.size) return null;
+            const rows = Array.from(byPrice, ([price, volume]) => ({ price: price, volume: volume }))
+                .sort((a, b) => a.price - b.price);
+            let total = 0;
+            for (const r of rows) total += r.volume;
+            const share = Math.max(0.1, Math.min(0.95, Number(pct) > 0 ? Number(pct) : 0.7));
+            const ranked = rows.slice().sort((a, b) => b.volume - a.volume);
+            const target = total * share;
+            let acc = 0;
+            const inVA = new Set();
+            for (const r of ranked) {
+                if (acc >= target && inVA.size) break;
+                inVA.add(r.price);
+                acc += r.volume;
+            }
+            const vaPrices = rows.filter((r) => inVA.has(r.price)).map((r) => r.price);
+            let step = 0;
+            for (let i = 1; i < rows.length; i++) {
+                const d = rows[i].price - rows[i - 1].price;
+                if (d > 1e-12 && (!step || d < step)) step = d;
+            }
+            const poc = ranked[0];
+            return {
+                rows: rows.map((r) => ({ price: r.price, volume: r.volume, inVA: inVA.has(r.price) })),
+                total: total, poc: poc.price, pocVolume: poc.volume,
+                pocShare: total > 0 ? poc.volume / total : 0,
+                vah: vaPrices.length ? Math.max.apply(null, vaPrices) : null,
+                val: vaPrices.length ? Math.min.apply(null, vaPrices) : null,
+                vaPct: share, step: step,
+                from: rows[0].price, to: rows[rows.length - 1].price,
+            };
+        },
     };
 
     /* ── state ───────────────────────────────────────────────────────────── */
@@ -877,10 +970,19 @@
        same frame; the measured 4K costs (heat ~7.5, base ~6.5) split cleanly under it. */
     const YIELD_MS = 6;
 
+    /* T10/B16: the value-scale rail's width — drawAxes paints it, and the right-click zone
+       and the axis drag both measure it. One constant, three consumers. */
+    const RAIL_W = 62;
+
     const state = {
         symbol: 'BTCUSDT',
         params: { R: 4.0, stack: 3, lambda: 500, textPx: 45, sweepC: 1.15, levelCap: 260,
             vaPct: 0.7, minBlock: 0, minRowPx: 9, ramp: 'classic',
+            /* B2: the heat scheme's live dials — contrast (a gamma over the ramp; 1 = as shipped),
+               a floor in size units and a floor as a share of the book's sizes (both off). */
+            heatContrast: 1.0, heatFloor: 0, heatFloorPct: 0,
+            /* T10/B3: the vertical-smoothing mode; T10/B13: the candle-degrade switch. */
+            heatSmooth: 'auto', degrade: true,
             /* P1-8: how a bar is expressed. Resolved by `expression.js` at paint time; junk falls
                back to `default`/`theme` there, so this pair can never blank the stage. */
             mode: 'default', palette: 'theme' },
@@ -889,6 +991,8 @@
            footprints, and LOD takes over when the user zooms out. */
         view: { offX: 0, scaleX: 52, offY: 0, scaleY: 0.6, width: 900, height: 480, dpr: 1 },
         data: { bars: [], levels: new Map(), prints: [], heat: [], heatScale: 1, sessions: [],
+            /* §3 level reads: served by /api/atlas/levels (unfinished magnets + node runs) */
+            reads: { unfinished: [], nodes: [], confluence: [], note: '' },
             heatIndex: null, palette: null, traded: [], best: [], flowEvents: [], key: '' },
         layers: { heat: null, base: null, live: null, ribbon: null, hud: null },
         mode: 'live',
@@ -898,7 +1002,7 @@
             recovered: 0, flowBubbles: 0, flowEvents: 0,
             printsSeen: 0, printsMatched: 0, sweepBubbles: 0, heatCells: 0, textStarved: 0,
             cellPx: 0, aggregating: false, groupK: 1, divState: 'none', blocksFiltered: 0,
-            barBodies: 0, barSplits: 0 },
+            barBodies: 0, barSplits: 0, degraded: false, heatSmooth: false },
         hover: null,
         /* P2-1: per-payload indexes (prints by bar, CVD prefix sums, flow events by column).
            Built once in `setData()`; hover reads them instead of rescanning the payload. */
@@ -910,6 +1014,8 @@
         heatEpoch: 0, heatPainted: -1, heatGhosts: [],
         pendingHover: null,
         autoFit: true,
+        degradeOn: false,          // T10/B13 hysteresis (recomputed every footprint paint)
+        smoothHeatOn: false,       // T10/B3 hysteresis (recomputed every heat paint)
         avgLevelVolume: 0,
         avgBarVolume: 0,
         lastPaint: 0,
@@ -933,7 +1039,7 @@
 
     /* What to draw for one bar, and the words that describe it. The catalogue decides; with no
        catalogue loaded the engine draws exactly what it always drew (CHROME_DEFAULT, no body). */
-    function barPaintFor(bar) {
+    function barPaintFor(bar, modeOverride) {
         const expr = root.OFAPEXPR;
         if (!expr || typeof expr.barPaint !== 'function') {
             return {
@@ -943,7 +1049,7 @@
             };
         }
         return expr.barPaint(bar, {
-            mode: state.params.mode, palette: state.params.palette,
+            mode: modeOverride || state.params.mode, palette: state.params.palette,
             theme: { pos: math.theme.bid, neg: math.theme.ask },
         });
     }
@@ -1214,7 +1320,10 @@
                     + 'the column is the sum of every depth snapshot inside that bar. Saturation is '
                     + 'the deepest cell in view.',
                 live: s.heatScale
-                    ? `ramp ${rampKey} · scale ${fmt(s.heatScale, 2)} · ${s.heatCells} cells drawn`
+                    ? `ramp ${rampKey} · scale ${fmt(s.heatScale, 2)} · contrast ${fmt(p.heatContrast, 2)}`
+                        + (Number(p.heatFloor) > 0 ? ` · floor ${math.fmtSize(p.heatFloor)}` : '')
+                        + (Number(p.heatFloorPct) > 0 ? ` · floor ${fmt(p.heatFloorPct, 0)}%` : '')
+                        + ` · ${s.heatCells} cells drawn`
                     : 'no depth history in view yet',
             },
             {
@@ -1259,6 +1368,21 @@
                 meaning: `${p.stack}+ consecutive imbalanced rows in one direction, banded with a `
                     + 'leading rail and labelled STACK. Strongest read of one-sided intent in the view.',
                 live: `${s.zones === undefined ? 'see STACK labels' : s.zones + ' zones'}`,
+            },
+            {
+                name: 'Unfinished business (UFB)',
+                swatch: { type: 'solid', rgb: t.unfinished },
+                meaning: 'An auction extreme that never finished — a bar high with sellers still on '
+                    + 'the bid, or a low with buyers on the ask. Dashed to the live edge until price '
+                    + 'returns to the level and the server resolves it.',
+                live: `${s.levelReadLines || 0} open magnets · labels show × re-arms`,
+            },
+            {
+                name: 'Node band (×2 / ×3)',
+                swatch: { type: 'solid', rgb: t.hvn },
+                meaning: 'Consecutive bars whose heaviest-volume price sits at one level — a double '
+                    + 'or triple node. The band spans the bars that agreed; the label counts them.',
+                live: `${s.levelReadBands || 0} bands drawn`,
             },
             {
                 name: 'POC (point of control)',
@@ -1412,6 +1536,7 @@
                 heatScale: Number(s.heatScale) || 0, heatCells: s.heatCells, sweepBubbles: s.sweepBubbles,
                 flowEvents: s.flowEvents, divState: s.divState, recovered: s.recovered || 0,
                 avgLevelVolume: s.avgLevelVolume, groupK: s.groupK, cellPx: s.cellPx, lod: state.lod.mode,
+                degraded: state.degradeOn === true, heatSmooth: !!s.heatSmooth,
             },
         };
     }
@@ -1446,7 +1571,7 @@
     function drawAxes(ctx) {
         const v = state.view;
         const bars = state.data.bars;
-        const railW = 62;
+        const railW = RAIL_W;
         const rulerH = 14;
         const gridCol = math.rgba('grid', '.10');
         const labelCol = math.rgba('axisLabel', '.85');
@@ -1609,7 +1734,7 @@
         state.stats.flowEvents = marks;
     }
 
-    function fitHeight() {
+    function fitHeight(force) {
         const bars = state.data.bars;
         if (!bars.length) return;
         /* Fit the bars the viewport actually shows: fitting the whole session leaves the stage
@@ -1620,15 +1745,65 @@
         for (let i = start; i < end; i += 1) { lo = Math.min(lo, bars[i].low); hi = Math.max(hi, bars[i].high); }
         if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return;
         const pad = (hi - lo) * 0.08;
+        /* T5/A11: auto-fit hysteresis — while the band sits comfortably inside the visible
+           range, the scale stays still (a scale that breathes every tick is the flicker the
+           study's Bookmap brief names). atlas.ofx.fit_tolerance, 0 = always refit. */
+        const tol = fitTolerance();
+        if (!force && tol > 0 && state.view.scaleY > 0 && state.view.height > 0) {
+            const verdict = math.fitDecision(
+                { lo: state.view.offY, hi: state.view.offY + state.view.height / state.view.scaleY },
+                { lo: lo - pad, hi: hi + pad }, tol);
+            if (verdict === 'hold') return;
+        }
         state.view.offY = lo - pad;
         state.view.scaleY = state.view.height / ((hi + pad) - state.view.offY);
     }
 
-    /* One rgba table per (scale, ramp): rebuilt only when either actually changes. */
+    /* How much slack auto-fit keeps before it refits (atlas.ofx.fit_tolerance; default 0.25). */
+    function fitTolerance() {
+        try {
+            /* `S` is ui.js's top-level binding, not a window property — window.S is always
+               undefined here and a guard on it would silently pin the default. */
+            if (typeof S === 'undefined' || !S || !S.config) return 0.25;
+            const cfg = (S.config.atlas && S.config.atlas.ofx) || {};
+            const v = Number(cfg.fit_tolerance);
+            return Number.isFinite(v) ? Math.max(0, Math.min(0.9, v)) : 0.25;
+        } catch (e) { return 0.25; }
+    }
+
+    /* B2: the live contrast dial, clamped at the same bounds the config store and the registry
+       hold it to. */
+    function heatGamma() {
+        const g = Number(state.params.heatContrast);
+        return Number.isFinite(g) ? Math.min(2.5, Math.max(0.5, g)) : 1;
+    }
+
+    /* B2: the size floor resolved once per (version, dials) — the exact size or the bottom share,
+       whichever is higher. Below it a cell draws nothing, so the map shows where size is NOT. */
+    function heatFloorFor() {
+        const f = Math.max(0, Number(state.params.heatFloor) || 0);
+        const fp = Math.min(50, Math.max(0, Number(state.params.heatFloorPct) || 0));
+        if (f <= 0 && fp <= 0) return 0;
+        const key = `${state.data.heatVersion}|${f}|${fp}`;
+        if (state.data.heatFloorKey !== key) {
+            const sizes = [];
+            for (const cell of state.data.heat || []) {
+                const s = Number(cell.size) || 0;
+                if (s > 0) sizes.push(s);
+            }
+            sizes.sort((a, b) => a - b);
+            const mod = root.OFAPRAMP;
+            state.data.heatFloorKey = key;
+            state.data.heatFloorVal = mod ? mod.floorValue(sizes, f, fp) : f;
+        }
+        return state.data.heatFloorVal || 0;
+    }
+
+    /* One rgba table per (scale, ramp, contrast): rebuilt only when one of them actually changes. */
     function heatPaletteFor() {
-        const key = `${state.data.heatScale}|${state.params.ramp}`;
+        const key = `${state.data.heatScale}|${state.params.ramp}|${heatGamma()}`;
         if (!state.data.palette || state.data.palette.key !== key) {
-            state.data.palette = { key, pal: math.heatPalette(state.data.heatScale, state.params.ramp, 64, 32) };
+            state.data.palette = { key, pal: math.heatPalette(state.data.heatScale, state.params.ramp, 64, 32, heatGamma()) };
         }
         return state.data.palette.pal;
     }
@@ -1643,6 +1818,7 @@
         const pal = heatPaletteFor();
         const strings = pal.strings;
         let decayed = 0;
+        const floorVal = heatFloorFor();
         /* P2-2: what is still fading is remembered WITH its rect, so the decay pass repaints
            exactly these cells and nothing else. */
         const ghosts = [];
@@ -1650,6 +1826,19 @@
            those columns only. Same picture as the per-cell bounds test, without the 30k
            iterations a pass: cells outside the viewport are never touched. */
         const cols = idx.cols;
+        /* T10/B3: the vertical-smoothing verdict for this frame — judged on the heat cells'
+           own pixel height ('auto' engages below ~2.5 px; hysteresis holds across the band). */
+        const RPHEAT = root.OFAPRAMP;
+        const smoothMode = state.params.heatSmooth || 'auto';
+        let probeH = 0;
+        for (let pi = 0; pi < cols.length && !probeH; pi += 1) {
+            for (const pcell of (idx.groups.get(cols[pi]) || [])) {
+                if (pcell.size > 0) { probeH = Math.abs(priceToY(pcell.hi) - priceToY(pcell.lo)); break; }
+            }
+        }
+        if (smoothMode === 'auto' && RPHEAT) state.smoothHeatOn = RPHEAT.smoothDecision(probeH, state.smoothHeatOn);
+        const smoothNow = smoothMode === 'manual' || (smoothMode === 'auto' && state.smoothHeatOn);
+        state.stats.heatSmooth = smoothNow;
         let lo = 0;
         let hi = cols.length - 1;
         while (lo < hi) {
@@ -1662,19 +1851,33 @@
             if (x > v.width + colW) break;
             if (x < -colW) continue;
             const cells = idx.groups.get(col) || [];
-            for (const cell of cells) {
+            /* T10/B3: blend the column's sizes across neighbouring price cells; a ghost keeps
+               its own lastSize — its colour is a memory of what was, not a live reading. */
+            const smoothedSizes = (smoothNow && RPHEAT)
+                ? RPHEAT.smoothVector(cells.map((c2) => c2.size || 0), RPHEAT.SMOOTH_STRENGTH) : null;
+            for (let k = 0; k < cells.length; k += 1) {
+                const cell = cells[k];
                 const y0 = priceToY(cell.hi);
                 const y1 = priceToY(cell.lo);
                 if (y1 < 0 || y0 > v.height) continue;
                 let alpha;
                 if (cell.size > 0) {
+                    /* B2: below the floor nothing is drawn — and nothing is remembered, so no
+                       ghost can fire later for a cell that never had colour. */
+                    if (floorVal > 0 && cell.size < floorVal) {
+                        cell.alpha = 0;
+                        cell.peak = 0;
+                        cell.seen = now;
+                        cell.lastSize = 0;
+                        continue;
+                    }
                     /* live cell: density colour at full strength, stamped for the decay pass */
                     alpha = 0.92;
                     cell.alpha = alpha;
                     cell.seen = now;
                     /* The ghost this cell will leave is proportional to what it was (P1-5). */
                     cell.peak = Math.max(cell.peak || 0,
-                        math.peakAlpha(cell.size, state.data.heatScale));
+                        math.peakAlpha(cell.size, state.data.heatScale, 0, 0, heatGamma()));
                     cell.lastSize = cell.size;
                 } else if ((cell.alpha || 0) > 0.004) {
                     /* liquidity left this level: keep the colour of the size that was there and
@@ -1689,7 +1892,8 @@
                 if (alpha <= 0.004) continue;
                 const yTop = Math.min(y0, y1);
                 const hh = Math.max(1, Math.abs(y1 - y0));
-                ctx.fillStyle = strings[pal.index(cell.lastSize || 1, alpha)] || strings[0];
+                const smoothSize = (smoothedSizes && cell.size > 0) ? smoothedSizes[k] : (cell.lastSize || 1);
+                ctx.fillStyle = strings[pal.index(Math.max(0, smoothSize), alpha)] || strings[0];
                 ctx.fillRect(x, yTop, colW, hh);
                 if (cell.size <= 0) ghosts.push({ cell: cell, x: x, yTop: yTop, h: hh });
             }
@@ -1772,6 +1976,10 @@
            more drawn rows than any stage can show). Width-based LOD covers the zoomed-out case. */
         const rowsPerBar = levelStep ? Math.ceil(probe.length / groupK) : 0;
         const groupFallback = rowsPerBar > 600;
+        /* T10/B13: the degrade verdict — hysteresis held on the view's own column width. */
+        state.degradeOn = math.degradeDecision(v.scaleX, state.params.textPx, 15, state.degradeOn);
+        const degrade = state.params.degrade && state.degradeOn;
+        state.stats.degraded = false;
         state.stats.cellPx = cellPx * groupK;
         state.stats.groupK = groupK;
         state.stats.aggregating = lod.mode === 'profile' || groupFallback;
@@ -1791,6 +1999,24 @@
             const chrome = paint.chrome || CHROME_DEFAULT;
 
             if (lod.mode === 'profile' || groupFallback) {
+                if (degrade) {
+                    /* Below the text threshold the footprint draws plain candles — change what
+                       is drawn, not how fast; the saved mode is untouched. */
+                    const candle = barPaintFor(bar, 'candles');
+                    if (candle) {
+                        paintBodyFill(ctx, candle, bar, x, colW);
+                        paintBodyStroke(ctx, candle, bar, x, colW);
+                        ctx.strokeStyle = candle.wick.rgba;
+                        ctx.lineWidth = candle.wick.lineWidth || 1;
+                        ctx.beginPath();
+                        ctx.moveTo(x + colW / 2, priceToY(bar.high));
+                        ctx.lineTo(x + colW / 2, priceToY(bar.low));
+                        ctx.stroke();
+                        state.stats.barBodies += 1;
+                        state.stats.degraded = true;
+                    }
+                    continue;
+                }
                 const prof = math.rowShares(raw, state.params.vaPct);
                 const total = prof.candleTotal || 1;
                 const h = Math.min(v.height * 0.5, Math.max(3, (state.avgBarVolume ? total / state.avgBarVolume : 1) * v.height * 0.06));
@@ -1848,7 +2074,7 @@
             if (paintBodyFill(ctx, paint, bar, x, colW)) state.stats.barBodies += 1;
             if (paintSplit(ctx, paint, bar, x, colW)) state.stats.barSplits += 1;
 
-            for (let k = 0; k < rows.length; k += 1) {
+            for (let k = 0; k < (chrome.cells === false ? 0 : rows.length); k += 1) {
                 const level = rows[k];
                 const im = imRows[k];
                 const y = priceToY(level.price) - cellH / 2;
@@ -1895,7 +2121,7 @@
             }
 
             /* Value-area frame: VAH/VAL edges, labelled once per viewport edge. */
-            if (shares.vaCount) {
+            if (shares.vaCount && chrome.cells !== false) {
                 ctx.strokeStyle = math.rgba('vaEdge', '.45');
                 ctx.lineWidth = 1;
                 ctx.beginPath();
@@ -1972,6 +2198,97 @@
                     state.stats.columnBadges += 1;
                 }
             }
+        }
+    }
+
+    /* ── level reads (fold-in plan §3): unfinished auctions + node bands ────────────────────────
+       The server owns the maths (`atlas/unfinished.py`, `atlas/nodes.py`); this is only the
+       picture. Open magnets run dashed from their bar to the right edge until price returns and
+       the server resolves them; node bands span the bars that shared one POC. `levelReadSegments`
+       decides the geometry (pure, selftested), `drawLevelReads` puts the pixels down. */
+    function setReads(reads) {
+        const r = reads || {};
+        const unf = (r.unfinished && Array.isArray(r.unfinished.open)) ? r.unfinished.open : [];
+        const nds = (r.nodes && typeof r.nodes === 'object') ? r.nodes : null;
+        const nodeList = nds ? ((nds.current ? [nds.current] : []).concat(nds.completed || [])) : [];
+        state.data.reads = {
+            unfinished: unf,
+            nodes: nodeList,
+            confluence: Array.isArray(r.confluence) ? r.confluence : [],
+            note: typeof r.note === 'string' ? r.note : '',
+        };
+        state.dirty.base = true;
+    }
+
+    function levelReadSegments(bars, reads) {
+        const out = { unfinished: [], nodes: [], dropped: 0 };
+        if (!bars || !bars.length || !reads) return out;
+        const list = (reads.unfinished || []).filter((lv) => lv && lv.active !== false);
+        for (const lv of list) {
+            const price = Number(lv.price);
+            if (!Number.isFinite(price)) continue;
+            const at = math.barIndex(bars, Number(lv.bar_ts_ms) / 1000);
+            if (at < 0) { out.dropped += 1; continue; }
+            out.unfinished.push({ price, side: lv.side === 'below' ? 'below' : 'above',
+                                  from: at, to: -1, arms: Math.max(1, Number(lv.arms) || 1) });
+        }
+        for (const run of (reads.nodes || [])) {
+            const price = Number(run && run.price);
+            const count = Math.round(Number(run && run.count) || 0);
+            if (!Number.isFinite(price) || count < 2) continue;
+            const from = math.barIndex(bars, Number(run.start_ts_ms) / 1000);
+            const to = math.barIndex(bars, Number(run.last_ts_ms) / 1000);
+            if (from < 0) { out.dropped += 1; continue; }
+            out.nodes.push({ price, count, from, to: to < 0 ? from : to });
+        }
+        return out;
+    }
+
+    function drawLevelReads(ctx) {
+        const seg = levelReadSegments(state.data.bars, state.data.reads);
+        state.stats.levelReadLines = seg.unfinished.length;
+        state.stats.levelReadBands = seg.nodes.length;
+        if (!seg.unfinished.length && !seg.nodes.length) return;
+        const v = state.view;
+        const colW = Math.max(2, v.scaleX);
+
+        for (const band of seg.nodes) {
+            const x0 = Math.max(0, worldX(band.from));
+            const x1 = Math.min(v.width, worldX(band.to) + colW);
+            if (x1 <= 0 || x0 >= v.width) continue;
+            const yc = priceToY(band.price);
+            if (yc < -12 || yc > v.height + 12) continue;
+            ctx.fillStyle = math.rgba('hvn', '.18');
+            ctx.fillRect(x0, yc - 3.5, Math.max(2, x1 - x0), 7);
+            ctx.strokeStyle = math.rgba('hvn', '.55');
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x0 + 0.5, yc - 3, Math.max(2, x1 - x0) - 1, 6);
+            if (band.count >= 2 && v.scaleX >= 18) {
+                ctx.fillStyle = math.rgba('hvn', '.9');
+                ctx.font = '10px "Segoe UI", sans-serif';
+                ctx.textAlign = 'left';
+                ctx.fillText('\u00d7' + band.count, x0 + 3, yc - 6);
+            }
+        }
+
+        for (const line of seg.unfinished) {
+            const x0 = worldX(line.from);
+            if (x0 > v.width) continue;
+            const y = priceToY(line.price);
+            if (y < -12 || y > v.height + 12) continue;
+            ctx.save();
+            ctx.setLineDash([5, 4]);
+            ctx.strokeStyle = math.rgba('unfinished', '.65');
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(Math.max(0, x0), y + 0.5);
+            ctx.lineTo(v.width, y + 0.5);
+            ctx.stroke();
+            ctx.restore();
+            ctx.fillStyle = math.rgba('unfinished', '.9');
+            ctx.font = '10px "Segoe UI", sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText('UFB' + (line.arms > 1 ? ' \u00d7' + line.arms : '') + (line.side === 'below' ? ' \u2193' : ' \u2191'), v.width - 6, y - 3);
         }
     }
 
@@ -2226,6 +2543,38 @@
         ctx.lineWidth = 1;
         ctx.strokeRect(Math.round(x0) + 0.5, Math.round(y0) + 0.5,
             Math.max(1, Math.round(x1 - x0)), Math.max(1, Math.round(y1 - y0)));
+        /* A3: the area profile's own lines — POC solid, the value-area edges dashed, inside the
+           box that was measured. Labels sit just outside the right edge so the box stays a
+           measurement; mid-drag (or with no ladder rows) there is nothing to draw and the box
+           alone is honest. */
+        const prof = selDrag == null ? areaProfile() : null;
+        if (prof) {
+            const lbl = (v) => (Math.abs(v) >= 1 ? v.toFixed(2) : String(Number(v.toPrecision(3))));
+            const line = (price, rgba, dash) => {
+                const y = Math.round(priceToY(price)) + 0.5;
+                ctx.save();
+                ctx.setLineDash(dash);
+                ctx.strokeStyle = rgba;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(x0, y);
+                ctx.lineTo(x1, y);
+                ctx.stroke();
+                ctx.restore();
+            };
+            line(prof.poc, math.rgba('poc', '1'), []);
+            line(prof.vah, math.rgba('vaEdge', '.85'), [4, 3]);
+            line(prof.val, math.rgba('vaEdge', '.85'), [4, 3]);
+            ctx.save();
+            ctx.font = '600 9.5px ui-monospace, monospace';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = math.rgba('poc', '1');
+            ctx.fillText('POC ' + lbl(prof.poc), x1 + 5, Math.round(priceToY(prof.poc)) + 3);
+            ctx.fillStyle = math.rgba('vaEdge', '.9');
+            ctx.fillText('VAH ' + lbl(prof.vah), x1 + 5, Math.round(priceToY(prof.vah)) + 3);
+            ctx.fillText('VAL ' + lbl(prof.val), x1 + 5, Math.round(priceToY(prof.val)) + 3);
+            ctx.restore();
+        }
         ctx.restore();
     }
 
@@ -2240,6 +2589,23 @@
         if (!st) return null;
         st.seq = selSeq;
         return st;
+    }
+
+    /* A3: the CURRENT selection's area profile, computed once per selection and cached — a repaint
+       storm (every hover, every live bar) must not re-sum the window. The cache key is the
+       selection's own serial number plus the VA share: both change exactly when the answer would. */
+    let areaCache = { key: '', prof: null };
+    function areaProfile() {
+        if (!selection || selection.i1 < selection.i0 || !state.data.bars.length) return null;
+        const key = selSeq + '|' + state.params.vaPct;
+        if (areaCache.key === key) return areaCache.prof;
+        const prof = math.areaVolumeProfile({
+            bars: state.data.bars, levels: state.data.levels,
+            i0: selection.i0, i1: selection.i1, p0: selection.p0, p1: selection.p1,
+            pct: state.params.vaPct,
+        });
+        areaCache = { key: key, prof: prof };
+        return prof;
     }
 
 
@@ -2348,6 +2714,7 @@
                 drawAxes(ctx);
                 drawFootprint(ctx);
                 drawFlow(ctx);
+                drawLevelReads(ctx);
             } else if (name === 'live') {
                 resetLayer(ctx, canvas, dpr);
                 drawSweeps(ctx);
@@ -2394,7 +2761,10 @@
             hover(p.x, p.y);
         }
         if (state.invalidateBase) { state.dirty.base = true; state.invalidateBase = false; }
-        if (state.dirty.heat || state.dirty.base || state.dirty.live || state.dirty.ribbon) renderLayers(false);
+        /* T4/A7: frozen under the pointer — keep the loop, skip the paint; the dirty flags hold,
+           so the newest state paints on the tick after the pointer leaves. */
+        if (!(window.OFAPFREEZE && OFAPFREEZE.held('ofx'))
+            && (state.dirty.heat || state.dirty.base || state.dirty.live || state.dirty.ribbon)) renderLayers(false);
     }
 
     function start() {
@@ -2441,6 +2811,55 @@
         return next;
     }
 
+    /* T5/A12: the precision nudge — one pixel, or ten with Shift, in either axis. The keys call
+       it; the arithmetic is the drag's, with the delta spelled out. */
+    function nudge(dxPx, dyPx) {
+        const dx = Number(dxPx) || 0;
+        const dy = Number(dyPx) || 0;
+        if (dx) state.view.offX += dx / state.view.scaleX;
+        if (dy) { state.view.offY += dy / state.view.scaleY; state.autoFit = false; }
+        clampView();
+        markViewDirty();
+        return [state.view.offX, state.view.offY];
+    }
+
+    /* T10/B16: the value-scale menu — state-first (the tick shows which mode is on), and
+       every item calls the same entry point the chips and keys use. Shares the drawing
+       layer's menu classes, so it is already themed. */
+    let scaleMenu = null;
+    function closeScaleMenu() {
+        if (scaleMenu && scaleMenu.parentNode) scaleMenu.parentNode.removeChild(scaleMenu);
+        scaleMenu = null;
+    }
+    function openScaleMenu(clientX, clientY) {
+        closeScaleMenu();
+        const menu = document.createElement('div');
+        menu.className = 'draw-menu';
+        const item = (label, on, run) => {
+            const b = document.createElement('button');
+            b.className = 'draw-menu-item';
+            b.type = 'button';
+            b.textContent = (on ? '✓ ' : ' ') + label;
+            b.addEventListener('click', () => { closeScaleMenu(); run(); });
+            menu.appendChild(b);
+        };
+        item('Auto price scale (fit the data)', !!state.autoFit,
+            () => { state.autoFit = true; fitHeight(true); clampView(); markViewDirty(); });
+        item('Free scale — drag the rail to move prices', !state.autoFit,
+            () => { state.autoFit = false; markViewDirty(); });
+        item('Reset scales — price auto + time to live', false, () => { snapToLive(); });
+        document.body.appendChild(menu);
+        menu.style.left = Math.max(4, Math.min(window.innerWidth - 260, clientX)) + 'px';
+        menu.style.top = Math.max(4, Math.min(window.innerHeight - 120, clientY)) + 'px';
+        scaleMenu = menu;
+        const off = (ev2) => {
+            if (menu.contains(ev2.target)) return;
+            closeScaleMenu();
+            document.removeEventListener('mousedown', off, true);
+        };
+        setTimeout(() => document.addEventListener('mousedown', off, true), 0);
+    }
+
     function markViewDirty() {
         state.dirty.base = state.dirty.live = state.dirty.ribbon = true;
         markHeatFull();                        // P2-2: the pixels are stale until the next pass
@@ -2466,6 +2885,16 @@
             }
         }, { passive: false });
 
+        /* T10/B16: the value scale as an interactive object — right-click the price rail for
+           auto / free / reset; a drag on the rail moves prices, while a drag on the matrix
+           still pans time. */
+        canvas.addEventListener('contextmenu', (ev) => {
+            const rect = canvas.getBoundingClientRect();
+            if ((ev.clientX - rect.left) < state.view.width - RAIL_W) return;   // the rail only
+            ev.preventDefault();
+            openScaleMenu(ev.clientX, ev.clientY);
+        });
+
         let drag = null;
         canvas.addEventListener('mousedown', (ev) => {
             if (ev.shiftKey) {
@@ -2477,7 +2906,9 @@
                 ev.preventDefault();
                 return;
             }
-            drag = { x: ev.clientX, y: ev.clientY, ox: state.view.offX, oy: state.view.offY };
+            const rect0 = canvas.getBoundingClientRect();
+            drag = { x: ev.clientX, y: ev.clientY, ox: state.view.offX, oy: state.view.offY,
+                     axis: (ev.clientX - rect0.left) >= state.view.width - RAIL_W };
         });
         window.addEventListener('mouseup', () => {
             drag = null;
@@ -2500,9 +2931,15 @@
             if (drag) {
                 const dx = (ev.clientX - drag.x) / state.view.scaleX;
                 const dy = (ev.clientY - drag.y) / state.view.scaleY;
-                state.view.offX = drag.ox - dx;
-                state.view.offY = drag.oy + dy;
-                if (dy) state.autoFit = false;
+                if (drag.axis) {
+                    /* T10/B16: dragging the value scale moves prices, not time. */
+                    state.view.offY = drag.oy + dy;
+                    state.autoFit = false;
+                } else {
+                    state.view.offX = drag.ox - dx;
+                    state.view.offY = drag.oy + dy;
+                    if (dy) state.autoFit = false;
+                }
                 clampView();
                 if (state.autoFit) fitHeight();
                 state.dirty.base = state.dirty.live = state.dirty.ribbon = state.dirty.heat = true;
@@ -2629,7 +3066,7 @@
         state.view.offX = lim.minOffX;
         state.autoFit = true;
         clampView();
-        fitHeight();
+        fitHeight(true);
         applyLod();
         applyMode();
         state.autoFit = true;
@@ -2639,7 +3076,7 @@
     function snapToLive() {
         state.autoFit = true;
         state.view.offX = Math.max(0, state.data.bars.length - Math.floor(state.view.width / state.view.scaleX));
-        fitHeight();
+        fitHeight(true);
         clampView();
         applyMode();
         state.dirty.base = state.dirty.live = state.dirty.ribbon = state.dirty.heat = true;
@@ -2668,7 +3105,7 @@
         /* P2-2: setting canvas.width CLEARS the canvas — without this bump the change gate would
            happily skip the repaint and leave a blank heat layer. */
         markHeatFull();
-        fitHeight();
+        fitHeight(true);
         applyLod();
         applyMode();
     }
@@ -2676,10 +3113,10 @@
     const ofx = {
         NS, math, state,
         worldX, xToIndex, priceToY, yToPrice,
-        setData, profileBars, computeSessionAverages,
+        setData, setReads, levelReadSegments, profileBars, computeSessionAverages,
         indexLevels, renderLayers, start, stop, attach, resize,
         hover, applyLod, applyMode, clampView, viewBounds, barsOnScreen, snapToLive, fitSession, fitHeight,
-        zoomTime, zoomPrice, barSeconds, legend,
+        zoomTime, zoomPrice, barSeconds, legend, nudge, fitTolerance,
         stats() {
             const s = state.stats;
             return {
@@ -2699,11 +3136,32 @@
                     bodies: s.barBodies || 0, splits: s.barSplits || 0,
                 },
                 colW: +state.view.scaleX.toFixed(1), levelCount: state.data.levels.size,
+                levelReads: { lines: s.levelReadLines || 0, bands: s.levelReadBands || 0 },
                 avgLevelVolume: +state.avgLevelVolume.toFixed(2), symbol: state.symbol, params: { ...state.params },
             };
         },
         setParams(next) {
-            Object.assign(state.params, next || {});
+            const n = next || {};
+            Object.assign(state.params, n);
+            /* B2: the heat dials are clamped at adoption — the config store clamps the stored
+               value, but the renderer holds the same line for whatever is handed to it directly. */
+            if (n.heatContrast !== undefined) {
+                const g = Number(n.heatContrast);
+                state.params.heatContrast = Number.isFinite(g) ? Math.min(2.5, Math.max(0.5, g)) : 1;
+            }
+            if (n.heatFloor !== undefined) {
+                const f = Number(n.heatFloor);
+                state.params.heatFloor = Number.isFinite(f) ? Math.max(0, f) : 0;
+            }
+            if (n.heatFloorPct !== undefined) {
+                const pct = Number(n.heatFloorPct);
+                state.params.heatFloorPct = Number.isFinite(pct) ? Math.min(50, Math.max(0, pct)) : 0;
+            }
+            if (n.heatSmooth !== undefined) {
+                state.params.heatSmooth = (['auto', 'manual', 'none'].indexOf(String(n.heatSmooth)) >= 0)
+                    ? String(n.heatSmooth) : 'auto';
+            }
+            if (n.degrade !== undefined) state.params.degrade = !!n.degrade;
             applyLod();
             state.dirty.base = state.dirty.live = true;
             markHeatFull();                    // P2-2: lambda changes the curve, ramp the palette
@@ -2726,8 +3184,13 @@
         /* P1-3: the selection's own surface (the arithmetic lives in math.selectionStats). */
         selection: () => (selection ? Object.assign({}, selection) : null),
         selectionStats: selectionStats,
+        areaProfile: areaProfile,
         clearSelection: clearSelection,
         seekToTime: seekToTime,
+        /* T10/B16: the price-scale state, and the degrade/smoothing reads (pins + receipts). */
+        scales: () => ({ autoFit: !!state.autoFit, scaleX: state.view.scaleX, scaleY: state.view.scaleY }),
+        degrade: () => ({ on: state.degradeOn === true, enabled: state.params.degrade !== false,
+            mode: state.params.mode, smoothHeat: !!state.smoothHeatOn }),
     };
 
     if (typeof module !== 'undefined' && module.exports) module.exports = ofx;

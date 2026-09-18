@@ -23,6 +23,10 @@
     'use strict';
 
     const GROUPS = ['A', 'B', 'C', 'D'];
+    /* T11/B17: group colours — the colour NEVER carries meaning alone; every badge also shows
+       the group letter (the CVD rule), and the cycle below is the palette users step through. */
+    const FALLBACK_COLORS = { A: '#6ec1ff', B: '#ffb454', C: '#7fe0a8', D: '#d49bff' };
+    const COLOR_CYCLE = ['#6ec1ff', '#ffb454', '#7fe0a8', '#d49bff', '#ff8fa3', '#c3a6ff'];
     const SYMBOL_CONTROL = { ofx: 'ofxSymbol' };              // panels with their own symbol select
     const GLOBAL_SYMBOL = 'symbolSelect';                     // the app's instrument select
     const TIMEFRAME_CONTROL = { chart: 'tfSelect' };          // the only panel with a timeframe control
@@ -32,6 +36,48 @@
     const state = { groups: {}, applying: false, applied: 0, sweeps: 0, refused: [], last: '' };
 
     function shellApi() { return (typeof window !== 'undefined' && window.OFAPSHELL) || null; }
+    function configColors() {
+        const cfg = (typeof S !== 'undefined' && S && S.config && S.config.ui && S.config.ui.link_colors) || null;
+        return (cfg && typeof cfg === 'object') ? cfg : null;
+    }
+    /* The colour of a group: the config’s own value, else the shipped fallback, else nothing. */
+    function colorOf(group) {
+        const g = String(group || '').toUpperCase();
+        const fromCfg = configColors();
+        return (fromCfg && fromCfg[g]) || FALLBACK_COLORS[g] || '';
+    }
+    /* Pure: the next colour in the cycle (wrapping), for the swatch buttons. */
+    function nextColor(current) {
+        const at = COLOR_CYCLE.indexOf(String(current || '').toLowerCase());
+        return COLOR_CYCLE[(at + 1) % COLOR_CYCLE.length];
+    }
+    function repaintChips() {
+        const api = shellApi();
+        if (api && typeof api.paintLinkChip === 'function') {
+            members().forEach(function (row) { api.paintLinkChip(row.view); });
+        }
+    }
+    /* Write a group’s colour: the in-page config copy first (so this session agrees), then the
+       event — the SHELL owns the store patch, so this module never reaches the network (the same
+       rule the membership follows). Every member’s chip repaints and other surfaces follow suit. */
+    function setColor(group, hex) {
+        const g = String(group || '').toUpperCase();
+        if (GROUPS.indexOf(g) < 0) return null;
+        const clean = /^#[0-9a-fA-F]{6}$/.test(String(hex || '')) ? String(hex) : FALLBACK_COLORS[g];
+        const cfg = (typeof S !== 'undefined' && S && S.config) || null;
+        if (cfg) {
+            cfg.ui = cfg.ui || {};
+            const merged = Object.assign({}, FALLBACK_COLORS, cfg.ui.link_colors || {});
+            merged[g] = clean;
+            cfg.ui.link_colors = merged;
+        }
+        repaintChips();
+        if (hasDom) document.dispatchEvent(new CustomEvent('ofap:link-colors', { detail: { group: g, color: clean } }));
+        return clean;
+    }
+    function cycleColor(group) {
+        return setColor(group, nextColor(colorOf(group)));
+    }
     function el(id) { return hasDom ? document.getElementById(id) : null; }
     function kindControl(kind, view) {
         return kind === 'sym' ? (SYMBOL_CONTROL[view] || GLOBAL_SYMBOL) : (TIMEFRAME_CONTROL[view] || '');
@@ -235,6 +281,12 @@
 
     window.OFAPLINKS = {
         GROUPS: GROUPS,
+        FALLBACK_COLORS: FALLBACK_COLORS,
+        COLOR_CYCLE: COLOR_CYCLE,
+        colorOf: colorOf,
+        nextColor: nextColor,
+        setColor: setColor,
+        cycleColor: cycleColor,
         SYMBOL_CONTROL: SYMBOL_CONTROL,
         GLOBAL_SYMBOL: GLOBAL_SYMBOL,
         TIMEFRAME_CONTROL: TIMEFRAME_CONTROL,

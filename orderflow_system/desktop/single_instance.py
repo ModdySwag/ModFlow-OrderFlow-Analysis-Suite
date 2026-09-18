@@ -128,14 +128,34 @@ def _focus_existing(title_prefix: str = _APP_TITLE) -> bool:
         return False
 
 
+#: How long the already-running notice stays on screen before it closes itself. The old plain
+#: MessageBoxW was modal with no deadline: a launch that could not find the owner's window (a
+#: second click during the app's slow start-up) left an invisible modal process sitting for as
+#: long as nobody clicked OK — measured live as a 7 MB windowless process, no ports, no log
+#: line, alive for 15+ minutes and mistaken for a duplicate instance.
+NOTICE_MS = 10_000
+
+
 def _notify_existing() -> None:
-    """Say the app is already running — focus it when possible, tell the user when not."""
+    """Say the app is already running — focus it when possible, tell the user when not.
+
+    The notice bounds itself with ``MessageBoxTimeoutW`` (user32's own timeout variant); the
+    plain modal call remains the fallback where that export is missing.
+    """
     if _focus_existing():
         return
     try:
+        user32 = _u32()
         MB_OK, MB_ICONINFORMATION, MB_SETFOREGROUND, MB_TOPMOST = 0x0, 0x40, 0x10000, 0x40000
-        _u32().MessageBoxW(None, f"{_APP_TITLE} is already running.", _APP_TITLE,
-                           MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST)
+        style = MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST
+        timeout_fn = getattr(user32, "MessageBoxTimeoutW", None)
+        if timeout_fn is not None:
+            timeout_fn.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p,
+                                   ctypes.c_uint, ctypes.c_ushort, ctypes.c_uint]
+            timeout_fn.restype = ctypes.c_int
+            timeout_fn(None, f"{_APP_TITLE} is already running.", _APP_TITLE, style, 0, NOTICE_MS)
+        else:                                          # pragma: no cover — user32 always has it here
+            user32.MessageBoxW(None, f"{_APP_TITLE} is already running.", _APP_TITLE, style)
     except Exception:
         logger.warning("could not show the already-running notice", exc_info=True)
 

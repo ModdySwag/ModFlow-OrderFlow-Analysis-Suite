@@ -166,6 +166,21 @@ def test_the_help_module_defers_to_the_apps_fetch_wrapper():
     assert not re.search(r"function\s+api\s*\(", text), "help.js must not declare its own api()"
 
 
+def test_clearing_the_search_never_leaves_stale_results_clickable():
+    """Live bug (help.js:476): clearing the query nulled `state.results`, but the pane re-rendered
+    only when a topic was open — so the previous results stayed on screen, and a click on one read
+    `state.results.results` off null and crashed the pane. The empty path now always replaces the
+    pane, and the click handler refuses to read a missing result set."""
+    text = _text(HELP_JS)
+    empty = text.split("if (!state.query.trim()) {", 1)[1].split("return;", 1)[0]
+    assert "renderTopic(topicById(state.open) || topicById('start.help'))" in empty, \
+        "the empty-query path must replace the pane instead of leaving stale result buttons"
+    assert "if (state.open)" not in empty, "whether a topic is open must not gate the re-render"
+    handler = text.split("doc.querySelectorAll('[data-result]')", 1)[1][:300]
+    assert "if (!state.results) return;" in handler, \
+        "the result click handler must not read `results` off a null result set"
+
+
 # ── 3. the corpus ────────────────────────────────────────────────────────────────────────────────
 
 
@@ -453,3 +468,24 @@ def test_the_prefs_endpoint_persists_and_bounds(store):
     # …and the file on disk carries it, which is what restart-survival means.
     on_disk = json.loads(store.config_path().read_text(encoding="utf-8"))
     assert on_disk["help"]["mode"] == "simple"
+
+def test_every_panel_carries_its_own_help_entry():
+    """T1: heads are injected at runtime — pin the wiring and that F1 answers for the panel in focus."""
+    text = _text(HELP_JS)
+    assert "injectPanelHelp" in text, "the per-panel help injection is gone"
+    assert "data-helptopic" in text and "panel-help" in text, "the help entry/links are not wired"
+    assert "focusedTopic()" in text, "F1 no longer resolves the panel in focus"
+
+
+def test_every_inline_help_link_names_a_real_topic(corpus):
+    """A data-helptopic that points nowhere is a dead click; the corpus is the authority."""
+    ids = {x["id"] for x in corpus["topics"]}
+    seen = 0
+    for path in (INDEX, UI / "paper.js", UI / "calendar.js"):
+        text = _text(path)
+        found = re.findall(r'data-helptopic="([a-z0-9_.]+)"', text)
+        found += re.findall(r"topicLink\('([a-z0-9_.]+)'", text)
+        for topic in found:
+            seen += 1
+            assert topic in ids, f"{path.name} links help topic {topic!r}, which does not exist"
+    assert seen >= 2, "no inline help links found at all"

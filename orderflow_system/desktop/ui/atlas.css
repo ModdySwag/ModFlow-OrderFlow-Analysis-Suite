@@ -9,6 +9,21 @@
    densities. Nothing outside this block declares a colour.
    ══════════════════════════════════════════════════════════════════ */
 
+/* T11/B15: readability tiers — one attribute on <html>, layered over whatever theme is active.
+   Calm quiets the chrome; Aggressive hardens borders and lifts secondary text. Standard adds no
+   overrides at all (the shipped look is the fixed point, like every other display default). */
+html[data-contrast="calm"] {
+    --of-line-strong-rgb: 41,56,82;      --of-steel-rgb: 108,134,170;
+    --of-ink-dim-rgb: 140,154,176;       --of-ink-faint-rgb: 94,107,127;
+    --of-ink-head-rgb: 148,168,196;
+}
+html[data-contrast="aggressive"] {
+    --of-line-rgb: 44,61,90;             --of-line-strong-rgb: 60,80,114;
+    --of-steel-rgb: 138,168,206;         --of-steel-hi-rgb: 168,196,232;
+    --of-ink-dim-rgb: 176,190,212;       --of-ink-muted-rgb: 134,152,178;
+    --of-ink-faint-rgb: 124,140,164;     --of-ink-head-rgb: 176,196,222;
+}
+
 :root {
     /* surfaces */
     --of-bg-rgb:          10,14,22;      --of-bg:          rgb(var(--of-bg-rgb));
@@ -176,6 +191,7 @@ td.down, b.down, span.down { color: var(--red); }
 /* ── order-flow engine ─────────────────────────────────────────────────── */
 .ofx-bar { gap: 10px; align-items: center; flex-wrap: wrap; }
 .ofx-bar input { background: rgba(var(--of-input-2-rgb),.9); color: var(--of-ink-2); border: 1px solid rgba(var(--of-steel-rgb),.35); border-radius: 4px; padding: 3px 6px; }
+.ofx-bar select.ofx-sym-pick { background: rgba(var(--of-input-2-rgb),.9); color: var(--of-ink-2); border: 1px solid rgba(var(--of-steel-rgb),.35); border-radius: 4px; padding: 3px 6px; max-width: 230px; }
 .ofx-stage { position: relative; height: clamp(320px, 58vh, 900px); margin: 8px 0; border: 1px solid rgba(var(--of-steel-rgb),.25); border-radius: 6px; overflow: hidden; background: var(--of-bg-deep); }
 .ofx-layer { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #ofxHeat { z-index: 1; } #ofxBase { z-index: 2; cursor: crosshair; } #ofxLive { z-index: 3; pointer-events: none; }
@@ -207,6 +223,46 @@ html.ui-compact .ofx-readout { flex-basis: 206px; width: 206px; font-size: 9.5px
 .ofx-ribbon { width: 100%; height: 84px; display: block; background: var(--of-bg-deep); border: 1px solid rgba(var(--of-steel-rgb),.25); border-radius: 6px; }
 .ofx-tip { position: absolute; z-index: 4; display: none; pointer-events: none; background: rgba(var(--of-deep-rgb),.94); border: 1px solid rgba(var(--of-steel-rgb),.45); border-radius: 6px; padding: 6px 8px; font: 500 11px ui-monospace, monospace; color: var(--of-ink-2); max-width: 240px; }
 .ofx-chip-on { background: rgba(var(--of-gold-rgb),.22); border-color: rgba(var(--of-gold-rgb),.6); color: var(--of-gold); }
+
+/* ── §82: the instrument look-up (symbol chip, panel, actions) ───────────────────────── */
+.ofx-sym-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 9px;
+  border-radius: 10px; border: 1px solid rgba(var(--of-steel-rgb),.35); color: var(--of-ink-dim);
+  white-space: nowrap; cursor: pointer; }
+.ofx-sym-chip:empty { display: none; }
+.ofx-sym-chip.ok   { color: var(--of-ok);   border-color: rgba(var(--of-ok-rgb),.45);   background: rgba(var(--of-ok-rgb),.08); }
+.ofx-sym-chip.warn { color: var(--of-warn); border-color: rgba(var(--of-warn-rgb),.45); background: rgba(var(--of-warn-rgb),.08); }
+.ofx-sym-chip.bad  { color: var(--of-err);  border-color: rgba(var(--of-err-rgb),.45);  background: rgba(var(--of-err-rgb),.08); }
+.ofx-sym-chip.dim  { color: var(--of-ink-muted); }
+.ofx-sym-panel { margin: 6px 0 8px; border: 1px solid rgba(var(--of-steel-rgb),.28); border-radius: 8px;
+  background: rgba(var(--of-surface-rgb),.72); padding: 8px 10px; }
+.ofx-sym-head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--of-ink-hi); }
+.ofx-sym-x { background: none; border: 0; color: var(--of-ink-muted); font-size: 15px; cursor: pointer; padding: 0 4px; }
+.ofx-sym-x:hover { color: var(--of-ink-bright); }
+.ofx-sym-reason { margin: 6px 0; font-size: 12.5px; color: var(--of-ink-soft); }
+.ofx-sym-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.ofx-sym-rows { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.ofx-sym-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 7px;
+  border-radius: 4px; border: 1px solid rgba(var(--of-steel-rgb),.18); cursor: pointer; }
+.ofx-sym-row:hover { background: rgba(var(--of-accent-rgb),.10); border-color: rgba(var(--of-accent-rgb),.35); }
+.ofx-sym-row .sym { color: var(--of-ink-bright); }
+.ofx-sym-row .meta { color: var(--of-ink-muted); }
+.ofx-sym-row .go { margin-left: auto; color: var(--of-accent); white-space: nowrap; }
+.ofx-sym-msg { font-size: 12px; margin-top: 6px; }
+.ofx-sym-msg.ok { color: var(--of-ok); }
+
+/* ── §83: the explain popover (hint.js) and the notice it can paint ─────────────────── */
+.ofap-hint { position: fixed; z-index: 900; }
+.ofap-hint-card { width: min(360px, calc(100vw - 24px)); background: rgba(var(--of-surface-rgb),.97);
+  border: 1px solid rgba(var(--of-steel-rgb),.45); border-radius: 8px; padding: 10px 12px;
+  box-shadow: 0 10px 28px rgba(0,0,0,.45); font-size: 12.5px; color: var(--of-ink-soft); }
+.ofap-hint-title { font-size: 13px; font-weight: 600; color: var(--of-ink-bright); margin-bottom: 4px; }
+.ofap-hint-body { line-height: 1.45; }
+.ofap-hint-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ofap-hint-btn { font-size: 12px; padding: 3px 9px; border-radius: 5px; cursor: pointer;
+  background: rgba(var(--of-accent-rgb),.14); border: 1px solid rgba(var(--of-accent-rgb),.45); color: var(--of-ink-bright); }
+.ofap-hint-btn:hover { background: rgba(var(--of-accent-rgb),.24); }
+.ofap-hint-notice { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ofx-sym-msg.bad { color: var(--of-err); }
 
 
 .ofx-snap-float { position: absolute; right: 14px; bottom: 14px; z-index: 5; display: none;
@@ -632,6 +688,15 @@ body.wf-gesture .wf-body { pointer-events: none; }
     color: var(--of-warn); }
 .ofx-sel-note:empty { display: none; }
 
+/* Phase 3 (A3): the area profile's block on the selection strip — a histogram drawn (by
+   ofx-view.js) from the same rows the numbers come from, plus the watch hand-off's button.
+   Colours are the engine's own table's, painted in JS; this block is only the box. */
+.ofx-sel-prof { margin-top: 7px; border-top: 1px solid rgba(var(--of-line-rgb),.5); padding-top: 6px; }
+.ofx-sel-head2 { display: flex; align-items: center; gap: 7px; font: 600 10.5px var(--of-font-mono), monospace;
+    text-transform: uppercase; letter-spacing: .04em; color: var(--of-ink-2); }
+.ofx-sel-head2 .btn { pointer-events: auto; }
+.ofx-sel-hist { display: block; width: 100%; height: 118px; margin-top: 6px; }
+
 /* ── the alert rule editor (P1-7) ─────────────────────────────────────────
    A rule's editor IS its row: named fields built from OFAPALERTS.paramSpec(kind) laid out in a grid,
    with the sentence those fields will save printed underneath — the form and the words side by side.
@@ -643,3 +708,42 @@ body.wf-gesture .wf-body { pointer-events: none; }
 .al-edit input[type="number"], .al-edit input[type="text"], .al-edit select { width: 100%; }
 .al-edit-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .al-edit-actions .dim { flex: 1 1 360px; min-width: 0; font: 400 11px var(--of-font-mono), monospace; }
+
+/* §86 — the Systems board (Overview card): one tile per ingest path / capability */
+.sy-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+.sy-tile { border: 1px solid rgba(var(--of-steel-rgb), .28); border-radius: 6px; padding: 8px 10px; background: rgba(var(--of-input-2-rgb), .35); }
+.sy-tile[data-view]:not([data-view=""]) { cursor: pointer; }
+.sy-tile:hover { border-color: rgba(var(--of-steel-rgb), .6); }
+.sy-tile.opt { opacity: .62; }
+.sy-tile .sy-line { display: flex; align-items: center; gap: 8px; }
+.sy-tile .sy-name { font-weight: 600; }
+.sy-tile .sy-detail { margin-top: 4px; font-size: 12px; opacity: .78; }
+.sy-note { margin-top: 6px; }
+
+/* Market watch (§87 live): the board's own pulse — a price cell tints green/red with its last
+   move and flashes on every change; the badge shows data age, or the frozen state. */
+#mwTable td.tick-up   { color: var(--of-ok); }
+#mwTable td.tick-down { color: var(--of-err); }
+#mwTable td.tick-up   { animation: mw-tick-up 700ms ease-out; }
+#mwTable td.tick-down { animation: mw-tick-down 700ms ease-out; }
+@keyframes mw-tick-up   { from { background: rgba(var(--of-ok-rgb), .22); }  to { background: transparent; } }
+@keyframes mw-tick-down { from { background: rgba(var(--of-err-rgb), .22); } to { background: transparent; } }
+#mwLive.mw-paused { color: var(--of-err); }
+
+/* Per-surface pause (intent.js user holds): a view-head button that parks one panel's updates
+   while the feed keeps running. The face is painted by intent's paint() from the effective state. */
+.surf-pause { margin-left: 10px; }
+.surf-pause.held { color: var(--of-err); border-color: rgba(var(--of-err-rgb), .45); }
+#mwLive.mw-paused { color: var(--of-err); }
+
+/* §90 — the live-tick layer shared by every numeric readout (ui/ticks.js): a value that moves
+   tints and flashes, cards that arrive announce themselves once. Market Watch's own rules above
+   stay exactly as they are; these generalise the same look to the KPIs, depth strip and tables. */
+.tick-up   { color: var(--of-ok);  animation: mw-tick-up 700ms ease-out; }
+.tick-down { color: var(--of-err); animation: mw-tick-down 700ms ease-out; }
+@keyframes tick-in { from { opacity: .25; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.tick-in, .sy-flash { animation: tick-in 700ms ease-out; }
+
+/* §92: the shortcut line inside a hover card (keys.js annotates the target, hint.js shows it). */
+.hint-shortcut { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(var(--of-steel-rgb),.25);
+  color: var(--of-ink-dim2); font: 500 11px ui-monospace, monospace; }

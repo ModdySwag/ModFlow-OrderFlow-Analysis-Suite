@@ -197,9 +197,12 @@ def test_the_cache_is_pruned_by_age(tmp_path):
     import os
     os.utime(old, (long_ago, long_ago))
     os.utime(stale, (long_ago, long_ago))
+    part = bf.cache_path("BTCUSDT", DAY, tmp_path).with_suffix(".zip.part")
+    part.write_bytes(b"half a download")
+    os.utime(part, (long_ago, long_ago))
     removed = bf.prune_cache(tmp_path, keep_days=4)
-    assert removed == 2
-    assert fresh.is_file() and not old.is_file() and not stale.is_file()
+    assert removed == 3, "half-downloads are swept too — nothing else ever cleans them"
+    assert fresh.is_file() and not old.is_file() and not stale.is_file() and not part.is_file()
 
 
 # ── the streaming and the pass ──────────────────────────────────────────────

@@ -141,7 +141,9 @@
     /* ── the command index: the program itself, searchable ─────────────────────────────────── */
 
     function railCommands() {
-        return Array.prototype.slice.call(document.querySelectorAll('.rail .nav-item')).map((btn) => {
+        /* T4/A-corr: VIEW items only — without the filter the Setup button became a bogus
+           "view:" command in the palette. */
+        return Array.prototype.slice.call(document.querySelectorAll('.rail .nav-item[data-view]')).map((btn) => {
             const view = btn.dataset.view || '';
             const label = (btn.textContent || '').trim().replace(/\s+/g, ' ')
                 .replace(/\s*\d+$/, '').replace(/^[^\w]+/, '');
@@ -437,7 +439,10 @@
         state.query = String(query || '');
         if (!state.query.trim()) {
             state.results = null;
-            if (state.open) renderTopic(topicById(state.open) || topicById('start.help'));
+            /* Always replace the pane. This used to re-render only when a topic was open, so
+               clearing the box while looking at results left those buttons on screen with
+               `state.results` already null — a click on one crashed the pane (live: help.js:476). */
+            renderTopic(topicById(state.open) || topicById('start.help'));
             return;
         }
         const res = SEARCH ? SEARCH.search(state.query, buildSearchIndex(), { limit: 40 }) : { results: [], total: 0, corrected: '' };
@@ -471,6 +476,8 @@
                 + '“depth”, “replay”, “telegram”).</div>');
         doc.querySelectorAll('[data-result]').forEach((btn) => {
             btn.onclick = () => {
+                /* Belt to the empty-query path's braces: never read a missing result set. */
+                if (!state.results) return;
                 const row = state.results.results[Number(btn.dataset.result)];
                 if (row) openTopic(row.id, false);
             };
@@ -1171,7 +1178,11 @@
            to protect characters) must not swallow it — a user in the middle of a search box presses
            F1 precisely when they want the help on top of what they are doing. */
         OFAPKEYS.bind({ id: 'help-centre', keys: ['f1'], scope: 'Global', inField: true,
-            label: 'open the Help Centre', run: () => openHelp('') });
+            label: 'help for the panel you are in', run: () => {
+                const topic = focusedTopic();
+                if (topic) openTopic(topic, false);
+                else openHelp('');
+            } });
         OFAPKEYS.bind({ id: 'help-search', keys: ['ctrl+shift+h'], scope: 'Global', inField: true,
             label: 'search the help', run: () => openHelp('') });
     }
@@ -1201,6 +1212,7 @@
         renderTopic(topicById('start.help'));
         buildLauncher();
         wireKeys();
+        wireHelpLinks();
         activateIfDeepLinked();
         state.ready = true;
         /* One read of the live facts; the panel works without it (the corpus is local) and says so. */
@@ -1220,11 +1232,84 @@
         });
     }
 
+    /* ── contextual help wiring (T1) ─────────────────────────────────────────────────────────
+       Help where the user is stuck: every panel head gains its own "?", any element carrying
+       data-helptopic opens that topic, and F1 answers for the panel in focus rather than the
+       Help Centre's front page. Every id here resolves against the same corpus the coverage
+       test holds index.html against. */
+
+    /* The topic of the panel in focus: the widget the shell is working in (Terminal mode), else
+       the visible view section. `''` when the app cannot say — the Help Centre front page answers. */
+    function focusedTopic() {
+        let view = '';
+        const shell = window.OFAPSHELL;
+        if (shell && typeof shell.state === 'function') {
+            const st = shell.state() || {};
+            if (st.mode === 'terminal' && st.focus) view = String(st.focus);
+        }
+        if (!view) {
+            const section = document.querySelector('.view.active[data-view]');
+            if (section) view = section.getAttribute('data-view') || '';
+        }
+        const map = (DATA && DATA.views) || {};
+        return map[view] || '';
+    }
+
+    /* One "?" per panel head, pointing at that view's own topic. Idempotent: a re-run (an injected
+       view arriving, a re-parented widget) never doubles the button. */
+    function injectPanelHelp(root) {
+        const map = (DATA && DATA.views) || {};
+        const sections = (root || document).querySelectorAll('.view[data-view]');
+        for (let i = 0; i < sections.length; i += 1) {
+            const section = sections[i];
+            const topic = map[section.getAttribute('data-view') || ''];
+            if (!topic) continue;
+            const head = section.querySelector('.view-head');
+            if (!head || head.querySelector('.panel-help')) continue;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn small panel-help';
+            btn.setAttribute('data-helptopic', topic);
+            btn.setAttribute('title', 'Help for this panel (F1)');
+            btn.setAttribute('aria-label', 'Help for this panel');
+            btn.textContent = '?';
+            head.appendChild(btn);
+        }
+    }
+
+    /* The inline link helper, for modules that render their own blank states. */
+    function topicLink(id, text) {
+        return '<a href="#" class="help-link" data-helptopic="' + esc(id) + '">'
+            + esc(text || 'help') + '</a>';
+    }
+
+    /* One delegated listener: any [data-helptopic] click opens its topic in the Help Centre. */
+    function wireHelpLinks() {
+        document.addEventListener('click', (ev) => {
+            const node = ev.target && ev.target.closest ? ev.target.closest('[data-helptopic]') : null;
+            if (!node) return;
+            ev.preventDefault();
+            openTopic(String(node.getAttribute('data-helptopic')), false);
+        });
+        injectPanelHelp();
+        /* Views injected at runtime (Scanner, this module's own entry) arrive after boot; a
+           debounced sweep adopts them without paying for the observer on every live repaint. */
+        if (window.MutationObserver) {
+            let pending = 0;
+            new MutationObserver(() => {
+                window.clearTimeout(pending);
+                pending = window.setTimeout(injectPanelHelp, 250);
+            }).observe(document.body, { childList: true, subtree: true });
+        }
+    }
+
     window.OFAPHELP = {
         open: openHelp,
         openTopic: openTopic,
         openAbout: openAbout,
         openCheck: () => { void refreshCheck(true).then(() => openTopic('support.syscheck', false)); },
+        focusedTopic: focusedTopic,
+        topicLink: topicLink,
         setMode: setMode,
         setDock: setDock,
         cycleDock: cycleDock,

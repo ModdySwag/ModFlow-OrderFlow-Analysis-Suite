@@ -17,23 +17,39 @@
     const ACCENTS = ['cobalt', 'teal', 'green', 'lime', 'amber', 'orange', 'magenta', 'violet'];
     const DENSITIES = ['comfortable', 'compact', 'dense'];
 
-    const state = { theme: 'dark', accent: 'cobalt', density: 'comfortable', source: 'default' };
+    /* T11/B15: readability tiers layered on whichever theme is active; T11/B14: the interface
+       scale. Both ride the same attribute/record mechanism as theme/accent/density — the config
+       is the record, the localStorage mirror only kills the first-paint flash. */
+    const CONTRASTS = ['calm', 'standard', 'aggressive'];
+    const SCALE_MIN = 0.75, SCALE_MAX = 1.5, SCALE_STEP = 0.05;
+
+    const state = { theme: 'dark', accent: 'cobalt', density: 'comfortable',
+        contrast: 'standard', scale: 1, source: 'default' };
 
     function pick(list, value, fallback) {
         return (typeof value === 'string' && list.indexOf(value) >= 0) ? value : fallback;
     }
     /* A partial change merges over the current appearance, and every field is clamped to the list that
        themes/density declare — a typo in the config paints the default rather than a broken shell. */
+    /* T11/B14: the scale clamps to the shipped bounds and quantises to its own step. */
+    function clampScale(value) {
+        const n = Number(value);
+        if (!isFinite(n)) return state.scale;
+        return Math.round(Math.min(SCALE_MAX, Math.max(SCALE_MIN, n)) / SCALE_STEP) * SCALE_STEP;
+    }
     function normalize(next) {
         const src = next || {};
         return {
             theme: pick(THEMES, src.theme, state.theme),
             accent: pick(ACCENTS, src.accent, state.accent),
             density: pick(DENSITIES, src.density, state.density),
+            contrast: pick(CONTRASTS, src.contrast, state.contrast),
+            scale: clampScale(src.scale === undefined ? state.scale : src.scale),
         };
     }
     function snapshot() {
-        return { theme: state.theme, accent: state.accent, density: state.density, source: state.source };
+        return { theme: state.theme, accent: state.accent, density: state.density,
+            contrast: state.contrast, scale: state.scale, source: state.source };
     }
     function readMirror() {
         try {
@@ -50,16 +66,26 @@
         root.dataset.theme = state.theme;
         root.dataset.accent = state.accent;
         root.dataset.density = state.density;
+        root.dataset.contrast = state.contrast;
+        /* T11/B14: one zoom on the root element scales the whole interface (chrome AND canvas
+           text; the canvases re-fit on the ResizeObserver pass that follows). */
+        root.style.setProperty('--ui-scale', String(state.scale));
+        if (state.scale === 1) root.style.removeProperty('zoom');
+        else root.style.zoom = String(state.scale);
         return true;
     }
     function same(a, b) {
-        return a.theme === b.theme && a.accent === b.accent && a.density === b.density;
+        return a.theme === b.theme && a.accent === b.accent && a.density === b.density
+            && a.contrast === b.contrast && a.scale === b.scale;
     }
     function syncControls() {
-        [['setTheme', 'theme'], ['setAccent', 'accent'], ['setDensity', 'density']].forEach(([id, field]) => {
+        [['setTheme', 'theme'], ['setAccent', 'accent'], ['setDensity', 'density'],
+            ['setContrast', 'contrast']].forEach(([id, field]) => {
             const el = document.getElementById(id);
             if (el && el.value !== state[field]) el.value = state[field];
         });
+        const sc = document.getElementById('setScale');
+        if (sc && sc.value !== String(state.scale)) sc.value = String(state.scale);
     }
     function announce() {
         try {
@@ -70,13 +96,24 @@
     function apply(next, opts) {
         const clean = normalize(next);
         const changed = !same(clean, state);
+        const scaleMoved = clean.scale !== state.scale;
         state.theme = clean.theme;
         state.accent = clean.accent;
         state.density = clean.density;
+        state.contrast = clean.contrast;
+        state.scale = clean.scale;
         state.source = (opts && opts.source) || state.source;
         paint();
         if (!(opts && opts.noMirror)) writeMirror();
         syncControls();
+        if (scaleMoved && window.OFAPScale && typeof OFAPScale.fit === 'function') {
+            /* The zoom reflows synchronously (the style write is flushed on the next measure), so
+               the canvases re-fit NOW; the rAF pass catches anything still settling. (Measured in
+               the sandbox: a headless tab throttles rAF, so the deferred-only fit left stale
+               backings — the synchronous pass is the one that must not be skipped.) */
+            try { OFAPScale.fit('ui-scale'); } catch (err) { /* the layer's own path reports faults */ }
+            requestAnimationFrame(() => { try { OFAPScale.fit('ui-scale'); } catch (err) { /* settled */ } });
+        }
         if (changed) announce();
         return snapshot();
     }
@@ -88,7 +125,8 @@
             if (typeof window.api !== 'function') return Promise.resolve(null);
             return window.api('/api/control/config', {
                 method: 'POST',
-                body: { ui: { theme: state.theme, accent: state.accent, density: state.density } },
+                body: { ui: { theme: state.theme, accent: state.accent, density: state.density,
+                    contrast: state.contrast, scale: state.scale } },
             }).catch(() => null);
         };
         const run = (window.OFAPINTENT && typeof OFAPINTENT.queueWrite === 'function')
@@ -98,7 +136,8 @@
     }
 
     function wire() {
-        [['setTheme', 'theme'], ['setAccent', 'accent'], ['setDensity', 'density']].forEach(([id, field]) => {
+        [['setTheme', 'theme'], ['setAccent', 'accent'], ['setDensity', 'density'],
+            ['setContrast', 'contrast']].forEach(([id, field]) => {
             const el = document.getElementById(id);
             if (!el || !el.addEventListener || el.dataset.ofapWired) return;
             el.dataset.ofapWired = '1';
@@ -107,7 +146,33 @@
                 void save();
             });
         });
+        const sc = document.getElementById('setScale');
+        if (sc && sc.addEventListener && !sc.dataset.ofapWired) {
+            sc.dataset.ofapWired = '1';
+            sc.addEventListener('change', () => {
+                apply({ scale: sc.value }, { source: 'user' });
+                void save();
+            });
+        }
         syncControls();
+        return true;
+    }
+
+    /* T11/B14: the keyboard — Ctrl+= / Ctrl+- step the scale, Ctrl+0 resets it. Registered once,
+       after the DOM is up, so the Keys sheet and the actions come from the same map. */
+    function bindScaleKeys() {
+        if (!window.OFAPKEYS || typeof OFAPKEYS.bind !== 'function') return false;
+        const stepBy = (dir) => () => {
+            apply({ scale: state.scale + dir * SCALE_STEP }, { source: 'user' });
+            void save();
+        };
+        OFAPKEYS.bind({ id: 'ui-scale-in', keys: ['ctrl+=', 'ctrl++'], scope: 'Interface',
+            label: 'larger interface', run: stepBy(1) });
+        OFAPKEYS.bind({ id: 'ui-scale-out', keys: ['ctrl+-', 'ctrl+_'], scope: 'Interface',
+            label: 'smaller interface', run: stepBy(-1) });
+        OFAPKEYS.bind({ id: 'ui-scale-reset', keys: ['ctrl+0'], scope: 'Interface',
+            label: 'reset the interface scale',
+            run: () => { apply({ scale: 1 }, { source: 'user' }); void save(); } });
         return true;
     }
 
@@ -119,10 +184,12 @@
             if (typeof window.api === 'function') {
                 const res = await window.api('/api/control/bootstrap');
                 const ui = (res && res.config && res.config.ui) || null;
-                if (ui) configured = { theme: ui.theme, accent: ui.accent, density: ui.density };
+                if (ui) configured = { theme: ui.theme, accent: ui.accent, density: ui.density,
+                    contrast: ui.contrast, scale: ui.scale };
             }
         } catch (err) { /* the mirror stands; appearance is not worth a banner */ }
-        if (configured && (configured.theme || configured.accent || configured.density)) {
+        if (configured && (configured.theme || configured.accent || configured.density
+            || configured.contrast || typeof configured.scale === 'number')) {
             const fromConfig = normalize(configured);
             if (!same(fromConfig, state)) apply(fromConfig, { source: 'config' });
             else { state.source = 'config'; paint(); }
@@ -140,14 +207,15 @@
         if (mirrored) apply(mirrored, { source: 'mirror', noMirror: true });
         else paint();
         if (typeof document === 'undefined' || !document) return;
-        const ready = () => { wire(); void load(); };
+        const ready = () => { wire(); bindScaleKeys(); void load(); };
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready);
         else ready();
     })();
 
     window.OFAPTHEME = {
-        KEY, THEMES, ACCENTS, DENSITIES,
-        state: snapshot, apply, load, wire, normalize, paint, save,
+        KEY, THEMES, ACCENTS, DENSITIES, CONTRASTS, SCALE_MIN, SCALE_MAX, SCALE_STEP,
+        state: snapshot, apply, load, wire, normalize, paint, save, clampScale,
         set(theme) { return apply({ theme: theme }, { source: 'user' }); },
+        setScale(value) { return apply({ scale: value }, { source: 'user' }); },
     };
 })();

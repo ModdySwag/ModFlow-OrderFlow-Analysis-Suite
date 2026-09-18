@@ -54,6 +54,9 @@ function ageTint01(heldMs, floorMs) {
     return 0.10 + 0.12 * t;
 }
 
+/* T10/B3: the heatmap's own hysteresis state for 'auto' smoothing (flips only across the band). */
+let hmSmoothOn = false;
+
 function ageTintOn() {
     const box = document.getElementById('hmAgeTint');
     return !!(box && box.checked);
@@ -61,6 +64,8 @@ function ageTintOn() {
 
 function drawHeatmap(data) {
     const el = document.getElementById('heatmapCanvas');
+    /* T4/A7: frozen under the pointer — the payload is kept, the paint is not. */
+    if (window.OFAPFREEZE && OFAPFREEZE.holds(el)) return;
     const c = prepCanvas(el, 520);
     if (!c) return;
     const ctx = c.ctx, w = c.w, h = c.h;
@@ -88,15 +93,62 @@ function drawHeatmap(data) {
     const ref = (data.scale_max > 0) ? data.scale_max
         : (flat.length ? flat[Math.floor(flat.length * 0.99)] : 1);
 
+    /* B2: the view's own dials, read at paint time so a change is one repaint away (pure canvas). */
+    const RP = window.OFAPRAMP;
+    const hmDials = ((S.config && S.config.atlas && S.config.atlas.heatmap) || {});
+    const heatGamma = RP ? RP.clampContrast(hmDials.contrast) : 1;
+    const heatFloor = RP ? RP.floorValue(flat, hmDials.floor, hmDials.floor_pct) : 0;
+    /* T10/B3: vertical smoothing — the same shared verdict the Engine's heat uses: 'auto'
+       engages when the map's rows compress below ~2.5 px, hysteresis holds until 4 px. The
+       smoothed columns are computed once per paint so both loops below read one array. */
+    const smoothMode = RP ? RP.smoothMode(hmDials.smooth) : 'none';
+    let smoothCols = null;
+    if (RP && smoothMode !== 'none') {
+        if (smoothMode === 'auto') hmSmoothOn = RP.smoothDecision(chh, hmSmoothOn);
+        if (smoothMode === 'manual' || hmSmoothOn) {
+            smoothCols = [];
+            for (let ci = 0; ci < cols; ci += 1) {
+                const vec = new Array(rows);
+                for (let r = 0; r < rows; r += 1) vec[r] = data.values[r][ci];
+                smoothCols.push(RP.smoothVector(vec, RP.SMOOTH_STRENGTH));
+            }
+        }
+    }
+
     for (let r = 0; r < rows; r++) {
         const y = plotH - (r + 1) * chh;
         const row = data.values[r];
         for (let ci = 0; ci < cols; ci++) {
             const v = row[ci];
-            if (v <= 0) continue;
-            ctx.fillStyle = heatColour(v / ref);
+            if (v <= 0 || (heatFloor > 0 && v < heatFloor)) continue;   // B2: the floor draws nothing
+            const sv = smoothCols ? Math.max(0, smoothCols[ci][r]) : v;
+            ctx.fillStyle = heatColour(RP ? RP.contrastT(sv / ref, heatGamma) : v / ref);
             ctx.fillRect(ci * cw, y, Math.max(1, cw + 0.4), Math.max(1, chh + 0.4));
         }
+    }
+
+    /* T5/A20: the values divider — draw each cell's own size once a cell is wide enough to
+       read it (atlas.heatmap.values_min_px; 0 = off). The map stays the primary read; these
+       are the numbers on top of it, the way the footprint's text_px gates its own. Contrast
+       flips with the cell's own brightness so a value never drowns in its ramp colour. */
+    /* `S` is ui.js's top-level binding (this file reuses it by design), not window.S. */
+    const valuesMinPx = Number(((S.config && S.config.atlas && S.config.atlas.heatmap) || {}).values_min_px) || 0;
+    if (valuesMinPx > 0 && cw >= valuesMinPx) {
+        ctx.font = '10px system-ui';
+        ctx.textAlign = 'center';
+        for (let r = 0; r < rows; r++) {
+            const y = plotH - (r + 0.5) * chh + 3.5;
+            const row = data.values[r];
+            for (let ci = 0; ci < cols; ci++) {
+                const v = row[ci];
+                if (v <= 0 || (heatFloor > 0 && v < heatFloor)) continue;   // B2: matches the colour loop
+                const sv2 = smoothCols ? Math.max(0, smoothCols[ci][r]) : v;
+                const painted = RP ? RP.contrastT(sv2 / ref, heatGamma) : v / ref;
+                ctx.fillStyle = painted > 0.55 ? 'rgba(6, 10, 16, 0.85)' : 'rgba(232, 238, 248, 0.85)';
+                ctx.fillText(compact(v), ci * cw + cw / 2, y);
+            }
+        }
+        ctx.textAlign = 'start';
     }
 
     const tradesBox = document.getElementById('hmTrades');
@@ -191,6 +243,7 @@ function drawHeatmap(data) {
 }
 
 function drawSeries(canvas, series, opts) {
+    if (window.OFAPFREEZE && OFAPFREEZE.holds(canvas)) return;   // T4/A7
     const c = prepCanvas(canvas, (opts && opts.height) || 300);
     if (!c) return;
     const ctx = c.ctx, w = c.w, h = c.h;
@@ -250,6 +303,8 @@ async function loadHeatmap() {
             OFAPFRESH.stamp('heatmap', { lastMs: hb.length ? Number(hb[hb.length - 1]) : 0, kind: 'depth' });
         }
         drawHeatmap(d);
+        /* T14/B4: the columns rail sees every fresh snapshot (it owns its own accumulators). */
+        if (window.OFAPCOLRAIL) OFAPCOLRAIL.observe(d);
         const walls = (d.walls || []).slice(0, 12);
         const heldLabel = (ms) => (ms >= 60000 ? (ms / 60000).toFixed(1) + ' min' : Math.max(0, Math.round(ms / 1000)) + ' s');
         const w0 = document.getElementById('hmWalls');
@@ -302,12 +357,12 @@ function paintTrackers(d) {
         (ev.sweeps || []).slice().reverse().slice(0, 20).map((s) =>
             '<tr><td>' + new Date(s.ts_ms).toLocaleTimeString() + '</td><td class="' + (s.side === 'buy' ? 'bullish' : 'bearish') + '">' + esc(s.side) +
             '</td><td>' + s.levels + '</td><td>' + s.size + '</td><td>' + s.from_price + ' → ' + s.to_price + '</td><td>' + s.duration_ms + 'ms</td></tr>').join('')
-        || '<tr><td colspan="8" class="dim">none yet</td></tr>';
+        || '<tr><td colspan="8" class="dim">none yet — sweeps are inferred from consecutive prints across levels</td></tr>';
     document.getElementById('tkStopTable').querySelector('tbody').innerHTML =
         (ev.stop_runs || []).slice().reverse().slice(0, 20).map((s) =>
             '<tr><td>' + new Date(s.ts_ms).toLocaleTimeString() + '</td><td>' + esc(s.direction) + '</td><td>' + s.ticks_moved +
             '</td><td>' + s.volume + '</td><td>' + (s.prints || '?') + '</td><td>' + (s.confirmed_by_liquidations ? '<span class="tag ok">confirmed</span>' : '<span class="dim">—</span>') + '</td></tr>').join('')
-        || '<tr><td colspan="6" class="dim">none yet</td></tr>';
+        || '<tr><td colspan="6" class="dim">none yet — stop runs are inferred from a fast move plus clustered prints</td></tr>';
     document.getElementById('tkBigTable').querySelector('tbody').innerHTML =
         (ev.big_trades || []).slice().reverse().slice(0, 20).map((b) =>
             '<tr><td>' + new Date(b.ts_ms).toLocaleTimeString() + '</td><td class="' + (b.side === 'buy' ? 'bullish' : 'bearish') + '">' + esc(b.side) +
@@ -319,7 +374,10 @@ function paintTrackers(d) {
             '<tr><td>' + new Date(l.ts_ms).toLocaleTimeString() + '</td><td>' + l.price + '</td><td>' + l.size + '</td><td>' + esc(l.side) + '</td></tr>').join('')
         || '<tr><td colspan="4" class="dim">no liquidations in this window</td></tr>';
     document.getElementById('tkLiqStats').textContent = liqs.length + ' shown · ' + (st.liquidations || 0) + ' total';
-    document.getElementById('navTrackerCount').textContent = String((st.sweeps || 0) + (st.icebergs || 0) + (st.stop_runs || 0));
+    /* §90: a counter that moves should say so (flash), not just silently change. */
+    { const el = document.getElementById('navTrackerCount');
+      const text = String((st.sweeps || 0) + (st.icebergs || 0) + (st.stop_runs || 0));
+      if (window.OFAPTICK) OFAPTICK.tick(el, text, { arrow: false }); else el.textContent = text; }
     toast(document.getElementById('tkBanner'),
         'Iceberg and stop-run trackers are INFERRED — Bybit publishes no market-by-order (order-id) feed. ' +
         'Sweeps, big trades, blocks and speed of tape come straight from the trade prints; stop runs are corroborated by the liquidation stream.',
@@ -347,7 +405,8 @@ function paintCvd(d) {
         const series = d.series || [];
         OFAPFRESH.stamp('cvd', { lastMs: series.length ? Number(series[series.length - 1].t) : 0, kind: 'trades' });
     }
-    document.getElementById('cvdValue').querySelector('.kpi-value').textContent = compact(d.cvd);
+    if (window.OFAPTICK) OFAPTICK.tick(document.getElementById('cvdValue').querySelector('.kpi-value'), compact(d.cvd), { arrow: true });
+    else document.getElementById('cvdValue').querySelector('.kpi-value').textContent = compact(d.cvd);
     document.getElementById('cvdValue').querySelector('.kpi-sub').textContent =
         d.session_start_ms ? 'from ' + new Date(d.session_start_ms).toLocaleTimeString() : '';
     document.getElementById('cvd1m').querySelector('.kpi-value').textContent = compact((d.windows || {})['60s']);
@@ -449,6 +508,8 @@ async function loadMarketProfile() {
             ' over ' + ((dva.sessions || []).length) + ' sessions</div></div>' +
             '<div class="field"><label>Virgin POCs (untested magnets)</label><div class="mono">' +
             (virgins.length ? virgins.map((v) => v.session + ' @ ' + Number(v.poc).toFixed(2)).join('<br>') : 'none') + '</div></div>' +
+            '<div class="field"><label>Profile shape</label><div class="mono">' +
+            (d.shape && d.shape.label ? esc(d.shape.label) + ' — ' + esc(d.shape.story) : '—') + '</div></div>' +
             '<div class="field"><label>Single prints</label><div class="mono">' + ((d.single_prints || []).length) + ' levels</div></div>';
     } catch (e) { console.error(e); }
 }
@@ -554,7 +615,7 @@ document.getElementById('rpSeek').onchange = async (e) => {
 if (window.OFAPKEYS) {
     OFAPKEYS.bind({ id: 'replay-play', keys: ['space'], scope: 'Replay',
         label: 'play / pause the replay',
-        when: () => OFAPKEYS.inView('replay'),
+        when: () => OFAPKEYS.inView('replay'), why: 'acts on the Replay panel',
         run: () => {
             const btn = document.getElementById(A.replay.playing ? 'rpPause' : 'rpPlay');
             if (btn) btn.click();
@@ -566,9 +627,9 @@ if (window.OFAPKEYS) {
         seek.dispatchEvent(new Event('change'));
     };
     OFAPKEYS.bind({ id: 'replay-seek-back', keys: [','], scope: 'Replay', label: 'seek back 2%',
-        when: () => OFAPKEYS.inView('replay'), run: () => replaySeek(-20) });
+        when: () => OFAPKEYS.inView('replay'), why: 'acts on the Replay panel', run: () => replaySeek(-20) });
     OFAPKEYS.bind({ id: 'replay-seek-fwd', keys: ['.'], scope: 'Replay', label: 'seek forward 2%',
-        when: () => OFAPKEYS.inView('replay'), run: () => replaySeek(20) });
+        when: () => OFAPKEYS.inView('replay'), why: 'acts on the Replay panel', run: () => replaySeek(20) });
 }
 
 /* ── alerts ─────────────────────────────────────────────────────── */
@@ -988,6 +1049,108 @@ document.getElementById('hmAuto').onclick = () => {
     A.heat.auto = !A.heat.auto;
     document.getElementById('hmAutoLabel').textContent = 'auto: ' + (A.heat.auto ? 'on' : 'off');
 };
+
+/* ── B2: the heat scheme, on the Heatmap's side ──────────────────────────────────────────────
+   Same registry gate as the Engine's controls; the dials are read at paint time, so a change is
+   one repaint away. `apply globally` copies this surface's dials to the Engine through the shared
+   /params path, and the event lets that view adopt them without either module reaching into the
+   other's state. */
+(() => {
+    const sel = document.getElementById('hmHeatScheme');
+    const contrast = document.getElementById('hmHeatContrast');
+    const floorBox = document.getElementById('hmHeatFloor');
+    const smoothBox = document.getElementById('hmHeatSmooth');
+    const globalBtn = document.getElementById('hmHeatGlobal');
+
+    function dials() {
+        const cfg = (S.config && S.config.atlas && S.config.atlas.heatmap) || {};
+        const RP = window.OFAPRAMP;
+        const d = {
+            ceiling_pct: Number(cfg.upper_cutoff_pct) || 5,
+            ceiling_abs: Number(cfg.upper_cutoff_abs) || 0,
+            floor: Number(cfg.floor) || 0,
+            floor_pct: Number(cfg.floor_pct) || 0,
+            contrast: Number(cfg.contrast) || 1,
+            smooth: String(cfg.smooth || 'auto'),
+        };
+        d.scheme = RP ? RP.matchScheme(d) : 'custom';
+        return d;
+    }
+
+    function note(text) {
+        const s = document.getElementById('hmStatus');
+        if (s && text) s.textContent = text;
+    }
+
+    function sync() {
+        const d = dials();
+        if (sel) sel.value = d.scheme;
+        if (contrast) contrast.value = String(d.contrast);
+        if (floorBox) floorBox.value = String(d.floor);
+        if (smoothBox) smoothBox.value = d.smooth;
+    }
+
+    async function write(path, value) {
+        const RP = window.OFAPRAMP;
+        if (!RP) return null;
+        return RP.writeParam(path, value, S.config, note);
+    }
+
+    async function applyScheme(id) {
+        const RP = window.OFAPRAMP;
+        const scheme = RP && RP.schemeById(id);
+        if (!scheme) { sync(); return; }   // 'custom' chosen: nothing to write
+        await write('atlas.heatmap.upper_cutoff_abs', 0);
+        await write('atlas.heatmap.upper_cutoff_pct', scheme.ceiling_pct);
+        await write('atlas.heatmap.contrast', scheme.contrast);
+        await write('atlas.heatmap.floor', scheme.floor);
+        await write('atlas.heatmap.floor_pct', scheme.floor_pct);
+        await repaint();
+        sync();
+        note('scheme: ' + scheme.label + ' — ' + scheme.says);
+        document.dispatchEvent(new CustomEvent('ofap:heat-scheme', { detail: { from: 'heatmap' } }));
+    }
+
+    function repaint() {
+        /* The map's own load path — a fetch plus the paint, the same call the auto refresh makes.
+           A scheme change is an explicit ask and deserves fresh data anyway; the sandbox receipts
+           showed this path answering where a bare drawHeatmap could race the paint. */
+        if (typeof loadHeatmap === 'function') return loadHeatmap();
+        if (A.heat.last) drawHeatmap(A.heat.last);
+    }
+
+    if (sel) sel.addEventListener('change', () => void applyScheme(sel.value));
+    if (contrast) contrast.addEventListener('change', () => {
+        void write('atlas.heatmap.contrast', Number(contrast.value)).then(() => { sync(); repaint(); });
+    });
+    if (floorBox) floorBox.addEventListener('change', () => {
+        void write('atlas.heatmap.floor', Number(floorBox.value)).then(() => { sync(); repaint(); });
+    });
+    if (smoothBox) smoothBox.addEventListener('change', () => {
+        void write('atlas.heatmap.smooth', smoothBox.value).then(() => { sync(); repaint(); });
+    });
+    if (globalBtn) globalBtn.addEventListener('click', () => {
+        const d = dials();
+        void (async () => {
+            await write('ofx.heat_contrast', d.contrast);
+            await write('ofx.heat_floor', d.floor);
+            await write('ofx.heat_floor_pct', d.floor_pct);
+            note('heat scheme written to the Engine and the Heatmap view');
+            document.dispatchEvent(new CustomEvent('ofap:heat-scheme', { detail: { from: 'heatmap' } }));
+        })();
+    });
+    document.addEventListener('ofap:heat-scheme', (ev) => {
+        if (ev && ev.detail && ev.detail.from === 'heatmap') return;
+        sync();
+        if (truthyView('heatmap')) repaint();
+    });
+    /* T12/B9: a per-instrument scope block was applied — repaint with the new recipe. */
+    document.addEventListener('ofap:scopes', () => {
+        sync();
+        if (truthyView('heatmap')) repaint();
+    });
+    sync();
+})();
 document.getElementById('frameSelect').onchange = loadFrames;
 
 /* atlas.js loads before cursor-link.js in index.html, so the spine's glue below waits for the module
@@ -1065,6 +1228,17 @@ const ATLAS_FIELDS = [
     ['cvd', 'divergence_lookback', 'CVD lookback buckets', 'number', 1],
     ['cvd', 'divergence_min_ticks', 'CVD divergence ticks', 'number', 1],
     ['market_profile', 'bracket_minutes', 'TPO bracket (min)', 'number', 5],
+    /* T4/A5 — how long a panel may go without an update before it reads stale (seconds; 0 = the
+       built-in window: depth/trades 5 s, quote/candles 60 s). The freshness chips and the status
+       strip judge against these; nothing server-side changes. */
+    ['freshness', 'depth_s', 'Depth stale after (s · 0 = default)', 'number', 1],
+    ['freshness', 'quote_s', 'Quote stale after (s · 0 = default)', 'number', 1],
+    ['freshness', 'trades_s', 'Trades stale after (s · 0 = default)', 'number', 1],
+    ['freshness', 'candles_s', 'Candles stale after (s · 0 = default)', 'number', 1],
+    /* T5/A20+A11 — renderer preferences: the heatmap's cell-value divider (0 = off) and the
+       Engine's auto-fit slack (0 = refit every payload, the old behaviour). */
+    ['heatmap', 'values_min_px', 'Heatmap cell values from (px · 0 = off)', 'number', 2],
+    ['ofx', 'fit_tolerance', 'Engine auto-fit slack (0-0.9)', 'number', 0.05],
 ];
 
 function renderAtlasSettings() {

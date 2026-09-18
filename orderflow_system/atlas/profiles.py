@@ -13,8 +13,10 @@ this module does not duplicate it, it adds the reads that engine lacks.
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Iterable, Optional
 
 from orderflow_system.data.models import Tick
@@ -263,4 +265,89 @@ def virgin_pocs(profiles: Iterable[Any], current_price: float = 0.0) -> list[dic
         if not tested:
             out.append({"session": getattr(p, "session_date", ""), "poc": poc,
                         "distance": round(poc - current_price, 6) if current_price else 0.0})
+    return out
+
+
+# ── HTF POC ladder: aggregate stored sessions into period POCs ────────────────
+
+def _period_key(day: "date", period: str) -> str:
+    """ISO week ('2026-W38') or calendar month ('2026-09')."""
+    if period == "month":
+        return f"{day.year:04d}-{day.month:02d}"
+    year, week, _ = day.isocalendar()
+    return f"{year:04d}-W{week:02d}"
+
+
+def _aggregate_value_area(prices: list[float], volumes: list[float], poc_idx: int,
+                          value_area_pct: float) -> tuple[float, float]:
+    """The engine's own expansion rule (grow from the POC toward the heavier side)."""
+    total = math.fsum(volumes)
+    if total <= 0:
+        return prices[poc_idx], prices[poc_idx]
+    target = total * value_area_pct
+    accumulated = volumes[poc_idx]
+    lo = hi = poc_idx
+    while accumulated < target:
+        up = volumes[hi + 1] if hi + 1 < len(prices) else -1.0
+        down = volumes[lo - 1] if lo - 1 >= 0 else -1.0
+        if up < 0 and down < 0:
+            break
+        if up >= down:
+            hi += 1
+            accumulated += up
+        else:
+            lo -= 1
+            accumulated += down
+    return prices[hi], prices[lo]
+
+
+def period_pocs(profiles: Iterable[Any], period: str = "week",
+                value_area_pct: float = 0.68) -> list[dict[str, Any]]:
+    """Aggregate stored session profiles into period POCs (week = ISO week, or month).
+
+    Each session's ``volume_at_price`` map is summed per price, and the POC / value area are
+    recomputed on the aggregate with the engine's own expansion rule — a weekly POC here is the
+    week's genuine volume mode, not a vote between daily POCs. Sessions whose ``session_date``
+    cannot be parsed, or which carry no per-price volumes, are excluded; the result's
+    ``sessions`` list names exactly what went into each period. Oldest period first, as
+    ``{period, kind, sessions, poc, vah, val, total_volume}``.
+    """
+    groups: dict[str, dict[str, Any]] = {}
+    for p in profiles:
+        raw = str(getattr(p, "session_date", "") or "")
+        try:
+            day = date.fromisoformat(raw[:10])
+        except ValueError:
+            continue
+        vap = getattr(p, "volume_at_price", None) or {}
+        if not vap:
+            continue
+        g = groups.setdefault(_period_key(day, period), {"levels": {}, "sessions": []})
+        for price, vol in vap.items():
+            key = float(price)
+            g["levels"][key] = g["levels"].get(key, 0.0) + float(vol or 0.0)
+        g["sessions"].append(day.isoformat())
+
+    out: list[dict[str, Any]] = []
+    for key in sorted(groups):
+        g = groups[key]
+        levels = g["levels"]
+        if not levels:
+            continue
+        prices = sorted(levels)
+        volumes = [levels[p] for p in prices]
+        total = math.fsum(volumes)
+        if total <= 0:
+            continue
+        poc_idx = max(range(len(prices)), key=lambda i: volumes[i])
+        vah, val = _aggregate_value_area(prices, volumes, poc_idx, value_area_pct)
+        out.append({
+            "period": key,
+            "kind": period,
+            "sessions": list(g["sessions"]),
+            "poc": prices[poc_idx],
+            "vah": vah,
+            "val": val,
+            "total_volume": round(total, 8),
+        })
     return out

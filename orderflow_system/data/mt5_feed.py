@@ -93,6 +93,15 @@ class MT5Feed:
         self._mt5 = None
         self._last_tick_time: dict[str, int] = {}  # Track last seen tick per symbol
         self._initialized = False
+        #: Broker server clocks run offset from UTC (a MetaQuotes demo measured +3 h) and MT5
+        #: stamps ticks with the SERVER clock, so storing `time_msc` raw would put every MT5 row
+        #: hours into the future — skewing candle buckets, session windows and the freshness
+        #: ages. The offset is learned from the freshest tick visible and applied on the way in.
+        self._clock_offset_ms: Optional[int] = None
+        #: Prints that carried no volume at all and were recorded as 1 lot (order flow cannot use a
+        #: zero-size fill). Counted so the substitution is visible, and warned about once.
+        self._volume_defaulted = 0
+        self._volume_defaulted_warned = False
 
     def connect(self) -> bool:
         """Initialize MT5 connection (call before download_historical_ticks)."""
@@ -196,7 +205,61 @@ class MT5Feed:
                     f"spread={info.spread}"
                 )
 
+        # One cheap probe so even the first tick batch is stamped in UTC
+        self._note_clock(self._newest_visible_tick_ms())
+
         return True
+
+    # ── Server clock ─────────────────────────────────────────────────────────
+    #: Brokers offset their server clock in whole/half hours; rounding the measured offset to
+    #: 15 minutes absorbs network latency, a candidate beyond 14 h is not a broker offset at all.
+    _CLOCK_ROUND_MS = 15 * 60 * 1000
+    _CLOCK_MAX_MS = 14 * 60 * 60 * 1000
+
+    def _newest_visible_tick_ms(self) -> int:
+        """The newest ``time_msc`` the subscribed symbols report right now (0 when none)."""
+        newest = 0
+        for mt5_sym in self.symbols.values():
+            try:
+                tick = self._mt5.symbol_info_tick(mt5_sym)
+            except Exception:                          # one bad symbol must not stop the probe
+                continue
+            if tick is not None:
+                newest = max(newest, int(tick.time_msc))
+        return newest
+
+    def _note_clock(self, newest_server_ms: int) -> None:
+        """Learn the server↔UTC offset from the newest live tick stamp seen.
+
+        Only ever RAISED within a session: a candidate from a tick that arrived on time equals
+        the broker's offset, while a quiet symbol's stale print understates it — so the maximum
+        observation is the honest one. Called from the live paths only (a historical download's
+        newest stamp is old by construction and would understate the offset).
+        """
+        try:
+            newest = int(newest_server_ms or 0)
+        except (TypeError, ValueError):
+            return
+        if not newest:
+            return
+        now_ms = int(time.time() * 1000)
+        candidate = int(round((newest - now_ms) / self._CLOCK_ROUND_MS)) * self._CLOCK_ROUND_MS
+        if abs(candidate) > self._CLOCK_MAX_MS:
+            return
+        if self._clock_offset_ms is None or candidate > self._clock_offset_ms:
+            self._clock_offset_ms = candidate
+            logger.info(
+                "MT5 server clock offset %+.2f h (server %s) — ticks are stored in UTC",
+                candidate / 3_600_000.0,
+                "+ ahead of UTC" if candidate >= 0 else "behind UTC",
+            )
+
+    def to_utc_ms(self, server_ms: int) -> int:
+        """A server-time stamp as a true UTC epoch ms (unchanged until an offset is learned)."""
+        try:
+            return int(server_ms) - int(self._clock_offset_ms or 0)
+        except (TypeError, ValueError):
+            return int(server_ms)
 
     # Known alternative symbol names per asset class (broker-dependent)
     _SYMBOL_ALTERNATIVES: dict[str, list[str]] = {
@@ -305,8 +368,13 @@ class MT5Feed:
         if ticks_data is None or len(ticks_data) == 0:
             return
 
+        # Learn the server clock from this batch BEFORE stamping it: the newest stamp of a live
+        # batch is the honest observation (a quiet symbol's stale print only understates it).
+        self._note_clock(int(ticks_data[-1]['time_msc']))
+
         for t in ticks_data:
-            # Skip if we already processed this tick
+            # Skip if we already processed this tick (stamps stay server-time here — the poll
+            # window is server-time too; only the stored Tick is converted to UTC).
             tick_time_ms = int(t['time_msc'])
             if internal in self._last_tick_time and tick_time_ms <= self._last_tick_time[internal]:
                 continue
@@ -336,11 +404,15 @@ class MT5Feed:
                 last_price = (float(t['bid']) + float(t['ask'])) / 2.0
 
             volume = float(t['volume_real']) if t['volume_real'] > 0 else float(t['volume'])
-            if volume == 0:
-                volume = 1.0  # Some brokers don't provide real volume
+            if volume <= 0:
+                # Neither real volume nor tick volume: a zero-size fill is unusable for order
+                # flow, so the print is carried as 1 lot — and COUNTED, because an invented 1 is
+                # otherwise indistinguishable from a real one on the tape.
+                volume = 1.0
+                self._volume_defaulted += 1
 
             tick = Tick(
-                timestamp_ms=tick_time_ms,
+                timestamp_ms=self.to_utc_ms(tick_time_ms),
                 price=last_price,
                 size=volume,
                 side=side,
@@ -349,6 +421,14 @@ class MT5Feed:
 
             if self.on_tick:
                 await self.on_tick(internal, tick)
+
+        if self._volume_defaulted and not self._volume_defaulted_warned:
+            self._volume_defaulted_warned = True
+            logger.warning(
+                "MT5: %d print(s) carried no volume (real or tick) and were recorded as 1 lot each "
+                "— this broker may not publish volume for these symbols",
+                self._volume_defaulted,
+            )
 
         # Update last tick time
         self._last_tick_time[internal] = int(ticks_data[-1]['time_msc'])
@@ -431,11 +511,12 @@ class MT5Feed:
                 last_price = (float(t['bid']) + float(t['ask'])) / 2.0
 
             volume = float(t['volume_real']) if t['volume_real'] > 0 else float(t['volume'])
-            if volume == 0:
-                volume = 1.0
+            if volume <= 0:
+                volume = 1.0                          # see _poll_ticks: carried as 1 lot
+                self._volume_defaulted += 1
 
             ticks.append(Tick(
-                timestamp_ms=int(t['time_msc']),
+                timestamp_ms=self.to_utc_ms(int(t['time_msc'])),
                 price=last_price,
                 size=volume,
                 side=side,
@@ -469,7 +550,7 @@ class MT5Feed:
         candles = []
         for r in rates:
             candles.append(Candle(
-                timestamp_ms=int(r['time']) * 1000,
+                timestamp_ms=self.to_utc_ms(int(r['time']) * 1000),
                 open=float(r['open']),
                 high=float(r['high']),
                 low=float(r['low']),

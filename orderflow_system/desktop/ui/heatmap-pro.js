@@ -142,6 +142,7 @@
     }
 
     function draw() {
+        if (window.OFAPFREEZE && OFAPFREEZE.held('heatmap')) return;   // T4/A7
         const c = stage(), ov = overlay();
         if (!c || !ov || !P.last) return;
         const dpr = window.devicePixelRatio || 1;
@@ -531,7 +532,7 @@
         if (!box) return;
         const st = regionStats();
         if (!st) {
-            box.innerHTML = 'Wheel = zoom window · shift+wheel = price rows · drag = box a region · Mark = pin a level · ' +
+            box.innerHTML = 'Wheel = zoom window · shift+wheel = price rows · arrows = rows / zoom · drag = box a region · Mark = pin a level · ' +
                 'hover a level then Alert to watch it';
             return;
         }
@@ -621,6 +622,30 @@
         c.addEventListener('dblclick', () => { P.sel = null; draw(); paintStats(); });
     }
 
+    /* T5/A10: minimal mode — the study's Bookmap pattern: hide the chrome, keep the map and
+       every interaction on it. CSS-only, so nothing is switched off behind the user's back;
+       the choice itself persists (ui.heatmap_minimal). */
+    function minimalOn() {
+        const s = document.querySelector('.view[data-view="heatmap"]');
+        return !!(s && s.classList.contains('hm-minimal'));
+    }
+    function setMinimal(on, persist) {
+        const s = document.querySelector('.view[data-view="heatmap"]');
+        if (s) s.classList.toggle('hm-minimal', !!on);
+        const b = document.querySelector('[data-hm-pro="minimal"]');
+        if (b) {
+            b.classList.toggle('on', !!on);
+            b.textContent = on ? 'minimal: on' : 'minimal';
+        }
+        if (persist && typeof api === 'function') {
+            /* /api/control/params takes {path, value} — the registry is the gate, which is why
+               ui.heatmap_minimal is registered there. */
+            void api('/api/control/params', { method: 'POST', body: { path: 'ui.heatmap_minimal', value: !!on } })
+                .catch(function () { /* the toggle still holds for this session */ });
+        }
+        return !!on;
+    }
+
     function toolbar() {
         const anchor = document.getElementById('hmAuto');
         if (!anchor || document.querySelector('[data-hm-pro-bar]')) return;
@@ -635,6 +660,7 @@
             '<input class="hm-note" data-hm-pro-note type="text" maxlength="120" placeholder="note (optional)" />' +
             '<button class="btn small" data-hm-pro="clear-markers">clear markers</button>' +
             '<button class="btn small" data-hm-pro="fit">fit</button>' +
+            '<button class="btn small" data-hm-pro="minimal" title="Heatmap + traded volume only — hide the rest of the chrome">minimal</button>' +
             '<button class="btn small" data-hm-pro="alert-here">alert on cursor level</button>' +
             '<span class="dim" data-hm-pro-info="1"></span>';
         anchor.parentElement.appendChild(bar);
@@ -667,6 +693,7 @@
             return;
         }
         if (act === 'fit') { P.sel = null; zoom(0); return; }
+        if (act === 'minimal') { setMinimal(!minimalOn(), true); return; }
         if (act === 'clear-sel') { P.sel = null; draw(); paintStats(); return; }
         if (act === 'alert-heavy') {
             const st = regionStats();
@@ -717,20 +744,36 @@
             if (b) b.click();
         };
         OFAPKEYS.bind({ id: 'heatmap-zoom-in', keys: ['=', '+'], scope: 'Heatmap', priority: 5,
-            label: 'zoom in (depth window)', when: () => OFAPKEYS.inView('heatmap'), run: () => heatAct('zoom-in') });
+            label: 'zoom in (depth window)', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => heatAct('zoom-in') });
         OFAPKEYS.bind({ id: 'heatmap-zoom-out', keys: ['-', '_'], scope: 'Heatmap', priority: 5,
-            label: 'zoom out (depth window)', when: () => OFAPKEYS.inView('heatmap'), run: () => heatAct('zoom-out') });
+            label: 'zoom out (depth window)', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => heatAct('zoom-out') });
         OFAPKEYS.bind({ id: 'heatmap-selection-clear', keys: ['x'], scope: 'Heatmap', priority: 5,
             label: 'clear the selection',
-            when: () => OFAPKEYS.inView('heatmap') && P.sel != null, run: () => heatAct('clear-sel') });
+            when: () => OFAPKEYS.inView('heatmap') && P.sel != null, why: 'box a region first', run: () => heatAct('clear-sel') });
         OFAPKEYS.bind({ id: 'heatmap-export', keys: ['ctrl+e'], scope: 'Heatmap', priority: 5,
             label: 'export the selected region as CSV',
-            when: () => OFAPKEYS.inView('heatmap') && P.sel != null, run: () => heatAct('export-region') });
+            when: () => OFAPKEYS.inView('heatmap') && P.sel != null, why: 'box a region first', run: () => heatAct('export-region') });
         OFAPKEYS.bind({ id: 'alert-from-cursor', keys: ['a'], scope: 'Heatmap', priority: 5,
-            label: 'alert on the cursor level', when: () => OFAPKEYS.inView('heatmap'), run: () => heatAct('alert-here') });
+            label: 'alert on the cursor level', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => heatAct('alert-here') });
+        /* T5/A12: the keyboard reach for what the bar does — rows on the vertical pair, the
+           depth window on the horizontal pair, so a reader can step the map without leaving
+           the keys. (Shift variants are deliberately absent: rows and windows are stepped
+           selectors, there is no 10-px to mean.) */
+        OFAPKEYS.bind({ id: 'heatmap-rows-more', keys: ['arrowup'], scope: 'Heatmap', priority: 5,
+            label: 'more price rows', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => heatAct('rows-up') });
+        OFAPKEYS.bind({ id: 'heatmap-rows-fewer', keys: ['arrowdown'], scope: 'Heatmap', priority: 5,
+            label: 'fewer price rows', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => heatAct('rows-down') });
+        OFAPKEYS.bind({ id: 'heatmap-window-wider', keys: ['arrowleft'], scope: 'Heatmap', priority: 5,
+            label: 'wider depth window', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => heatAct('zoom-out') });
+        OFAPKEYS.bind({ id: 'heatmap-window-narrower', keys: ['arrowright'], scope: 'Heatmap', priority: 5,
+            label: 'narrower depth window', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => heatAct('zoom-in') });
     }
 
     function refresh() {
+        if (!P.minimalSeen) {
+            P.minimalSeen = true;
+            setMinimal(!!((S.config && S.config.ui && S.config.ui.heatmap_minimal)), false);   // S = ui.js's binding
+        }
         if (!active()) return;
         build();
         toolbar();

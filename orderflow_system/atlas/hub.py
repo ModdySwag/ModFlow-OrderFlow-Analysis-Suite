@@ -7,6 +7,7 @@ Wiring (all optional, all additive to the original repo):
     hub.set_sink(broadcast)                     # async (channel, symbol, data)
     hub.on_tick(symbol, tick)                   # from the repo feed OR the replay
     hub.on_orderbook(symbol, snapshot)          # repo feed (50 levels)
+    hub.feed_bar(symbol, ts_ms, levels)         # closed bars: unfinished auctions + node runs
     await hub.start_feeds({symbol: tick_size})  # extra Bybit streams: 200-level
                                                 # book, liquidations, block flags
 Detections are pushed to the sink and stored for the REST layer to read.
@@ -29,9 +30,12 @@ from orderflow_system.atlas.depthmap import DepthHeatmap
 from orderflow_system.atlas.frames import FrameSet
 from orderflow_system.atlas.imbalance import ImbalanceLadder
 from orderflow_system.atlas.intent import ParticipantIntent
+from orderflow_system.atlas.nodes import NodeTracker
 from orderflow_system.atlas.profiles import MarketProfile
+from orderflow_system.atlas.radar import RadarTracker
 from orderflow_system.atlas.tapeflow import TapeFlow
 from orderflow_system.atlas.tradedepth import TradeDetector
+from orderflow_system.atlas.unfinished import UnfinishedTracker
 from orderflow_system.atlas.vwap import VWAPStudy
 from orderflow_system.data.models import OrderbookSnapshot, Tick
 
@@ -53,11 +57,15 @@ class SymbolFeatures:
     frames: FrameSet = field(init=False)
     imbalance: ImbalanceLadder = field(init=False)
     intent: ParticipantIntent = field(init=False)
+    nodes: NodeTracker = field(init=False)              # level reads: node persistence
+    unfinished: UnfinishedTracker = field(init=False)   # level reads: unfinished auctions
+    radar: RadarTracker = field(init=False)             # G1: the level lifecycle book
     vwap: VWAPStudy = field(init=False)
     detector: TradeDetector = field(init=False)
     dots: DotMap = field(init=False)
     book: feed_extras.BybitDepthBook = field(init=False)
     first_tick_ms: int = 0
+    last_price: float = 0.0                             # the radar's side reference for new levels
 
     def __post_init__(self) -> None:
         self.heatmap = DepthHeatmap(self.symbol, tick_size=self.tick_size)
@@ -67,6 +75,9 @@ class SymbolFeatures:
         self.frames = FrameSet(self.symbol, self.tick_size)
         self.imbalance = ImbalanceLadder(self.symbol, tick_size=self.tick_size)
         self.intent = ParticipantIntent(self.symbol, tick_size=self.tick_size)
+        self.nodes = NodeTracker(tick_size=self.tick_size)
+        self.unfinished = UnfinishedTracker(tick_size=self.tick_size)
+        self.radar = RadarTracker(self.symbol, tick_size=self.tick_size)
         self.vwap = VWAPStudy(self.symbol, tick_size=self.tick_size)
         self.detector = TradeDetector(self.symbol, tick_size=self.tick_size)
         self.dots = DotMap(self.symbol, tick_size=self.tick_size)
@@ -82,12 +93,33 @@ class SymbolFeatures:
         self.heatmap.stack_pct = float(hm.get("stack_pct", self.heatmap.stack_pct))
         self.heatmap.wall_quantile = float(hm.get("wall_quantile", self.heatmap.wall_quantile))
         self.heatmap.upper_cutoff_pct = float(hm.get("upper_cutoff_pct", self.heatmap.upper_cutoff_pct))
+        self.heatmap.upper_cutoff_abs = float(hm.get("upper_cutoff_abs", self.heatmap.upper_cutoff_abs))
         self.heatmap.carry_forward = bool(hm.get("carry_forward", self.heatmap.carry_forward))
 
         dots = cfg.get("dots") or {}
         self.dots.window_ms = max(1_000, int(dots.get("window_ms", self.dots.window_ms)))
         self.dots.cluster_ms = max(0, int(dots.get("cluster_ms", self.dots.cluster_ms)))
         self.dots.min_size = max(0.0, float(dots.get("min_size", self.dots.min_size)))
+
+        unf = cfg.get("unfinished") or {}
+        if unf:
+            self.unfinished.enabled = bool(unf.get("enabled", self.unfinished.enabled))
+            self.unfinished.max_open = max(1, int(unf.get("max_open", self.unfinished.max_open)))
+            self.unfinished.merge_ticks = max(0.0, float(unf.get("merge_ticks", self.unfinished.merge_ticks)))
+        nd = cfg.get("nodes") or {}
+        if nd:
+            self.nodes.enabled = bool(nd.get("enabled", self.nodes.enabled))
+            self.nodes.tol_ticks = max(0.0, float(nd.get("tol_ticks", self.nodes.tol_ticks)))
+
+        rd = cfg.get("radar") or {}
+        if rd:
+            self.radar.enabled = bool(rd.get("enabled", self.radar.enabled))
+            self.radar.tol_ticks = max(0.0, float(rd.get("tol_ticks", self.radar.tol_ticks)))
+            self.radar.approach_mult = max(1.0, float(rd.get("approach_mult", self.radar.approach_mult)))
+            self.radar.max_age_ms = int(max(60.0, float(rd.get("max_age_min",
+                                  self.radar.max_age_ms / 60_000.0))) * 60_000)
+            self.radar.spent_keep_ms = int(max(0.0, float(rd.get("spent_keep_min",
+                                     self.radar.spent_keep_ms / 60_000.0))) * 60_000)
 
         tap = cfg.get("tape") or {}
         self.tape.big_quantile = float(tap.get("big_quantile", self.tape.big_quantile))
@@ -233,6 +265,8 @@ class FeatureHub:
             feats.imbalance.clear()
             feats.dots.clear()
             feats.intent.clear()
+            feats.nodes.clear()
+            feats.unfinished.clear()
             feats.vwap.clear()
             feats.detector.clear()
         self.counters = {k: 0 for k in self.counters}
@@ -252,6 +286,11 @@ class FeatureHub:
         feats.profile.on_tick(tick)
         feats.frames.on_tick(tick)
         detections.update(feats.imbalance.on_tick(tick))
+        # level reads: a tick that returns to an open unfinished level fixes it (the bar path
+        # inside `feed_bar` resolves too; this is the faster of the two when both see it)
+        if feats.unfinished.enabled:
+            for ev in feats.unfinished.on_tick(tick.price, tick.timestamp_ms):
+                detections[ev["kind"]] = ev
         # intent: a trap is a tape event; pressure/pulls arrive from the book path
         trap = feats.intent.on_tick(tick).get("trapped")
         if trap is not None:
@@ -269,7 +308,135 @@ class FeatureHub:
 
         for kind, payload in detections.items():
             self._dispatch(symbol, kind, payload)
+        # the level radar (fold-in plan §4 / G1): step every tracked level against this price and
+        # dispatch each transition like any other detection; then offer any area-profile watch
+        # levels to the book.
+        feats.last_price = float(tick.price)
+        if feats.radar.enabled:
+            self._radar_track_rules(symbol, feats, tick.timestamp_ms)
+            for ev in feats.radar.step(tick.price, tick.timestamp_ms):
+                self._dispatch(symbol, "radar_level", ev)
+        # the area profile's watch hand-off (fold-in plan §3 / A3): a `level_touch` rule fires when
+        # price returns into its own band. The touch IS the event — no detector payload — so it
+        # rides the tick and then the same firing path as everything else.
+        touch = self.alerts.evaluate_touch(symbol, tick.price, tick.timestamp_ms)
+        if touch:
+            self._emit_fired(symbol, touch, tick.price, float(getattr(tick, "size", 0) or 0))
         return detections
+
+    def feed_bar(self, symbol: str, ts_ms: int, levels: Any, tick_size: float = 0.0) -> list[dict[str, Any]]:
+        """A closed footprint bar -> level-read events (unfinished auctions, node runs).
+
+        Called from the system's candle-close path (``main.OrderflowSystem._on_candle_closed``).
+        ``levels`` maps price -> (bid, ask). Events ride the same ``_dispatch`` path as every
+        other detection, so alert rules and the history see them identically; the return value
+        exists for tests and receipts.
+        """
+        feats = self.ensure(symbol, tick_size or None)
+        events: list[dict[str, Any]] = []
+        rows = {float(p): (float(b or 0.0), float(a or 0.0)) for p, (b, a) in (levels or {}).items()}
+        if not rows:
+            return events
+        if feats.unfinished.enabled:
+            events.extend(feats.unfinished.on_bar(int(ts_ms), rows, tick_size=feats.tick_size))
+        if feats.nodes.enabled:
+            poc_price, poc_vol = None, 0.0
+            for price, (bid, ask) in rows.items():
+                vol = bid + ask
+                if poc_price is None or vol > poc_vol:
+                    poc_price, poc_vol = price, vol
+            events.extend(feats.nodes.on_bar(int(ts_ms), poc_price, poc_vol))
+        # the level radar registers what this bar produced, then the bands and zones the other
+        # analyzers already hold — one book per instrument, fed from the same events the alerts see.
+        if feats.radar.enabled:
+            for ev in events:
+                kind = ev.get("kind")
+                if kind == "unfinished_business":
+                    self._radar_register(symbol, feats, ev.get("price"), "unfinished", int(ts_ms), 60.0)
+                elif kind == "node_zone":
+                    cnt = int(ev.get("count") or 0)
+                    self._radar_register(symbol, feats, ev.get("price"), "node", int(ts_ms),
+                                         55.0 + 5.0 * min(3, max(0, cnt - 2)))
+            self._radar_sweep_feats(symbol, feats, int(ts_ms))
+        for ev in events:
+            self._dispatch(symbol, ev["kind"], ev)
+        return events
+
+    # ── G1: the level radar's registrations ───────────────────
+    def _radar_register(self, symbol: str, feats: Any, price: Any, source: str, ts_ms: int,
+                        strength: float, tol: Any = None) -> None:
+        """Register one level (or merge it) and, when it is new, offer it to the level hook.
+
+        The hook is how the radar widens the signals machine's net (fold-in plan U3): the engine
+        sets it to hand every new level to the aggregator's WATCHING pathway, behind config.
+        """
+        try:
+            price_f = float(price)
+        except (TypeError, ValueError):
+            return
+        if not (price_f > 0):
+            return
+        try:
+            tol_f = float(tol) if tol is not None else None
+        except (TypeError, ValueError):
+            tol_f = None
+        lvl, is_new = feats.radar.register(price_f, source, ts_ms, strength=strength, tol=tol_f,
+                                           ref_price=float(getattr(feats, "last_price", 0.0) or 0.0))
+        if lvl is None or not is_new:
+            return
+        self._dispatch(symbol, "radar_level", {
+            "kind": "radar_level", "state": "armed", "price": lvl.price, "source": lvl.source,
+            "sources": list(lvl.sources), "tol": lvl.tol, "side": lvl.side,
+            "strength": lvl.strength, "id": lvl.id, "ts_ms": int(ts_ms)})
+        hook = getattr(self, "level_hook", None)
+        if hook is not None:
+            try:
+                hook(symbol, lvl, float(getattr(feats, "last_price", 0.0) or lvl.price))
+            except Exception:
+                logger.debug("level hook failed for %s", symbol, exc_info=True)
+
+    def _radar_sweep_feats(self, symbol: str, feats: Any, ts_ms: int) -> None:
+        """Register the levels the other analyzers already hold: the VWAP band pair + stacked zones."""
+        try:
+            snap = feats.vwap.snapshot(points=2)
+        except Exception:
+            snap = {}
+        for band in (snap.get("bands") or [])[:1]:
+            if not isinstance(band, dict):
+                continue
+            for key in ("upper", "lower"):
+                point = band.get(key)
+                if point:
+                    self._radar_register(symbol, feats, point, "vwap_band", ts_ms, 50.0)
+        try:
+            clusters = feats.imbalance.clusters()
+        except Exception:
+            clusters = []
+        for c in clusters:
+            levels_n = int(getattr(c, "levels", 0) or 0)
+            mid = (float(getattr(c, "from_price", 0.0) or 0.0)
+                   + float(getattr(c, "to_price", 0.0) or 0.0)) / 2.0
+            if mid > 0 and levels_n >= 3:
+                self._radar_register(symbol, feats, mid, "stacked", ts_ms,
+                                     60.0 + 5.0 * min(3, levels_n - 3))
+
+    def _radar_track_rules(self, symbol: str, feats: Any, ts_ms: int) -> None:
+        """The area profile's watched POCs (``ap-`` level_touch rules) are radar levels too."""
+        try:
+            rules = list(self.alerts.rules)
+        except Exception:
+            return
+        prefix = f"ap-{symbol}-"
+        for rule in rules:
+            if getattr(rule, "kind", "") != "level_touch" or not getattr(rule, "enabled", False):
+                continue
+            if not str(getattr(rule, "id", "")).startswith(prefix):
+                continue
+            params = getattr(rule, "params", None) or {}
+            price = params.get("at_price")
+            tol = params.get("at_tol")
+            if price:
+                self._radar_register(symbol, feats, price, "area_poc", ts_ms, 65.0, tol=tol)
 
     def on_orderbook(self, symbol: str, snapshot: OrderbookSnapshot) -> None:
         feats = self.ensure(symbol)
@@ -346,17 +513,12 @@ class FeatureHub:
         return {"ok": True}
 
     # ── dispatch ──────────────────────────────────────────────
-    def _dispatch(self, symbol: str, kind: str, payload: Any) -> None:
-        data = payload.to_dict() if hasattr(payload, "to_dict") else (
-            payload.__dict__ if hasattr(payload, "__dict__") and not isinstance(payload, dict) else payload)
-        # heat events use their own kinds so alerts match (heat_pull / heat_stack)
-        alert_kind = kind
-        if kind in ("pull", "stack"):
-            alert_kind = f"heat_{kind}"
-        elif kind == "liquidation":
-            alert_kind = "liquidation"
-        ts_ms, price, size = _event_fields(payload)
-        fired = self.alerts.evaluate(symbol, alert_kind, payload)
+    def _emit_fired(self, symbol: str, fired: Any, price: float, size: float) -> None:
+        """The one firing path every alert rides — detections and price touches alike.
+
+        Extracted so the watch hand-off (``evaluate_touch``) records, emits and notifies exactly
+        like a detector's firing: one place decides what "fired" means, so the two cannot drift.
+        """
         for alert in fired:
             self.counters["alerts"] += 1
             alert_dict = alert.to_dict()
@@ -369,6 +531,19 @@ class FeatureHub:
                 self._notify(alert_dict)
         if fired and self.alerts.webhook_url:
             self._dispatch_webhooks(fired)
+
+    def _dispatch(self, symbol: str, kind: str, payload: Any) -> None:
+        data = payload.to_dict() if hasattr(payload, "to_dict") else (
+            payload.__dict__ if hasattr(payload, "__dict__") and not isinstance(payload, dict) else payload)
+        # heat events use their own kinds so alerts match (heat_pull / heat_stack)
+        alert_kind = kind
+        if kind in ("pull", "stack"):
+            alert_kind = f"heat_{kind}"
+        elif kind == "liquidation":
+            alert_kind = "liquidation"
+        ts_ms, price, size = _event_fields(payload)
+        fired = self.alerts.evaluate(symbol, alert_kind, payload)
+        self._emit_fired(symbol, fired, price, size)
         if kind != "pull" and kind != "stack":
             self._emit(kind, symbol, data)
             self._record(symbol, kind, ts_ms, price, size)
@@ -477,6 +652,28 @@ class FeatureHub:
         """Rolling correlation matrix across the streaming instruments."""
         return self.correlation.snapshot(symbols=symbols or None, top=top)
 
+    def snapshot_levels(self, symbol: str) -> dict[str, Any]:
+        """Level reads for one instrument: unfinished magnets + node runs (fold-in plan §3)."""
+        feats = self.ensure(symbol)
+        return {"symbol": symbol, "tick": feats.tick_size,
+                "unfinished": feats.unfinished.snapshot(), "nodes": feats.nodes.snapshot()}
+
+    def snapshot_radar(self, symbol: str = "") -> dict[str, Any]:
+        """The level radar: tracked levels and their lifecycle states (fold-in plan §4 / G1)."""
+        if symbol:
+            feats = self.symbols.get(symbol)
+            if feats is None:
+                return {"ok": True, "symbol": symbol, "counts": None, "levels": [],
+                        "note": "no live readings yet — the radar fills while the engine runs"}
+            return {"ok": True, "symbol": symbol, "tick": feats.tick_size,
+                    "counts": feats.radar.summary(), "levels": feats.radar.snapshot()["levels"]}
+        rows = []
+        for sym, feats in sorted(self.symbols.items()):
+            summary = feats.radar.summary()
+            live = [lv for lv in feats.radar.snapshot()["levels"] if lv.get("live")]
+            rows.append({"symbol": sym, **summary, "levels": live})
+        return {"ok": True, "count": len(rows), "symbols": rows}
+
     # ── CSV exports (the reference layout exposes CSV for its feeds and journals) ───────────
     def tape_csv(self, symbol: str, limit: int = 500) -> str:
         """Detections on the tape as CSV: big trades, sweeps, stop runs, icebergs."""
@@ -533,6 +730,8 @@ class FeatureHub:
             "alerts": self.alerts.stats(),
             "heatmap": {s: f.heatmap.stats() for s, f in self.symbols.items()},
             "imbalance": {s: len(f.imbalance.clusters()) for s, f in self.symbols.items()},
+            "levels": {s: {"unfinished_open": len(f.unfinished.snapshot()["open"]),
+                           "nodes": (1 if f.nodes.current else 0)} for s, f in self.symbols.items()},
             "history": ({"pending": getattr(self.history, "pending", 0),
                          "written": getattr(self.history, "written", 0),
                          "enabled": getattr(self.history, "enabled", False)}

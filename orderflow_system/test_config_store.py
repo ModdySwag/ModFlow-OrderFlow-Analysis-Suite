@@ -190,3 +190,64 @@ def test_the_appearance_defaults_exist_and_a_bad_value_clamps(store):
     stored = cs.merge_config({"ui": {"theme": "light", "accent": "teal", "density": "dense"}})
     assert (stored["ui"]["theme"], stored["ui"]["accent"], stored["ui"]["density"]) == \
         ("light", "teal", "dense"), "the legitimate values must survive the sanitiser"
+# ── The legacy-database migration's two guards ───────────────────────────────────────────────
+
+
+def _legacy_db(dir_path, rows: int = 120_000):
+    """A real (if small) OrderFlow-shaped database: SQLite with the `ticks` table."""
+    import sqlite3
+
+    path = dir_path / "orderflow_data.db"
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE ticks (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "instrument TEXT NOT NULL, timestamp_ms INTEGER NOT NULL)")
+    con.executemany("INSERT INTO ticks (instrument, timestamp_ms) VALUES (?, ?)",
+                    [(f"X{i % 9}", i) for i in range(rows)])
+    con.commit()
+    con.close()
+    assert path.stat().st_size > 1_000_000, "the guard only looks at files past 1 MB"
+    return path
+
+
+def test_a_legacy_db_in_a_plain_install_directory_is_migrated(store, tmp_path, monkeypatch):
+    install = tmp_path / "install"
+    install.mkdir()
+    _legacy_db(install)
+    monkeypatch.chdir(install)
+
+    target = store.db_path()
+    assert target.is_file(), "an old install's database must still come across"
+
+
+def test_a_legacy_db_inside_a_source_checkout_is_not_migrated(store, tmp_path, monkeypatch):
+    """The repo's own stray collector database must never seed the user profile."""
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    _legacy_db(checkout)
+    monkeypatch.chdir(checkout)
+
+    assert not store.db_path().exists()
+
+
+def test_a_foreign_legacy_file_is_not_migrated(store, tmp_path, monkeypatch):
+    """Big enough to look migratable, but not SQLite — and not ours."""
+    somewhere = tmp_path / "somewhere"
+    somewhere.mkdir()
+    (somewhere / "orderflow_data.db").write_bytes(b"x" * 2_000_000)
+    monkeypatch.chdir(somewhere)
+
+    assert not store.db_path().exists()
+def test_the_mt5_block_is_clamped():
+    """apply_settings reads these straight into the settings module — junk there kills every
+    later engine start (a non-numeric poll_interval_ms raises inside int())."""
+    from orderflow_system.desktop.config_store import _sanitise
+
+    clean = _sanitise({"mt5": {"poll_interval_ms": "fast", "login": "x",
+                               "download_history_days": 999, "enable_book": 0,
+                               "password": "p" * 500, "server": " srv "}})
+    mt5 = clean["mt5"]
+    assert mt5["poll_interval_ms"] == 100 and mt5["login"] == 0
+    assert mt5["download_history_days"] == 60 and mt5["enable_book"] is False
+    assert len(mt5["password"]) == 200 and mt5["server"] == "srv"
+
+    assert "mt5" not in _sanitise({}), "a config with no mt5 block must not grow one"

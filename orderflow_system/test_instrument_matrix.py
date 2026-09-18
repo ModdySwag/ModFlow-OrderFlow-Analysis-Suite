@@ -8,6 +8,9 @@ that cannot half-land, and a venue symbol the app has never heard of still runs.
 
 from __future__ import annotations
 
+import sys
+
+import pytest
 
 from orderflow_system.config import settings as S
 from orderflow_system.config.settings import CRYPTO_MAJORS, INSTRUMENT_SPECS, Instrument
@@ -106,3 +109,58 @@ def test_bad_override_values_fall_back_instead_of_raising():
     selected, skipped = engine.select_instruments({"data_source": "bybit", "instruments": [spec]})
     assert skipped == []
     assert selected[0].absorption.min_aggressive_volume == 20
+
+
+# ── §82: venue stamps for symbols the matrix does not know ──────────────────────────
+
+def test_venue_stamp_for_reads_each_source_by_its_own_stamp():
+    """The one reader of "which venue confirmed this row" — a stamp for the ACTIVE source only."""
+    rows = {
+        "bybit": {"symbol": "WIFUSDT", "bybit_symbol": "WIFUSDT"},
+        "mt5": {"symbol": "NQZ25", "mt5_symbol": "NQZ25"},
+        "alpaca": {"symbol": "SPY", "alpaca_symbol": "SPY"},
+        "binance": {"symbol": "WIFUSDT", "binance_symbol": "WIFUSDT"},
+    }
+    assert engine.venue_stamp_for(rows["bybit"], "bybit") == "bybit"
+    assert engine.venue_stamp_for(rows["bybit"], "both") == "bybit"
+    assert engine.venue_stamp_for(rows["bybit"], "mt5") is None
+    assert engine.venue_stamp_for(rows["mt5"], "mt5") == "mt5"
+    assert engine.venue_stamp_for(rows["mt5"], "both") == "mt5"
+    assert engine.venue_stamp_for(rows["mt5"], "bybit") is None
+    assert engine.venue_stamp_for(rows["alpaca"], "alpaca") == "alpaca"
+    assert engine.venue_stamp_for(rows["alpaca"], "all") == "alpaca"
+    assert engine.venue_stamp_for(rows["alpaca"], "mt5") is None
+    assert engine.venue_stamp_for(rows["binance"], "binance") == "binance"
+    assert engine.venue_stamp_for(rows["binance"], "bybit") is None
+    assert engine.venue_stamp_for({"symbol": "NOTAREALSYMBOL"}, "mt5") is None
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the MT5 lane is Windows-only")
+def test_mt5_stamped_row_streams_on_the_mt5_source():
+    """§82: NQ1!-style look-ups end here — a broker-confirmed row the matrix has never heard
+    of becomes a real instrument on the MT5 source, built from the row's own tick."""
+    spec = {"symbol": "NQZ25", "enabled": True, "tick_size": 0.25, "patterns": {},
+            "mt5_symbol": "NQZ25"}
+    selected, skipped = engine.select_instruments({"data_source": "mt5", "instruments": [spec]})
+    assert skipped == []
+    assert [c.instrument.value for c in selected] == ["NQZ25"]
+    assert selected[0].tick_size == 0.25
+    # …and the same row on the Bybit source is still refused: the stamp is per-venue
+    selected, skipped = engine.select_instruments({"data_source": "bybit", "instruments": [spec]})
+    assert selected == []
+    assert skipped == [{"symbol": "NQZ25", "reason": "unknown instrument"}]
+
+
+def test_alpaca_stamped_row_streams_once_the_symbol_is_mapped(monkeypatch):
+    """The Alpaca lane keeps its own rule: the row must be mapped for the account as well."""
+    spec = {"symbol": "SPY", "enabled": True, "tick_size": 0.01, "patterns": {},
+            "alpaca_symbol": "SPY"}
+    monkeypatch.setattr(S.ALPACA, "symbols", {"SPY": "SPY"})
+    selected, skipped = engine.select_instruments({"data_source": "alpaca", "instruments": [spec]})
+    assert skipped == []
+    assert [c.instrument.value for c in selected] == ["SPY"]
+
+    monkeypatch.setattr(S.ALPACA, "symbols", {})
+    selected, skipped = engine.select_instruments({"data_source": "alpaca", "instruments": [spec]})
+    assert selected == []
+    assert skipped and "Alpaca" in skipped[0]["reason"]

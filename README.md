@@ -1,13 +1,13 @@
 # ModFlow OrderFlow Analysis Suite
 
-> **Real-time orderflow trading system** — tick-level microstructure analysis, 5 pattern detectors, volume profile framing, state machine trade lifecycle, dual data feeds (MT5 + Bybit), FastAPI dashboard with WebSocket, Telegram alerts. Built on Fabio Testa's methodology.
+> **Real-time orderflow trading system** — tick-level microstructure analysis, 5 pattern detectors, volume profile framing, state machine trade lifecycle, seven venue integrations (Bybit · Binance · Hyperliquid · OKX · MT5 · Alpaca · NinjaTrader 8), FastAPI dashboard with WebSocket, Telegram alerts. Built on Fabio Testa's methodology.
 
 [![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](.)
 [![License](https://img.shields.io/badge/license-MIT-informational?style=for-the-badge)](LICENSE)
 [![Instruments](https://img.shields.io/badge/instruments-49-blue?style=for-the-badge)](.)
-[![Code](https://img.shields.io/badge/code-~73k%20lines-brightgreen?style=for-the-badge)](.)
-[![API](https://img.shields.io/badge/API-138%20routes-orange?style=for-the-badge)](.)
-[![Tests](https://img.shields.io/badge/tests-891%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+[![Code](https://img.shields.io/badge/code-~84k%20lines-brightgreen?style=for-the-badge)](.)
+[![API](https://img.shields.io/badge/API-180%20routes-orange?style=for-the-badge)](.)
+[![Tests](https://img.shields.io/badge/tests-1399%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
 
 ---
 
@@ -32,8 +32,35 @@ Everything below is the packaged desktop app streaming the live Bybit feed — n
   </tr>
 </table>
 
-All thirty screenshots — one per view, plus the terminal board and the Help Centre search — live in
+All thirty-two screenshots — one per view, plus the terminal board and the Help Centre search — live in
 **[docs/SCREENSHOTS.md](docs/SCREENSHOTS.md)** with captions.
+
+---
+
+## Golden Features
+
+Three reads set the suite apart from the usual study rack — a **level radar** that tracks every
+level's lifecycle across the whole watchlist, an **area volume profile** you can box anywhere and
+hand straight to the alerts, and the **precision reads** (unfinished business and node
+persistence) borrowed from the professional numbers-bar toolchains.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/level-radar.png" alt="The Radar column on the Scanner — armed, approaching and held levels per instrument"></td>
+    <td width="50%"><img src="docs/screenshots/area-volume-profile.png" alt="An area volume profile boxed on the Engine, POC and value-area lines drawn"></td>
+  </tr>
+</table>
+
+- **Level radar** — armed → approaching → defended / confirmed → spent / failed, ranked per
+  instrument in the Scanner's Radar column, announced in plain sentences, with each level's first
+  test counted for you.
+- **Area volume profile** — drag any region on the Engine: volume-at-price, POC / VAH / VAL, a
+  histogram and a CSV export; one button turns the POC into a watched level.
+- **Unfinished business & node persistence** — incompletely auctioned extremes drawn until price
+  fixes them, and double/triple nodes drawn as repeat-acceptance bands. Both feed the radar.
+
+The full write-up, with the reasoning behind each, is in
+**[docs/GOLDEN_FEATURES.md](docs/GOLDEN_FEATURES.md)**.
 
 ---
 
@@ -52,6 +79,7 @@ give it a star: **<https://github.com/mahmoud20138/OrderFlow-Analysis-Pro>**
 ## Table of Contents
 
 - [See It Running](#see-it-running)
+- [Golden Features](#golden-features)
 - [Credit & Lineage](#credit--lineage)
 - [What Is OrderFlow Analysis?](#what-is-orderflow-analysis)
 - [System Overview](#system-overview)
@@ -136,7 +164,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 │               │                                  │                          │
 │  ┌────────────▼──────────┐  ┌───────────────────▼────────────────────┐     │
 │  │   Telegram Alerts     │  │   FastAPI Dashboard                    │     │
-│  │   Entry/BE/Trail/Exit │  │   138 REST/WS routes + streams         │     │
+│  │   Entry/BE/Trail/Exit │  │   180 REST/WS routes + streams         │     │
 │  │   Daily Bias updates  │  │   Charts, VP, Footprint, Orderbook     │     │
 │  └───────────────────────┘  │   Scanner, Strategy Status, Tape       │     │
 │                              └───────────────────────────────────────┘     │
@@ -223,15 +251,16 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 ### Module Dependency Graph
 
 ```
-main.py (857L) ─── System orchestrator
+main.py (883L) ─── System orchestrator
     │
-    ├── config/settings.py (822L) ─── 31 instrument configs, 14 config dataclasses
+    ├── config/settings.py (842L) ─── 31 instrument configs, 15 config dataclasses
     │
     ├── data/
     │   ├── models.py (330L) ─── 9 dataclasses: Tick, Candle, Signal, FootprintLevel, TradeState...
     │   ├── candle_builder.py (132L) ─── Tick → 1m aggregation + footprint
     │   ├── mt5_feed.py (493L) ─── MT5 terminal: ticks, book, history
     │   ├── bybit_feed.py (339L) ─── Bybit WebSocket: trades + orderbook
+    │   ├── ninjatrader_feed.py (629L) ─── NinjaTrader 8 via the shipped read-only bridge
     │   └── database.py (472L) ─── SQLite: 5 tables, WAL mode
     │
     ├── analytics/
@@ -268,7 +297,7 @@ main.py (857L) ─── System orchestrator
     │   ├── launcher.py ─── pywebview window / --headless server
     │   ├── api.py ─── /api/control/* (config, feeds, alerts, exports, layouts)
     │   ├── engine.py ─── the live pipeline host the UI reads from
-    │   └── ui/ ─── vanilla-JS modules (~34,300L across 79 files) + index.html
+    │   └── ui/ ─── vanilla-JS modules (~34,800L across 81 files) + index.html
 ```
 
 ---
@@ -572,7 +601,7 @@ The system auto-discovers instruments across 200+ broker-specific naming variant
 
 ### Frontend Components
 
-The current UI is the desktop suite: **79 vanilla-JS modules** (23 of them selftests) in `orderflow_system/desktop/ui/`
+The current UI is the desktop suite: **81 vanilla-JS modules** (24 of them selftests) in `orderflow_system/desktop/ui/`
 (shell and menus, chart, the order-flow engine, heatmap, tape, alerts, options, fundamentals, news,
 search, watchlist, studies — no build step, no framework). The 8 modules listed below are the legacy
 dashboard page's assets, still served at `/static/`:
@@ -862,18 +891,20 @@ curl http://localhost:8080/api/trade/NAS100USDT
 
 ```
 orderflow_system/
-├── main.py                          # System orchestrator (857L)
+├── main.py                          # System orchestrator (883L)
 ├── __init__.py                      # Package init
 ├── test_integration.py              # Integration tests (309L)
 │
 ├── config/
-│   └── settings.py                  # 31 instrument configs, 14 config dataclasses (822L)
+│   └── settings.py                  # 31 instrument configs, 15 config dataclasses (842L)
 │
 ├── data/
 │   ├── models.py                    # 9 dataclasses: Tick, Candle, Signal, FootprintLevel, TradeState... (330L)
 │   ├── candle_builder.py            # Tick → 1m candle aggregation (132L)
 │   ├── bybit_feed.py                # Bybit WebSocket feed (339L)
 │   ├── mt5_feed.py                  # MT5 terminal feed with auto-discovery (493L)
+│   ├── ninjatrader_feed.py          # NinjaTrader 8 via the shipped read-only bridge (629L)
+│   ├── ninjatrader_bridge/          # the NT8 add-on: C# source, build.ps1, the built DLL
 │   └── database.py                  # SQLite persistence, 5 tables (472L)
 │
 ├── analytics/
@@ -919,17 +950,17 @@ orderflow_system/
 
 | Area | Files | Python Lines | UI Lines (JS/CSS/HTML) | Total Lines |
 |------|-------|-------------|------------------------|-------------|
-| Config | 2 | 822 | — | 822 |
-| Data feeds + storage | 16 | 6,081 | — | 6,081 |
+| Config | 2 | 842 | — | 842 |
+| Data feeds + storage | 17 | 6,710 | — | 6,710 |
 | Analytics (delta, footprint, volume profile, patterns, signals, alerts) | 17 | 3,077 | — | 3,077 |
 | Atlas (live analytics + `/api/atlas/*`) | 26 | 7,558 | — | 7,558 |
-| Desktop app (desktop package + packaging scripts) | 26 | 10,075 | — | 10,075 |
-| Desktop UI (vanilla JS + CSS + HTML, no build step) | 89 | — | 36,964 | 36,964 |
+| Desktop app (desktop package + packaging scripts) | 27 | 11,547 | — | 11,547 |
+| Desktop UI (vanilla JS + CSS + HTML, no build step) | 93 | — | 38,480 | 38,480 |
 | Legacy dashboard (host + legacy page assets) | 14 | 2,571 | 4,667 | 7,238 |
-| Orchestrator (`main.py`) | 1 | 857 | — | 857 |
-| **Total (excluding tests)** | **191** | **31,041** | **41,631** | **72,672** |
+| Orchestrator (`main.py` + package init) | 2 | 892 | — | 892 |
+| **Total (excluding tests)** | **198** | **33,197** | **43,147** | **76,344** |
 
-Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 79 files / 15,790 lines. The desktop UI also ships its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the nine Help Centre screenshots (`orderflow_system/desktop/ui/help/`), which the columns above do not count.
+Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 86 files / 17,467 lines. The NinjaTrader bridge add-on ships as C# (`orderflow_system/data/ninjatrader_bridge/` — 1,126 lines of source + build script, plus the built DLL) and is not counted in the columns above; the desktop UI count also excludes its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the nine Help Centre screenshots (`orderflow_system/desktop/ui/help/`).
 
 ---
 
@@ -938,7 +969,7 @@ Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest
 ### REST Endpoints (legacy dashboard API)
 
 The app additionally serves `/api/atlas/*` (45 routes — heatmap, tape, CVD, profiles, imbalance,
-trades, scanner, alerts, replay) and `/api/control/*` (77 routes — config, feeds, exports, layouts, backfill, windows, help).
+trades, scanner, alerts, replay) and `/api/control/*` (83 routes — config, feeds, exports, layouts, backfill, windows, help).
 The always-current list is the running app's OpenAPI schema at `/docs`. The endpoints below are the
 legacy dashboard set, kept for compatibility:
 
