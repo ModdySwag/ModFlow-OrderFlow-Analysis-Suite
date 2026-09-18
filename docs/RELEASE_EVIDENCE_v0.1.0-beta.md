@@ -187,3 +187,17 @@ nightly Storage Sense temp cleanup (2026-09-17); the measurements above are as r
 - `docs/SECURITY_SWEEP_v0.1b.md` — the pre-release security sweep (14 findings; SS-8 closed in §74).
 - `docs/DISPLAY_MULTIMONITOR_AUDIT_v0.1b.md` — the display audit the §72 hardening answers.
 - `docs/AUDIT_RETURN_v0.1b.md` — the audit-return pass (§66–§68).
+
+## Superseding build and the release cut (2026-09-18, §110 + §111)
+
+The packaged payload rebuilt on the full order-flow fold-in: exe `e83f579b…` (dist 600 files),
+zip `f11450d7…` (600 entries, 40,830,501 B), Setup `76F53EAD…` (41,759,968 B; 0 errors / 4 known
+warnings), SBOM `8c3c0683…` (45 components; metatrader5 + numpy). Frozen smoke **18/18** (asset
+parity 73/73, 11/11 help PNGs, the radar endpoint and the education corpus answering from inside
+the build, WS native/cross refused, clean client-error log). Setup journey: 600/600 files,
+installed exe hash == dist exe, ARP `{FA4E31A6-840E-4581-A1E0-4C950A96E0FD}` found and fully
+cleaned on uninstall, `%APPDATA%` untouched, the machine's dev shortcut restored.
+
+**Release cut:** tag `v0.1.0-beta` published as a prerelease in the private lane
+(ModdySwag/ModFlow-beta-builds) with the zip + Setup + SBOM; asset digests verified against the
+local sha256s, SBOM re-downloaded and hash-matched. Source build commit `0123cc1`.

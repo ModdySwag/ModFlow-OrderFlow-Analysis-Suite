@@ -1,6 +1,16 @@
 # Resume here — ModFlow OrderFlow Analysis Suite
 
-> ## ▶ RE-ATTENDANCE (latest, 2026-09-18 — **§110: packaging pass done — dist 600 files · zip 600 entries · SBOM 45 comps · Setup `76F53EAD…`, smoke 18/18, journey green; the release cut (tag v0.1.0-beta) awaits his word**)
+> ## ▶ RE-ATTENDANCE (latest, 2026-09-18 — **§111: the release cut — v0.1.0-beta published (prerelease) in the private lane with zip + Setup + SBOM; digests verified**)
+>
+> **State.** Full record: SESSION_HANDOFF **§111**. `ModdySwag/ModFlow-beta-builds` seeded (README, commit `4d6135ff…`), release published: https://github.com/ModdySwag/ModFlow-beta-builds/releases/tag/v0.1.0-beta — Setup `76f53ead…` (41,759,968 B), zip `f11450d7…` (40,830,501 B), SBOM `8c3c0683…` (448,822 B); API digests == local sha256s; the SBOM was downloaded back and hash-verified. Notes name the source commit `0123cc1`.
+>
+> **Gates.** (unchanged — packaging/release only) pytest 1400 / 2 skipped; AUDIT CLEAN; ruff clean; 33/33 selftests; frozen smoke 18/18; journey clean.
+>
+> **Owed.** Invite the beta testers as **Read collaborators** on the lane (his call). Follow-ups: radar walls / big-trade zones, spent-state persistence, B5 migrations, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §110–§111 closed (packaging + release cut: v0.1.0-beta live in the private lane, digests verified). Owed: tester invites; the standing follow-ups.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-18 — **§110: packaging pass done — dist 600 files · zip 600 entries · SBOM 45 comps · Setup `76F53EAD…`, smoke 18/18, journey green; the release cut (tag v0.1.0-beta) awaits his word**)
 >
 > **State.** Full record: SESSION_HANDOFF **§110**. Rebuilt on the full fold-in payload: exe `e83f579b…` (15,536,784 B), zip `f11450d7…` (40,830,501 B / 600 entries), Setup `76F53EAD…` (41,759,968 B), SBOM `8c3c0683…` (45 comps, mt5 + numpy). Frozen smoke **18/18** incl. asset parity 73/73, 11/11 help PNGs, "fold-in inside" (radar endpoint + education corpus), WS native/cross refused, log clean. Journey: install 600/600, installed exe == dist, ARP `{FA4E31A6-…}` found + fully cleaned, `%APPDATA%` untouched, dev shortcut restored. Reusable scripts: `profiles/deepseek/runtime/ofap_{smoke.py,journey.ps1}`.
 >
