@@ -1,6 +1,16 @@
 # Resume here — ModFlow OrderFlow Analysis Suite
 
-> ## ▶ RE-ATTENDANCE (latest, 2026-09-18 — **§109: PUSHED — fold-in + waves on ModdySwag/ModFlow-OrderFlow-Analysis-Suite (`91f337c`, CI fix `0bd9836`); CI GREEN both jobs; worktree clean; packaging still owed**)
+> ## ▶ RE-ATTENDANCE (latest, 2026-09-18 — **§110: packaging pass done — dist 600 files · zip 600 entries · SBOM 45 comps · Setup `76F53EAD…`, smoke 18/18, journey green; the release cut (tag v0.1.0-beta) awaits his word**)
+>
+> **State.** Full record: SESSION_HANDOFF **§110**. Rebuilt on the full fold-in payload: exe `e83f579b…` (15,536,784 B), zip `f11450d7…` (40,830,501 B / 600 entries), Setup `76F53EAD…` (41,759,968 B), SBOM `8c3c0683…` (45 comps, mt5 + numpy). Frozen smoke **18/18** incl. asset parity 73/73, 11/11 help PNGs, "fold-in inside" (radar endpoint + education corpus), WS native/cross refused, log clean. Journey: install 600/600, installed exe == dist, ARP `{FA4E31A6-…}` found + fully cleaned, `%APPDATA%` untouched, dev shortcut restored. Reusable scripts: `profiles/deepseek/runtime/ofap_{smoke.py,journey.ps1}`.
+>
+> **Gates.** pytest 1400 / 2 skipped; AUDIT CLEAN; ruff clean; 33/33 selftests (no source edits in this pass — packaging only).
+>
+> **Owed.** The **release cut** on his word (tag `v0.1.0-beta` with zip + Setup + SBOM assets). Follow-ups: radar walls / big-trade zones, spent-state persistence, B5 migrations, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §110 closed (packaging pass done: dist/zip/SBOM/installer rebuilt, smoke 18/18, journey green). Owed: release cut (tag v0.1.0-beta) on Moddy's word.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-18 — **§109: PUSHED — fold-in + waves on ModdySwag/ModFlow-OrderFlow-Analysis-Suite (`91f337c`, CI fix `0bd9836`); CI GREEN both jobs; worktree clean; packaging still owed**)
 >
 > **State.** Full record: SESSION_HANDOFF **§109**. His word landed it: everything since `110c568` pushed to `moddy` (205 files, +33.5k) with **docs/GOLDEN_FEATURES.md**, a README Golden Features section and two 1920×1080 shots in `docs/screenshots/`; counts re-derived (tests 1400, code ~84k, API 180, help 81 topics). First CI run red on two CI-only failures — the P2-3 frame-yield checks (real-time flake, red since `110c568`) and the machine-dependent NT bridge test (`ok=True` needs a live NinjaTrader AddOns state) — fixed in `0bd9836` (fake clock; stubbed detect; sources now resolve under `src/`). CI run `35293195447` green on 3.11 + 3.12.
 >

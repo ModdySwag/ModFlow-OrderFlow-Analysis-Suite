@@ -1,11 +1,10 @@
 # Trader Dale's order-flow guides — study, assessment against this build, and the fold-in plan
 
-**Status:** Phases 1–5 **EXECUTED** (approved 2026-09-18 — "go with everything"; receipts in `docs/SESSION_HANDOFF.md` §104–§107). Only Phase 6 (packaging, on his word) remains; every §8 decision was taken as recommended. Written 2026-09-18 after Moddy's brief ("read the article and its
+**Status:** Phases 1–5 **EXECUTED** (approved 2026-09-18 — "go with everything"; receipts in `docs/SESSION_HANDOFF.md` §104–§107). **Phase 6 (packaging) EXECUTED 2026-09-18** — dist · zip · SBOM · installer rebuilt on the full fold-in payload; receipts in `docs/SESSION_HANDOFF.md` §110. Every §8 decision was taken as recommended. Written 2026-09-18 after Moddy's brief ("read the article and its
 linked articles, collate, assess against ModFlow OrderFlow Analysis Suite, and gather the
 feature-enhancing conclusions — additions, upgrades, and any 'golden feature' that sets it above
 the market"). **Phases 1–5 are built on disk** (status line above; receipts in §104–§107) —
-this document's phase table (§6) is now a completed record, with only Phase 6 (packaging, on his
-word) outstanding, and §2's two-column table is the record of what was already shipped before
+this document's phase table (§6) is now a completed record — all six phases executed — and §2's two-column table is the record of what was already shipped before
 any of it.
 
 **How claims are made here.** Every "already in the build" claim carries a `file:line` cite from
