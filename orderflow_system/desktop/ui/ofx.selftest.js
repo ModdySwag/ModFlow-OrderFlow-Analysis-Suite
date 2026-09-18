@@ -689,11 +689,19 @@ check('zoom: the price scale clamps at both limits',
     OFX.state.layers.live = canvasFor();
     OFX.state.layers.ribbon = canvasFor();
 
+    /* The frame budget reads performance.now(); on a loaded runner a stub paint can cross
+       6 ms of REAL time and push the deferral one frame further out — the check must measure
+       the contract, not the machine. Drive the budget from a fake clock: the "slow" layer
+       advances it past the share, deterministically, wherever this runs. */
+    const realNow = performance.now;
+    let clockMs = 1000;
+    performance.now = () => clockMs;
+
     let spin = true;
     const heatStub = {
         fillStyle: '',
         setTransform() {},
-        clearRect() { if (spin) { const t0 = Date.now(); while (Date.now() - t0 < 7) { /* burn the budget */ } spin = false; } },
+        clearRect() { if (spin) { spin = false; clockMs += 7.5; /* the slow layer: over the 6 ms share */ } },
         fillRect() {},
         getContext() { return heatStub; },
     };
@@ -737,6 +745,8 @@ check('zoom: the price scale clamps at both limits',
         JSON.stringify([y4.yields - y4before.yields, OFX.state.dirty.heat]));
 
     check('P2-3: stats() reports yields', 'yields' in OFX.stats());
+
+    performance.now = realNow;   /* back to the real clock for everything after this block */
 }
 
 /* ── §56: the typed heat wire decodes, and adapts to EXACTLY what the JSON path produces ──

@@ -15,6 +15,7 @@ import socket
 import time
 
 from orderflow_system.desktop import api, config_store, engine as engine_mod
+from orderflow_system.desktop import platforms as platform_mod
 from orderflow_system.test_ninjatrader_feed import MockNtBridge
 
 
@@ -134,13 +135,37 @@ def test_bridge_probe_says_where_to_look_when_nothing_listens(monkeypatch):
 
 
 def test_dll_endpoint_reports_the_shipped_bridge(monkeypatch):
+    """Whatever the machine: the endpoint always tells the truth about the build that travels
+    with this install. The detect is stubbed to find no NinjaTrader, so the verdict is the
+    honest "copy it into AddOns" — the DLL's own facts never depend on the machine."""
     _stub(monkeypatch, _cfg())
+    monkeypatch.setattr(platform_mod, "detect_installs", lambda: {"ninjatrader": {}})
     out = asyncio.run(api.ninjatrader_dll())
-    assert out["ok"] is True
     assert out["dll"]["exists"] is True
     assert out["dll"]["name"] == "ModFlowBridge.dll"
+    assert out["dll"]["size"] > 0 and len(out["dll"]["sha256"]) == 64
+    assert out["sources"]["complete"] is True, "the source files ship with the build"
+    assert out["installed"]["exists"] is False
+    assert out["ok"] is False and "AddOns" in out["note"]
     assert "installed" in out
     assert out["note"]
+
+
+def test_dll_endpoint_reads_ok_with_the_sources_in_ninjatrader(tmp_path, monkeypatch):
+    """With the .cs copies in the platform's AddOns folder — the lane the card recommends —
+    the verdict flips to ok and the note carries the one-time compile step."""
+    _stub(monkeypatch, _cfg())
+    addons = tmp_path / "AddOns"
+    addons.mkdir()
+    for name in platform_mod.NINJATRADER_SOURCE_NAMES:
+        (addons / name).write_text("// stub source\n", encoding="utf-8")
+    monkeypatch.setattr(platform_mod, "detect_installs",
+                        lambda: {"ninjatrader": {"found": True, "version": "8.1.8.2",
+                                                 "addons_folder": str(addons)}})
+    out = asyncio.run(api.ninjatrader_dll())
+    assert out["ok"] is True
+    assert out["installed_sources"]["complete"] is True
+    assert "compile" in out["note"]
 
 
 # ── the instrument lane ───────────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@
 [![Instruments](https://img.shields.io/badge/instruments-49-blue?style=for-the-badge)](.)
 [![Code](https://img.shields.io/badge/code-~84k%20lines-brightgreen?style=for-the-badge)](.)
 [![API](https://img.shields.io/badge/API-180%20routes-orange?style=for-the-badge)](.)
-[![Tests](https://img.shields.io/badge/tests-1399%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+[![Tests](https://img.shields.io/badge/tests-1400%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
 
 ---
 

@@ -859,7 +859,10 @@ def ninjatrader_bridge_state() -> dict[str, Any]:
     app, the bridge's presence in NinjaTrader's AddOns folder (source — the supported lane — or a
     compiled copy), and whether the two builds match."""
     dll = NINJATRADER_ADDON_DIR / NINJATRADER_DLL_NAME
-    sources = [NINJATRADER_ADDON_DIR / name for name in NINJATRADER_SOURCE_NAMES]
+    # the .cs files ship beside the build script inside src/ — checking the folder root
+    # reported them missing on every machine (the DLL check masked it locally).
+    source_dir = NINJATRADER_ADDON_DIR / "src"
+    sources = [source_dir / name for name in NINJATRADER_SOURCE_NAMES]
     found = detect_installs().get("ninjatrader", {})
     addons_folder = str(found.get("addons_folder") or "")
     addons = Path(addons_folder) if addons_folder else None
@@ -870,7 +873,7 @@ def ninjatrader_bridge_state() -> dict[str, Any]:
         "dll": {"path": str(dll), "folder": str(NINJATRADER_ADDON_DIR), "name": NINJATRADER_DLL_NAME,
                 "exists": dll.is_file(), "size": dll.stat().st_size if dll.is_file() else 0,
                 "sha256": _sha256(dll) if dll.is_file() else "", "shipped": True},
-        "sources": {"folder": str(NINJATRADER_ADDON_DIR), "names": list(NINJATRADER_SOURCE_NAMES),
+        "sources": {"folder": str(source_dir), "names": list(NINJATRADER_SOURCE_NAMES),
                     "exists": all(p.is_file() for p in sources),
                     "complete": all(p.is_file() for p in sources)},
         "installed_path": str(installed) if installed is not None else "",
