@@ -11,8 +11,8 @@ this machine (see "Verified journey" at the bottom).
 - `build\...\DiskImages\DISK1\setup.exe` — raw IsCmdBld output (compressed network image)
 - `..\dist\ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe` — the release artifact
 
-Latest build: 41,759,968 bytes (39.83 MB), sha256
-`76F53EAD1703FD5DEFF7BB7139F5D4202863A80D5FE11C25CA6882D6F5EFCF81`
+Latest build: 41,770,193 bytes (39.84 MB), sha256
+`8EE41AF5E8B52C04F44FB46515B42312ABB66FB5043A7966DBF1E2F7E5A40F2A`
 
 ## How to rebuild
 
@@ -101,3 +101,14 @@ installed exe's sha256 equal to the dist exe's -> app headless on 8097 (healthz 
 untouched. Frozen-exe smoke on the same payload: 18/18, including asset parity (73/73 shell refs
 byte-identical), 11/11 help screenshots, the level-radar endpoint and the education corpus
 answering from inside the build, and a clean client-error log.
+
+Verified again on 2026-09-18 (the index-instrument UX pass: timeframe persistence, the Data-menu
+index explainer, the one-click Alpaca source switch and the Alpaca asset lane): silent install ->
+**600 files**, the installed exe's sha256 equal to the dist exe's (`CD895044…`) -> app headless
+on 8097 (healthz 200, `/api/candles/BTCUSDT` 200 / 173,401 B, `UNKNOWNXYZ` `[]`) -> ARP entry in
+`HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\{0561F1EC-8E61-46CB-A123-076ED6964D3D}`
+(product codes re-mint each build) -> silent uninstall -> install dir, desktop shortcut and the
+ARP entry all gone, `%APPDATA%` untouched, development shortcut restored. Frozen-exe smoke on the
+same payload: 18/18 including asset parity (73/73 shell refs byte-identical); new-code receipts:
+`/api/control/alpaca/assets` answers from inside the build and the served `menubar.js` hashes
+equal to the tree's.
