@@ -5,9 +5,9 @@
 [![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](.)
 [![License](https://img.shields.io/badge/license-MIT-informational?style=for-the-badge)](LICENSE)
 [![Instruments](https://img.shields.io/badge/instruments-49-blue?style=for-the-badge)](.)
-[![Code](https://img.shields.io/badge/code-~84k%20lines-brightgreen?style=for-the-badge)](.)
-[![API](https://img.shields.io/badge/API-180%20routes-orange?style=for-the-badge)](.)
-[![Tests](https://img.shields.io/badge/tests-1400%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+[![Code](https://img.shields.io/badge/code-~87k%20lines-brightgreen?style=for-the-badge)](.)
+[![API](https://img.shields.io/badge/API-181%20routes-orange?style=for-the-badge)](.)
+[![Tests](https://img.shields.io/badge/tests-1412%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
 
 ---
 
@@ -164,7 +164,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 │               │                                  │                          │
 │  ┌────────────▼──────────┐  ┌───────────────────▼────────────────────┐     │
 │  │   Telegram Alerts     │  │   FastAPI Dashboard                    │     │
-│  │   Entry/BE/Trail/Exit │  │   180 REST/WS routes + streams         │     │
+│  │   Entry/BE/Trail/Exit │  │   181 REST/WS routes + streams         │     │
 │  │   Daily Bias updates  │  │   Charts, VP, Footprint, Orderbook     │     │
 │  └───────────────────────┘  │   Scanner, Strategy Status, Tape       │     │
 │                              └───────────────────────────────────────┘     │
@@ -291,13 +291,13 @@ main.py (883L) ─── System orchestrator
         └── static/ ─── the legacy page's assets, served at /static/
 
     ├── atlas/ ─── live analytics (CVD, heatmap, imbalance, tapeflow, profiles)
-    │   └── api.py ─── the /api/atlas/* surface (45 routes)
+    │   └── api.py ─── the /api/atlas/* surface (56 routes)
     │
     ├── desktop/ ─── the desktop application
     │   ├── launcher.py ─── pywebview window / --headless server
     │   ├── api.py ─── /api/control/* (config, feeds, alerts, exports, layouts)
     │   ├── engine.py ─── the live pipeline host the UI reads from
-    │   └── ui/ ─── vanilla-JS modules (~34,800L across 81 files) + index.html
+    │   └── ui/ ─── vanilla-JS modules (~43,452L across 112 files) + index.html
 ```
 
 ---
@@ -601,7 +601,7 @@ The system auto-discovers instruments across 200+ broker-specific naming variant
 
 ### Frontend Components
 
-The current UI is the desktop suite: **81 vanilla-JS modules** (24 of them selftests) in `orderflow_system/desktop/ui/`
+The current UI is the desktop suite: **112 vanilla-JS modules** (33 of them selftests) in `orderflow_system/desktop/ui/`
 (shell and menus, chart, the order-flow engine, heatmap, tape, alerts, options, fundamentals, news,
 search, watchlist, studies — no build step, no framework). The 8 modules listed below are the legacy
 dashboard page's assets, still served at `/static/`:
@@ -951,16 +951,16 @@ orderflow_system/
 | Area | Files | Python Lines | UI Lines (JS/CSS/HTML) | Total Lines |
 |------|-------|-------------|------------------------|-------------|
 | Config | 2 | 842 | — | 842 |
-| Data feeds + storage | 17 | 6,710 | — | 6,710 |
-| Analytics (delta, footprint, volume profile, patterns, signals, alerts) | 17 | 3,077 | — | 3,077 |
-| Atlas (live analytics + `/api/atlas/*`) | 26 | 7,558 | — | 7,558 |
-| Desktop app (desktop package + packaging scripts) | 27 | 11,547 | — | 11,547 |
-| Desktop UI (vanilla JS + CSS + HTML, no build step) | 93 | — | 38,480 | 38,480 |
+| Data feeds + storage | 17 | 6,955 | — | 6,955 |
+| Analytics (delta, footprint, volume profile, patterns, signals, alerts) | 17 | 3,128 | — | 3,128 |
+| Atlas (live analytics + `/api/atlas/*`) | 30 | 9,191 | — | 9,191 |
+| Desktop app (desktop package + packaging scripts) | 34 | 16,694 | — | 16,694 |
+| Desktop UI (vanilla JS + CSS + HTML, no build step) | 122 | — | 46,856 | 46,856 |
 | Legacy dashboard (host + legacy page assets) | 14 | 2,571 | 4,667 | 7,238 |
-| Orchestrator (`main.py` + package init) | 2 | 892 | — | 892 |
-| **Total (excluding tests)** | **198** | **33,197** | **43,147** | **76,344** |
+| Orchestrator (`main.py` + package init) | 2 | 1,247 | — | 1,247 |
+| **Total (excluding tests)** | **238** | **40,628** | **46,856** | **87,484** |
 
-Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 86 files / 17,467 lines. The NinjaTrader bridge add-on ships as C# (`orderflow_system/data/ninjatrader_bridge/` — 1,126 lines of source + build script, plus the built DLL) and is not counted in the columns above; the desktop UI count also excludes its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the nine Help Centre screenshots (`orderflow_system/desktop/ui/help/`).
+Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 123 files / 23,481 lines. The NinjaTrader bridge add-on ships as C# (`orderflow_system/data/ninjatrader_bridge/` — 1,126 lines of source + build script, plus the built DLL) and is not counted in the columns above; the desktop UI count also excludes its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the nine Help Centre screenshots (`orderflow_system/desktop/ui/help/`).
 
 ---
 
@@ -968,8 +968,8 @@ Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest
 
 ### REST Endpoints (legacy dashboard API)
 
-The app additionally serves `/api/atlas/*` (45 routes — heatmap, tape, CVD, profiles, imbalance,
-trades, scanner, alerts, replay) and `/api/control/*` (83 routes — config, feeds, exports, layouts, backfill, windows, help).
+The app additionally serves `/api/atlas/*` (56 routes — heatmap, tape, CVD, profiles, imbalance,
+trades, scanner, alerts, replay) and `/api/control/*` (108 routes — config, feeds, exports, layouts, backfill, windows, help).
 The always-current list is the running app's OpenAPI schema at `/docs`. The endpoints below are the
 legacy dashboard set, kept for compatibility:
 
