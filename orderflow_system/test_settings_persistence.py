@@ -152,13 +152,15 @@ def test_the_telegram_master_switch_is_restored_and_collected():
 def test_the_view_state_is_saved_on_change_and_restored():
     src = _ui("ui.js")
     for control, key in (("rangeSelect", "range"), ("ovMarkers", "markers"),
-                         ("ovVP", "vp"), ("logLevel", "level"), ("logAuto", "auto")):
+                         ("ovVP", "vp"), ("logLevel", "level"), ("logAuto", "auto"),
+                         ("tfSelect", "tf")):
         at = src.find(f'{control}").onchange')
         assert at >= 0, f"{control} has no onchange handler"
         window = src[at:at + 400]
         assert "saveUIState" in window, f"{control} is changed but never saved"
         assert f"{{{key}:" in window or f"{key}:" in window, f"{control} saves the wrong field"
     assert "c.ui.chart" in src and "chartUI.markers" in src, "chart state is never restored"
+    assert "chartUI.tf" in src, "the chart timeframe is never restored"
     assert "c.ui.logs" in src and "logsUI.level" in src, "log state is never restored"
 
 
@@ -176,19 +178,46 @@ def test_the_alpaca_feed_save_patches_one_field():
         "the feed save must patch its own field, not re-post a stale whole config"
 
 
+def test_the_alpaca_symbol_list_says_what_it_is():
+    """The list is the Alpaca feed's own subscription set — not engine instruments. Saying so
+    is what stops "I added SPY and nothing happened" (the reported loop)."""
+    src = _ui("alpaca-card.js")
+    assert "subscribes the Alpaca feed" in src, "the list no longer says what it subscribes"
+
+
+def test_the_alpaca_card_switches_the_engine_source_in_one_click():
+    src = _ui("alpaca-card.js")
+    assert "'/api/control/source'" in src, "the source switch endpoint is gone"
+    assert "body: { source: 'alpaca' }" in src, "the switch must post the alpaca source id"
+    assert "alpUseSrc" in src and "alpFeedUseSrc" in src, "a one-click control is gone"
+    assert "Use Alpaca as the engine source" in src, "the button's literal label is gone"
+    assert "engine source: Alpaca" in src, "the state chip is gone"
+    at = src.find("async function alpUseSource")
+    assert at >= 0, "no handler behind the button"
+    assert "alpOvRender();" in src[at:at + 1800], \
+        "the card must re-render so the state chip replaces the button"
+
+
 # ── the new config blocks ────────────────────────────────────────────────────────────
 
 def test_chart_and_log_view_state_is_clamped(store):
     cfg = store.load_config()
-    cfg["ui"]["chart"] = {"range": -5, "markers": "yes", "vp": 0}
+    cfg["ui"]["chart"] = {"range": -5, "markers": "yes", "vp": 0, "tf": 7}
     cfg["ui"]["logs"] = {"auto": "no", "level": "trace"}
     saved = store.save_config(cfg)
-    assert saved["ui"]["chart"] == {"range": 0, "markers": True, "vp": False}
+    assert saved["ui"]["chart"] == {"range": 0, "markers": True, "vp": False, "tf": 60}
     assert saved["ui"]["logs"] == {"auto": True, "level": ""}
 
     cfg = store.load_config()
     cfg["ui"]["chart"]["range"] = 86_400
+    cfg["ui"]["chart"]["tf"] = 300
     cfg["ui"]["logs"]["level"] = "error"
     saved = store.save_config(cfg)
     assert saved["ui"]["chart"]["range"] == 86_400
+    assert saved["ui"]["chart"]["tf"] == 300
     assert saved["ui"]["logs"]["level"] == "ERROR"
+
+    cfg = store.load_config()
+    cfg["ui"]["chart"]["tf"] = 12_345                  # not a #tfSelect option
+    saved = store.save_config(cfg)
+    assert saved["ui"]["chart"]["tf"] == 60

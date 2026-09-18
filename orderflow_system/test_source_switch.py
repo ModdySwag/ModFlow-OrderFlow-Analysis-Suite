@@ -328,3 +328,14 @@ def test_the_both_and_all_legs_use_the_partition():
     assert 'partition["bybit"]' in main_src and 'partition["mt5"]' in main_src
     assert 'partition["alpaca"]' in main_src and 'partition["ninjatrader"]' in main_src
     assert "MT5 leg skipped" in main_src, "an empty leg must be announced, not silently blank"
+
+
+def test_each_source_hint_names_what_it_carries():
+    """The Data menu shows each venue's hint on hover — it must say what the venue carries,
+    not only how to reach it (the "where do I get index funds?" hunt)."""
+    hints = {sid: hint for sid, _name, hint, _url, _wired in api.FREE_SOURCES}
+    for crypto_only in ("bybit", "binance", "okx", "hyperliquid"):
+        assert "crypto only" in hints[crypto_only], crypto_only
+    assert "index CFDs" in hints["mt5"]
+    assert "ETFs" in hints["alpaca"]
+    assert "index futures" in hints["ninjatrader"]

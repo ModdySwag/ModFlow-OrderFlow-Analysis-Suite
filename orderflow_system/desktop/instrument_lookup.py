@@ -136,6 +136,11 @@ def source_fix_hint(source: str, mt5_available: bool = False, row: Optional[Mapp
     if src == "ninjatrader":
         return _FIX_HINTS["ninjatrader"]
     if src in ("bybit", "binance", "hyperliquid", "okx"):
+        # A row that carries an Alpaca mapping streams on Alpaca — telling NVDA's user to go
+        # find MT5 while the linked account is right there was the reported surprise.
+        if row is not None and str(row.get("alpaca_symbol") or "").strip():
+            return ("switch the data source to Alpaca for US equities and ETFs (☰ ▸ sources, or "
+                    "the setup assistant); MetaTrader 5 covers indices, metals and FX")
         return _FIX_HINTS["exchange"]
     if src in ("alpaca", "all"):
         return _FIX_HINTS["alpaca"]
@@ -267,6 +272,7 @@ def resolve(
     mt5_available: bool = False,
     mt5_known: Optional[Iterable[str]] = None,
     nt_known: Optional[Iterable[str]] = None,
+    alpaca_known: Optional[Iterable[str]] = None,
 ) -> dict[str, Any]:
     """What the typed symbol is, why, what to offer next. Pure — the caller supplies facts.
 
@@ -281,10 +287,12 @@ def resolve(
     engine_set = {str(s).upper() for s in engine_symbols}
     broker_by_norm = {normalise(s): s for s in (mt5_known or ())}
     broker_exact = {str(s) for s in (mt5_known or ())}
+    alpaca_by_norm = {normalise(s): s for s in (alpaca_known or ())}
     hit_exact = broker_by_norm.get(q, "")
     base: dict[str, Any] = {
         "query": raw, "symbol": q, "state": "unknown", "reason": "", "hint": "", "via": None,
         "instrument": None, "actions": ["open_instruments"], "suggestions": [], "broker_name": "",
+        "add_source": "",
     }
     if not q:
         base["reason"] = "type an instrument name"
@@ -399,6 +407,22 @@ def resolve(
             base["broker_name"] = matched
             base["reason"] = (f"your NinjaTrader terminal lists {matched} — add it, enable it and "
                               "restart the engine")
+            base["actions"] = ["add", "open_instruments"]
+            return base
+
+    # §82-ext: the linked Alpaca account's asset list is a venue listing too — the same shape as
+    # MT5's broker list and the NT terminal's names. A US ticker only Alpaca carries (SPY, QQQ)
+    # used to end at "unknown" while the add endpoint would have taken it (a user kept trying).
+    # The door names its own venue, so a Bybit-source session still writes the Alpaca stamp.
+    if alpaca_by_norm:
+        hit_alpaca = alpaca_by_norm.get(q, "")
+        if hit_alpaca:
+            base["state"] = "available"
+            base["symbol"] = hit_alpaca
+            base["broker_name"] = hit_alpaca
+            base["add_source"] = "alpaca"
+            base["reason"] = (f"your Alpaca account lists {hit_alpaca} — add it, then make "
+                               "Alpaca the data source and restart the engine to stream it")
             base["actions"] = ["add", "open_instruments"]
             return base
 

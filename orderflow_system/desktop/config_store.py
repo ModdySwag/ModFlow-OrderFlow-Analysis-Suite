@@ -70,6 +70,10 @@ VIEW_DEFAULT_MAP: dict[str, tuple[str, ...]] = {
     "ofx": ("ofx", "atlas.ofx"),
 }
 
+#: The chart’s timeframe options, in seconds — spelled exactly as `#tfSelect` in index.html.
+#: `_sanitise` clamps `ui.chart.tf` to this set so the file and the dropdown agree on what is legal.
+CHART_TFS: tuple[int, ...] = (60, 300, 900, 3600, 14400, 86400)
+
 LAYOUT_VERSIONS_MAX = 10                             # previous versions kept per layout
 LAYOUT_MAX_TABS = 12
 LAYOUT_MAX_WIDGETS = 24
@@ -554,7 +558,10 @@ def default_config() -> dict[str, Any]:
             # §83: view state the user sets by hand. These used to live only in the page, so a
             # restart put the chart back on its factory range and re-showed every marker the
             # user had switched off — the same class of "I have to set it again" as the keys.
-            "chart": {"range": 0, "markers": True, "vp": True},
+            # §83 continued: the timeframe was the last control left out of this block — a user
+            # picks 5m, restarts, and the chart says 1m again. Values are the #tfSelect options
+            # in seconds; the store clamps to that set below.
+            "chart": {"range": 0, "markers": True, "vp": True, "tf": 60},
             "logs": {"auto": True, "level": ""},
             # §73: the auxiliary windows that are OPEN — one widget each, placed on a monitor.
             # This is the desired set, not a history: opening adds, closing (either way) removes,
@@ -1367,16 +1374,22 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     ui["windows"] = clean_windows(ui.get("windows"))
 
     # §83: the chart and logs view state — clamped here so a hand-edited file can never park the
-    # chart on a nonsense range or leave the log filter on a level that does not exist.
+    # chart on a nonsense range, a bar size the dropdown cannot show, or leave the log filter on
+    # a level that does not exist.
     chart = ui.get("chart") if isinstance(ui.get("chart"), dict) else {}
     try:
         range_s = int(chart.get("range", 0) or 0)
     except (TypeError, ValueError):
         range_s = 0
+    try:
+        tf_s = int(chart.get("tf", 60) or 60)
+    except (TypeError, ValueError):
+        tf_s = 60
     ui["chart"] = {
         "range": range_s if 0 <= range_s <= 2_592_000 else 0,
         "markers": bool(chart.get("markers", True)),
         "vp": bool(chart.get("vp", True)),
+        "tf": tf_s if tf_s in CHART_TFS else 60,
     }
     logs_cfg = ui.get("logs") if isinstance(ui.get("logs"), dict) else {}
     level = str(logs_cfg.get("level", "") or "").upper()

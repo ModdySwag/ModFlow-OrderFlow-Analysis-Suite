@@ -100,18 +100,26 @@
     }
 
     async function loadAlpaca() {
-        const al = (typeof S !== 'undefined' && S && S.caps && S.caps.alpaca) || {};
-        const map = al.symbols || {};
-        const rows = Object.keys(map).map((app) => ({
-            app: app, label: app + '  (' + map[app] + ')',
-            detail: String(map[app]).indexOf('/') >= 0 ? 'crypto pair' : 'US equity / ETF',
-            enabled: false, source: 'alpaca',
-            group: String(map[app]).indexOf('/') >= 0 ? 'crypto pairs' : 'stocks & ETFs',
+        /* §82-ext: the account's own asset list is the venue listing (SPY, QQQ and every other
+           tradable ticker) — not only the few rows already mapped in the config. The reported
+           loop was adding SPY in places that accepted the text and did nothing with it. */
+        let res = null;
+        try { res = await api('/api/control/alpaca/assets'); } catch (err) { res = null; }
+        if (!res || res.linked === false) {
+            return { ok: true, rows: [], total: 0,
+                why: 'no Alpaca account is linked — link it in the Alpaca view, then its asset list appears here' };
+        }
+        const symbols = res.symbols || [];
+        if (!symbols.length) {
+            return { ok: true, rows: [], total: 0,
+                why: res.note || 'the Alpaca asset list could not be read — check the keys and paper mode' };
+        }
+        const rows = symbols.map((s) => ({
+            app: s, label: s, detail: 'US equity / ETF', enabled: false, source: 'alpaca',
+            group: 'Alpaca assets',
         }));
         return { ok: true, rows: rows, total: rows.length,
-            why: al.linked === false || !Object.keys(map).length
-                ? 'no Alpaca account is linked — the full asset list lives in the symbol search once it is'
-                : 'the ' + rows.length + ' pairs this install maps to Alpaca' };
+            why: 'the account lists ' + rows.length + ' tradable symbols — Enable adds one as an instrument' };
     }
 
     const SOURCES = { bybit: loadBybit, mt5: loadMt5, alpaca: loadAlpaca };
@@ -216,8 +224,11 @@
             { method: 'POST', body: { symbols: [symbol], source: source, enable: true } });
         const ok = res && res.ok !== false && ((res.added || []).length + (res.updated || []).length) > 0;
         state.note = ok
-            ? (symbol + ' enabled — restart the engine (Instruments ▸ Restart) to stream it')
-            : (symbol + ' could not be enabled: ' + ((res && (res.error || (res.skipped || [])[0])) || 'the venue did not confirm it'));
+            ? (source === 'alpaca'
+                ? (symbol + ' enabled on Alpaca — set the data source to Alpaca (☰ ▸ sources) and restart the engine to stream it')
+                : (symbol + ' enabled — restart the engine (Instruments ▸ Restart) to stream it'))
+            : (symbol + ' could not be enabled: '
+                + ((res && (res.error || ((res.skipped || [])[0] || {}).reason)) || 'the venue did not confirm it'));
         button.disabled = false;
         button.textContent = 'Enable';
         paintBody();

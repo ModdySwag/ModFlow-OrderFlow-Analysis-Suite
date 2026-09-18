@@ -243,6 +243,10 @@
         try {
             const res = await api('/api/control/source', { method: 'POST', body: { source: id } });
             state.active = id;
+            /* Adopt the response into the page's copy: with the engine stopped the status poll
+               carries no `source`, so a stale copy would leave the source chips (topbar,
+               Alpaca card) naming the old venue until a reload. */
+            try { S.config = S.config || {}; if (res && res.data_source) S.config.data_source = res.data_source; } catch (e) { /* page copy only */ }
             note(res && res.ok === false ? `refused: ${res.error || 'unknown source'}`
                 : `engine restarted on ${name}`);
             await loadSources();
@@ -324,6 +328,9 @@
 
     /* ── the inline editor (phase 1: one variable at a time) ──────────────── */
     let editing = null;
+    /* The Data menu's index explainer — the same one-click-in-place pattern as the editor:
+       the row swaps the dropdown content for the answer instead of sending the user to Help. */
+    let explainer = null;
     function openEditor(param) {
         editing = param;
         paintOpenMenu();
@@ -395,6 +402,27 @@
             document.dispatchEvent(new CustomEvent('ofap:expression', { detail: { path: path, value: value } }));
         }
         if (path.startsWith('atlas.') && window.OFAPAtlasSettings && OFAPAtlasSettings.reload) OFAPAtlasSettings.reload();
+    }
+
+    /* The reported hunt — "where do I get index funds?" — answered where the user already is:
+       one click swaps the menu for the three lines, the shared how-to and the doors to each
+       route. Nothing here is a paid tier of this app; the app says who to pay instead. */
+    function explainerBlock() {
+        if (!explainer) return '';
+        return `<div class="mb-editor">
+            <div class="mb-editor-head">Index funds &amp; indices <span class="mb-dim">which platform?</span></div>
+            <div class="mb-editor-why">One line per goal — then the door. The app itself is free: you only ever pay the platform.</div>
+            <div class="mb-editor-row"><b>Index ETFs</b> · SPY, QQQ <span class="mb-dim">— Alpaca: the free account works; its paid data plan just upgrades the data to full-market real-time.</span></div>
+            <div class="mb-editor-row"><b>Index CFDs</b> · US500, NAS100, DE40, gold, oil, FX <span class="mb-dim">— MetaTrader 5 with any broker: funded = live feed; a demo terminal streams quotes too.</span></div>
+            <div class="mb-editor-row"><b>Index futures</b> · ES, NQ <span class="mb-dim">— NinjaTrader 8 + the bridge add-on; free sim accounts work.</span></div>
+            <div class="mb-editor-why">Whichever you pick, changing the instrument is the same: enable it in <b>Instruments</b>, pick it in the top-bar <b>INSTRUMENT</b> dropdown, press <b>Start engine</b>.</div>
+            <div class="mb-editor-row">
+                <button class="mb-btn primary" id="mbExplainAlpaca">Alpaca setup</button>
+                <button class="mb-btn" id="mbExplainPlatforms">Connect a platform…</button>
+                <button class="mb-btn" id="mbExplainInstruments">Instruments</button>
+                <button class="mb-btn" id="mbExplainBack">Back</button>
+            </div>
+        </div>`;
     }
 
     /* ── the Layout menu: the terminal's arrangements, and the workspace switch ────────────────────
@@ -690,6 +718,17 @@
         return items;
     }
 
+    /* A menu row that names a setting must land on the control that owns it: the Data menu’s
+       timeframe row jumps to the chart panel and focuses #tfSelect — it used to be a dead
+       "planned" stub that named no way out. */
+    function openChartTimeframe() {
+        if (window.showView) window.showView('chart');
+        setTimeout(() => {
+            const sel = document.getElementById('tfSelect');
+            if (sel) sel.focus();
+        }, 80);
+    }
+
     function menus() {
         return [
             { id: 'file', label: 'File', items: [
@@ -718,6 +757,9 @@
             { id: 'data', label: 'Data', items: [
                 { header: 'Data source' },
                 { label: 'Source', submenu: sourceItems() },
+                { label: 'Index funds & indices — which platform?…', keepOpen: true,
+                  hint: 'three lines: ETF vs CFD vs futures, the shared how-to, and the doors to each route',
+                  run: () => { explainer = 'indices'; paintOpenMenu(); } },
                 { label: 'Instruments…', run: () => showView('instruments') },
                 { label: 'Instrument look-up\u2026', run: () => { if (window.OFAPHINT) OFAPHINT.run('lookup'); else showView('ofx'); } },
                 { label: 'Feed health', run: () => { showView('instruments'); note('tick rate and latency live in the status bar and the Instruments view'); } },
@@ -725,7 +767,9 @@
                 { header: 'Streams' },
                 { label: 'Extra Bybit streams (200-level book, liquidations)', checked: !!(state.params && extrasValue()), run: () => setExtraStreams(!extrasValue()) },
                 sep(),
-                planned('Timeframe / aggregation', 'phase 2 — the chart view owns its own settings'),
+                { label: 'Timeframe / aggregation…',
+                  hint: 'the chart panel owns the bar size — this opens it and focuses the timeframe dropdown',
+                  run: () => openChartTimeframe() },
                 planned('History & retention', 'phase 3 — storage policy (DB is ~547 MB of ticks)'),
                 planned('Replay…', 'phase 2 — the Replay view exists; deep-linking comes with the settings dialogs'),
                 planned('Notifications…', 'phase 2 — the Settings view already holds the channels'),
@@ -1074,8 +1118,10 @@
         const host = bar.querySelector(`.mb-menu[data-menu="${state.open}"]`);
         if (!menu || !host) return;
         state.itemMap = new Map();
-        host.innerHTML = promptBlock() || editorBlock() || itemsHtml(menu.items, menu.id, state.itemMap);
+        host.innerHTML = promptBlock() || editorBlock() || explainerBlock()
+            || itemsHtml(menu.items, menu.id, state.itemMap);
         bindEditor();
+        bindExplainer();
         bindAbout(host);
     }
 
@@ -1099,6 +1145,22 @@
             num.addEventListener('input', () => { range.value = num.value; });
             range.addEventListener('input', () => { num.value = range.value; });
         }
+    }
+
+    /* The explainer's doors: each closes the menu and lands on the real panel; Back returns
+       to the item list without leaving the dropdown. */
+    function bindExplainer() {
+        const back = el('mbExplainBack');
+        if (back) back.addEventListener('click', () => { explainer = null; paintOpenMenu(); });
+        [['mbExplainAlpaca', 'alpaca'], ['mbExplainPlatforms', 'platforms'], ['mbExplainInstruments', 'instruments']]
+            .forEach(([id, view]) => {
+                const btn = el(id);
+                if (btn) btn.addEventListener('click', () => {
+                    explainer = null;
+                    closeAll();
+                    if (window.showView) showView(view);
+                });
+            });
     }
 
     async function loadParams() {
@@ -1162,6 +1224,7 @@
                 const id = title.dataset.menu;
                 state.open = state.open === id ? null : id;
                 editing = null;
+                explainer = null;
                 syncOpen();
                 return;
             }

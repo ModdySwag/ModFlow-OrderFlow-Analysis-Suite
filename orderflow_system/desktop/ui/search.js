@@ -560,12 +560,11 @@ function searchActivateSymbol(symbol, opts) {
             sel.value = app;
             sel.dispatchEvent(new Event('change'));
         } else {
-            // not a configured instrument yet: say so instead of switching to nothing
-            if (typeof toast === 'function') {
-                toast(document.getElementById('ovBanner') || document.body,
-                    `${app} is not an enabled instrument yet — add it under Instruments, then it becomes streamable here.`,
-                    'warn');
-            }
+            /* Not a configured instrument yet — ask the server what it IS and, when a linked
+               venue confirms it (an Alpaca asset, a broker symbol), add it right here. The old
+               toast sent the user to the Instruments view, which has no row to add and no
+               form: the reported "keeps trying to add" loop. */
+            void searchAddUnknown(app);
         }
     }
     /* T12/B18: deep-launching the Engine also pre-loads its own symbol control (the Engine's
@@ -581,6 +580,47 @@ function searchActivateSymbol(symbol, opts) {
     window.showView && window.showView(o.view || searchDefaultView());
     searchPushActive();
     return app;
+}
+
+/* A symbol the app does not know yet: let the look-up decide, and when a venue confirms the
+   name (an Alpaca asset, a broker symbol), make the add HERE — the message it replaces
+   ("add it under Instruments") pointed at a view with no way to add anything. */
+async function searchAddUnknown(symbol) {
+    const host = document.getElementById('ovBanner') || document.body;
+    const say = (msg, kind) => { if (typeof toast === 'function') toast(host, msg, kind || 'warn'); };
+    let p = null;
+    try { p = await api('/api/control/instruments/resolve?symbol=' + encodeURIComponent(symbol)); }
+    catch (err) { p = null; }
+    const actions = (p && p.actions) || [];
+    if (p && actions.indexOf('add') >= 0) {
+        const addSymbol = p.symbol || symbol;
+        const source = p.add_source || p.source || '';
+        say(`adding ${addSymbol}${source ? ' on ' + source : ''}…`, 'info');
+        try {
+            const res = await api('/api/control/instruments/add',
+                { method: 'POST', body: { symbols: [addSymbol], source: source, enable: true } });
+            const skip = (res && (res.skipped || [])[0]) || {};
+            const ok = res && res.ok !== false
+                && ((res.added || []).length + (res.updated || []).length) > 0;
+            if (!ok) {
+                say(`${addSymbol} could not be added: ${(res && res.error) || skip.reason || 'the venue did not confirm it'}`, 'err');
+                return;
+            }
+            say(`${addSymbol} added — press Start engine (or restart it) to stream it`, 'ok');
+            if (typeof refreshInstruments === 'function') void refreshInstruments();
+            const sel = document.getElementById('symbolSelect');
+            if (sel) {
+                setTimeout(() => {
+                    const known = Array.from(sel.options).some((opt) => opt.value === addSymbol);
+                    if (known) { sel.value = addSymbol; sel.dispatchEvent(new Event('change')); }
+                }, 400);
+            }
+        } catch (err) {
+            say(`${addSymbol} could not be added: ${(err && err.message) ? err.message : err}`, 'err');
+        }
+        return;
+    }
+    say((p && p.reason) || `${symbol} is not an instrument this app can stream yet`, 'warn');
 }
 
 /** Alpaca spells crypto as BTC/USD; the program streams it as BTCUSDT. */

@@ -89,6 +89,14 @@ def test_the_picker_is_wired_from_config_to_markup():
     assert 'id="ofxSymPick"' in page
 
 
+def test_the_lookup_lane_reads_the_accounts_own_asset_list():
+    """§82-ext: the Alpaca lane lists the account's tradable symbols, not only the rows already
+    mapped in the config — the lane that makes SPY/QQQ addable from the look-up."""
+    lookup = (UI / "lookup.js").read_text(encoding="utf-8")
+    assert "'/api/control/alpaca/assets'" in lookup, "the lane is not backed by the account list"
+    assert "Alpaca assets" in lookup, "the lane lost its group label"
+
+
 def test_the_view_module_is_registered_with_the_audit():
     """A new ui/*.js that the audit does not know is a module nothing checks for dead calls."""
     audit = (Path(__file__).parent.parent / "scripts" / "audit_ui_refs.py").read_text(encoding="utf-8")

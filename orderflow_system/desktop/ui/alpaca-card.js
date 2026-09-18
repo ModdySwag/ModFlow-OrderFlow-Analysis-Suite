@@ -47,6 +47,10 @@ function alpOvCardHTML() {
     const acc = (report && report.account) || {};
     const configured = !!st.configured;
     const pill = typeof alpacaStatusPill === 'function' ? alpacaStatusPill() : '';
+    /* The reported confusion: keys saved, feed still on Bybit — "I only connected Alpaca".
+       The card carries the one click that makes the account the engine's data source. */
+    const srcNow = String(((S.status || {}).source) || ((S.config || {}).data_source) || '');
+    const alpacaSource = /(alpaca|all)/.test(srcNow);
     const rows = configured ? [
         alpacaCapabilityRow('IEX real-time equity tape', !!caps.equities_realtime_iex,
             'live trades for delta, footprint and VWAP — 30 stream symbols on the free plan'),
@@ -65,6 +69,11 @@ function alpOvCardHTML() {
         <div class="card-head">
             <span class="card-title">Broker account — Alpaca Markets</span>
             <span style="margin-left:10px">${pill}</span>
+            ${configured
+                ? (alpacaSource
+                    ? '<span class="dim" id="alpSrcChip" title="The engine streams from Alpaca — Data ▸ Source still lists every venue">engine source: Alpaca</span>'
+                    : '<button class="btn small primary" id="alpUseSrc" title="Set the engine data source to Alpaca — the engine restarts if it is running">Use Alpaca as the engine source</button><span class="dim" id="alpSrcMsg"></span>')
+                : ''}
             <div class="grow" style="flex:1"></div>
             <button class="btn small" id="ovAlpOpen" title="Keys, environment, capability report and symbol list">Open Alpaca setup</button>
         </div>
@@ -91,6 +100,37 @@ function alpOvRender() {
     host.innerHTML = alpOvCardHTML();
     const open = alpC('ovAlpOpen');
     if (open) open.onclick = () => { window.showView && window.showView('alpaca'); };
+    const srcBtn = alpC('alpUseSrc');
+    if (srcBtn) srcBtn.onclick = alpUseSource;
+}
+
+/* One click from "keys saved" to "the engine uses them". The same endpoint the Data ▸
+   Source rows use: it writes the source and restarts a running engine end-to-end, so the
+   feed actually moves — linking keys alone never switched it. */
+async function alpUseSource() {
+    const msgs = [alpC('alpSrcMsg'), alpC('alpFeedSrcMsg')].filter(Boolean);
+    const btns = [alpC('alpUseSrc'), alpC('alpFeedUseSrc')].filter(Boolean);
+    const say = (html) => { msgs.forEach((m) => { m.innerHTML = html; }); };
+    btns.forEach((b) => { b.disabled = true; });
+    say(' switching…');
+    try {
+        const r = await api('/api/control/source', { method: 'POST', body: { source: 'alpaca' } });
+        if (r && r.ok === false) {
+            say(`<span class="wiz-bad">${G_ESC(r.error || 'the switch was refused')}</span>`);
+            btns.forEach((b) => { b.disabled = false; });
+            return;
+        }
+        if (S.config) S.config.data_source = (r && r.data_source) || 'alpaca';
+        if (typeof toast === 'function') toast(document.body, (r && r.note) || 'source saved', 'info');
+        if (typeof pollStatus === 'function') void pollStatus();
+        if (typeof alpacaLoad === 'function') alpacaLoad(true);
+        if (window.OFX && !window.OFAP_PAUSED) OFX.renderLayers(true);
+        alpOvRender();                             // the button becomes the state chip
+        if (typeof alpFeedRender === 'function') alpFeedRender();
+    } catch (e) {
+        say(`<span class="wiz-bad">switch failed: ${G_ESC(String(e))}</span>`);
+        btns.forEach((b) => { b.disabled = false; });
+    }
 }
 
 /* ── the not-connected banner (dismissible, never nags twice in a row) ── */
@@ -160,7 +200,7 @@ function alpRouteRender() {
         <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
             <div class="field" style="flex:0 0 180px"><label>Add symbol</label>
                 <input type="text" id="alpAddSym" placeholder="e.g. TSLA" autocomplete="off" spellcheck="false"
-                       title="Any US ticker the account can reach — stocks, ETFs, or crypto as BTC/USD."></div>
+                       title="Subscribes the Alpaca feed's quote/trade stream for this ticker — to chart it as an instrument, add it in the Instrument look-up instead."></div>
             <button class="btn small" id="alpAddBtn">Add</button>
             <button class="btn small" id="alpDefaultsBtn" title="AAPL, MSFT, NVDA, SPY, QQQ">Use the defaults</button>
             <button class="btn small" id="alpSaveBtn">Save list</button>
@@ -223,7 +263,7 @@ function alpViewRender() {
     alpCardStyles();
     alpRouteRender();
     const note = alpC('alpRouteNote');
-    if (note) note.textContent = `${alpSymbols().length} symbol(s) — equity quotes and trades need an enabled account`;
+    if (note) note.textContent = `${alpSymbols().length} symbol(s) — this list subscribes the Alpaca feed's own stream; to chart a symbol as an instrument, add it in the Instrument look-up (Ctrl+F)`;
     if (typeof alpacaLoad === 'function') alpacaLoad(true);
     alpFeedRender();
 }
@@ -241,7 +281,11 @@ function alpFeedPill(state) {
 
 function alpFeedHostHTML(d) {
     if (!d || d.running === false) {
-        return `<div class="dim">Not running — ${G_ESC(d && d.note ? d.note : 'start the engine with Alpaca as its data source.')}</div>`;
+        const srcNow = String(((S.status || {}).source) || ((S.config || {}).data_source) || '');
+        const onAlpaca = /(alpaca|all)/.test(srcNow);
+        return `<div class="dim" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Not running — ${G_ESC(d && d.note ? d.note : 'start the engine with Alpaca as its data source.')}
+            ${onAlpaca ? '' : '<button class="btn small" id="alpFeedUseSrc" title="Set the engine data source to Alpaca — it restarts if the engine is running">Use Alpaca as the engine source</button>'}
+            <span class="dim" id="alpFeedSrcMsg"></span></div>`;
     }
     const subs = d.subscriptions || {};
     const budget = d.budget || {};
@@ -277,6 +321,8 @@ async function alpFeedRender() {
     if (!d) { host.innerHTML = '<div class="dim">feed status unavailable</div>'; alpFeedPill('unknown'); return; }
     alpFeedPill(d.state || (d.running ? 'running' : 'idle'));
     host.innerHTML = alpFeedHostHTML(d);
+    const useSrc = alpC('alpFeedUseSrc');
+    if (useSrc) useSrc.onclick = () => { void alpUseSource(); };
 
     // the feed selector: only offer what this account is entitled to
     const caps = (S.caps && S.caps.alpaca) || {};

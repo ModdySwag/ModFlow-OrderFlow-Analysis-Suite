@@ -495,9 +495,36 @@ async def instruments_add(payload: dict = Body(default={})) -> dict[str, Any]:
             "config": saved}
 
 
+#: The linked Alpaca account's tradable symbols (SPY, QQQ, …), read through the palette's shared
+#: AlpacaData — disk-cached a day there — behind a short in-process TTL so a keystroke-driven
+#: resolve never waits on the disk. §82-ext: the look-up's Alpaca lane and the resolver both read
+#: the venue's own list, the same way MT5 reads the broker's symbol_info.
+_ALPACA_SYMBOLS_CACHE: dict[str, Any] = {"at": 0.0, "symbols": []}
+_ALPACA_SYMBOLS_TTL_S = 600.0
+
+
+def _alpaca_asset_symbols() -> list[str]:
+    """Tradable US symbols of the linked account; [] when unlinked or unreadable — never raises."""
+    import time as _time
+
+    now = _time.time()
+    cached = list(_ALPACA_SYMBOLS_CACHE.get("symbols") or [])
+    if cached and (now - float(_ALPACA_SYMBOLS_CACHE.get("at") or 0.0)) < _ALPACA_SYMBOLS_TTL_S:
+        return cached
+    try:
+        rows = _search_data().assets() or []
+    except Exception:                      # noqa: BLE001 — the look-up must answer regardless
+        rows = []
+    symbols = [str(r.get("symbol") or "").strip().upper() for r in rows
+               if isinstance(r, dict) and str(r.get("symbol") or "").strip()]
+    _ALPACA_SYMBOLS_CACHE["symbols"], _ALPACA_SYMBOLS_CACHE["at"] = symbols, now
+    return list(symbols)
+
+
 def _resolve_instrument(symbol: str, cfg: dict[str, Any] | None = None,
                         *, broker_names: Optional[list[str]] = None,
-                        nt_names: Optional[list[str]] = None) -> dict[str, Any]:
+                        nt_names: Optional[list[str]] = None,
+                        alpaca_names: Optional[list[str]] = None) -> dict[str, Any]:
     """One builder for the instrument look-up's answer (§82) — every caller gets the same one.
 
     ``broker_names`` / ``nt_names`` are the venue symbol lists (MT5's broker list, the
@@ -518,6 +545,7 @@ def _resolve_instrument(symbol: str, cfg: dict[str, Any] | None = None,
         mt5_available=bool(mt5.get("available")),
         mt5_known=list(broker_names or []),
         nt_known=list(nt_names or []),
+        alpaca_known=list(alpaca_names or []),
     )
 
 
@@ -539,7 +567,12 @@ async def instruments_resolve(symbol: str = "", broker: bool = True) -> dict[str
         rows = await asyncio.to_thread(engine_mod.ninjatrader_symbol_names)
         nt_names = [str(row.get("Name") or "") for row in rows
                     if isinstance(row, dict) and row.get("Name")]
-    out = _resolve_instrument(symbol, cfg, broker_names=names, nt_names=nt_names)
+    alpaca_names: list[str] = []
+    alp = dict(cfg.get("alpaca") or {})
+    if alp.get("key_id") and alp.get("secret"):
+        alpaca_names = await asyncio.to_thread(_alpaca_asset_symbols)
+    out = _resolve_instrument(symbol, cfg, broker_names=names, nt_names=nt_names,
+                              alpaca_names=alpaca_names)
     total = len(nt_names) if source == "ninjatrader" else len(names)
     return {"ok": True, **out, "source": source or "bybit",
             "broker_total": total, "running": bool(engine_mod.engine.status().get("running"))}
@@ -655,20 +688,22 @@ async def studies_save(payload: dict = Body(default={})) -> dict[str, Any]:
 
 # (id, name, hint, probe url, wired) — `wired` means THIS build's engine can stream it today.
 # The rest are reachable and free, and are listed as detected-but-not-ingestible rather than
-# offered as a switch that would silently fall back to bybit.
+# offered as a switch that would silently fall back to bybit. Each hint also names what the
+# venue CARRIES — the Data menu shows it on hover, and the "where do I get index funds?" hunt
+# is answered in place by the explainer row beside it.
 FREE_SOURCES = (
-    ("bybit", "Bybit", "public WS + REST — trades, order book depth, candles, no key",
+    ("bybit", "Bybit", "public WS + REST — trades, order book depth, candles, no key · crypto only — indices need Alpaca, MT5 or NinjaTrader",
      "https://api.bybit.com/v5/market/time", True),
-    ("binance", "Binance Futures", "public WS + REST — trades, 100–1000-level book, candles, no key",
+    ("binance", "Binance Futures", "public WS + REST — trades, 100–1000-level book, candles, no key · crypto only — indices need Alpaca, MT5 or NinjaTrader",
      "https://fapi.binance.com/fapi/v1/time", True),
-    ("mt5", "MetaTrader 5", "your local terminal — free if it is installed here", "", True),
-    ("alpaca", "Alpaca crypto", "keyless crypto quotes and bars (no book)",
+    ("mt5", "MetaTrader 5", "your local terminal — free if it is installed here · index CFDs, FX, metals via your broker", "", True),
+    ("alpaca", "Alpaca crypto", "keyless crypto quotes and bars (no book) · keys add US stocks, ETFs and options",
      "https://data.alpaca.markets/v1beta3/crypto/us/latest/quotes?symbols=BTC%2FUSD", True),
-    ("okx", "OKX", "public WS + REST — trades, 400-level book, no key",
+    ("okx", "OKX", "public WS + REST — trades, 400-level book, no key · crypto only — indices need Alpaca, MT5 or NinjaTrader",
      "https://www.okx.com/api/v5/public/time", True),
-    ("hyperliquid", "Hyperliquid", "public WS + REST — trades, whole-book snapshots, no key",
+    ("hyperliquid", "Hyperliquid", "public WS + REST — trades, whole-book snapshots, no key · crypto only — indices need Alpaca, MT5 or NinjaTrader",
      "https://api.hyperliquid.xyz/info", True),
-    ("ninjatrader", "NinjaTrader 8", "your local terminal — free demo accounts work; needs the bridge add-on once",
+    ("ninjatrader", "NinjaTrader 8", "your local terminal — free demo accounts work; needs the bridge add-on once · index futures (ES, NQ) and more",
      "tcp://127.0.0.1:8790", True),
 )
 
@@ -1571,6 +1606,19 @@ async def alpaca_status(refresh: bool = Query(default=False)) -> dict[str, Any]:
             return out
     out["report"] = _ALPACA_CACHE["report"]
     return out
+
+
+@router.get("/alpaca/assets")
+async def alpaca_assets() -> dict[str, Any]:
+    """The linked account's tradable symbols — the look-up's Alpaca lane reads this (§82-ext)."""
+    cfg = config_store.load_config()
+    alp = dict(cfg.get("alpaca") or {})
+    if not (alp.get("key_id") and alp.get("secret")):
+        return {"ok": True, "linked": False, "symbols": [], "total": 0,
+                "note": "no Alpaca account is linked — the Alpaca view holds the keys"}
+    symbols = await asyncio.to_thread(_alpaca_asset_symbols)
+    return {"ok": True, "linked": True, "symbols": symbols, "total": len(symbols),
+            "note": "" if symbols else "the asset list could not be read — check the keys and paper mode"}
 
 
 @router.post("/alpaca/test")

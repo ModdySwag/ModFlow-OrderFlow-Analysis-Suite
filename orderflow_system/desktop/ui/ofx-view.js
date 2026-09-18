@@ -1172,11 +1172,14 @@
         if (action === 'enable' || action === 'add') {
             if (!symbol) { setSymbolMsg('type an instrument name first', 'bad'); return; }
             const instrumentRow = p.instrument || {};
-            const body = { symbols: [symbol], source: p.source || '', enable: true };
+            /* §82-ext: the resolve answer may name its own venue — an Alpaca asset found from a
+               Bybit session — and the add must go to THAT venue or the venue catalog refuses it. */
+            const addSource = p.add_source || p.source || '';
+            const body = { symbols: [symbol], source: addSource, enable: true };
             /* A row that carries the broker's own name keeps it; a broker-only add maps the
                typed name onto itself. */
-            if (p.source === 'mt5') body.mt5_symbols = { [symbol]: p.broker_name || instrumentRow.mt5_symbol || symbol };
-            if (p.source === 'alpaca') body.alpaca_symbols = { [symbol]: instrumentRow.alpaca_symbol || symbol };
+            if (addSource === 'mt5') body.mt5_symbols = { [symbol]: p.broker_name || instrumentRow.mt5_symbol || symbol };
+            if (addSource === 'alpaca') body.alpaca_symbols = { [symbol]: instrumentRow.alpaca_symbol || symbol };
             setSymbolMsg(`${action === 'add' ? 'adding' : 'enabling'} ${symbol}…`);
             try {
                 const res = await apiGet('/api/control/instruments/add', { method: 'POST', body });
@@ -1197,7 +1200,9 @@
                         return;
                     }
                 }
-                setSymbolMsg(`${symbol} is on — the engine covers it now`, 'ok');
+                setSymbolMsg((p.add_source && p.add_source !== p.source)
+                    ? `${symbol} added on ${p.add_source} — switch the data source to ${p.add_source} (☰ ▸ sources) and start the engine to stream it`
+                    : `${symbol} is on — the engine covers it now`, 'ok');
                 /* The view was showing whatever was typed; a broker name is not an app symbol,
                    so the stage would keep asking for a symbol nothing streams (measured: the
                    footprint 404 note stayed on screen after a successful add). Follow the row. */

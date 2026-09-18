@@ -241,3 +241,41 @@ def test_a_stale_default_mapping_is_remapped_from_the_rows_own_market_names():
     assert out["actions"] == ["add", "open_instruments"]
     assert out["broker_name"] == "USTEC"
     assert "USTEC" in out["reason"]
+
+
+# ── §82-ext: the Alpaca asset list is a venue listing too ───────────────────────────
+
+def test_a_linked_alpaca_asset_answers_available_with_its_own_door():
+    """The reported loop: SPY (a US ticker only Alpaca lists) read "unknown" while the add
+    endpoint would have taken it. With the account's asset list in hand it is available, and
+    the door names Alpaca even from a Bybit session — the add must go to the venue that
+    confirmed the name."""
+    out = IL.resolve("SPY", instruments=_rows(), source="bybit",
+                     alpaca_known=["SPY", "QQQ", "AAPL", "BTC/USD"])
+    assert out["state"] == "available"
+    assert out["symbol"] == "SPY" and out["broker_name"] == "SPY"
+    assert out["add_source"] == "alpaca"
+    assert out["actions"] == ["add", "open_instruments"]
+    assert "Alpaca" in out["reason"]
+
+
+def test_a_shipped_row_still_answers_from_the_config_first():
+    """An Alpaca-listed name that IS a shipped row keeps its row verdict (the source gate),
+    never the asset-list short cut."""
+    out = IL.resolve("NVDA", instruments=_rows(), source="bybit", alpaca_known=["NVDA"])
+    assert out["state"] == "unsupported" and out["add_source"] == ""
+
+
+def test_without_the_asset_list_an_unknown_symbol_stays_unknown():
+    out = IL.resolve("SPY", instruments=_rows(), source="bybit")
+    assert out["state"] == "unknown"
+    assert "add" not in out["actions"] and out["add_source"] == ""
+
+
+def test_the_exchange_refusal_names_alpaca_when_the_row_maps_to_it():
+    """NVDA on Bybit used to be told to go find MT5 — while Alpaca (linked, and where the row
+    actually streams) was never named. Index rows keep the MT5 sentence."""
+    hint = IL.source_fix_hint("bybit", False, _row("NVDA"))
+    assert "Alpaca" in hint and "MetaTrader 5" in hint
+    plain = IL.source_fix_hint("bybit", False, _row("NAS100USDT"))
+    assert "Alpaca" not in plain and "MetaTrader 5" in plain

@@ -200,3 +200,28 @@ def test_ofx_save_with_an_empty_symbol_does_not_pretend(monkeypatch):
     out = asyncio.run(api.ofx_save({"symbol": ""}))
     assert out["stream"]["state"] == "unknown"
     assert out["stream"]["reason"] == "type an instrument name"
+
+
+# ── §82-ext: the Alpaca lane ─────────────────────────────────────────────────────────
+
+def test_resolve_hands_the_linked_alpaca_assets_to_the_look_up(monkeypatch):
+    cfg = _cfg(source="bybit")
+    cfg["alpaca"] = {"key_id": "test-key-id", "secret": "test-secret"}
+    _stub(monkeypatch, cfg, running=False)
+    monkeypatch.setattr(api, "_alpaca_asset_symbols", lambda: ["SPY", "QQQ"])
+    out = asyncio.run(api.instruments_resolve(symbol="SPY"))
+    assert out["state"] == "available" and out["add_source"] == "alpaca"
+    assert "add" in out["actions"] and "Alpaca" in out["reason"]
+
+
+def test_the_assets_route_answers_unlinked_without_keys_and_serves_the_list_with_them(monkeypatch):
+    cfg = _cfg(source="bybit")
+    _stub(monkeypatch, cfg, running=False)
+    out = asyncio.run(api.alpaca_assets())
+    assert out["ok"] is True and out["linked"] is False and out["symbols"] == []
+    linked = dict(cfg)
+    linked["alpaca"] = {"key_id": "test-key-id", "secret": "test-secret"}
+    monkeypatch.setattr(config_store, "load_config", lambda: linked)
+    monkeypatch.setattr(api, "_alpaca_asset_symbols", lambda: ["SPY", "QQQ"])
+    out2 = asyncio.run(api.alpaca_assets())
+    assert out2["linked"] is True and out2["symbols"] == ["SPY", "QQQ"] and out2["total"] == 2

@@ -101,3 +101,19 @@ def test_the_menu_ships_the_trio_and_retired_the_planned_row():
         assert needle in menu, "the View menu lost: " + needle
     assert "planned('Reset all view settings'" not in menu, "the placeholder is back"
 
+
+def test_the_timeframe_row_lands_on_the_chart_control():
+    menu = _text(UI / "menubar.js")
+    assert "planned('Timeframe / aggregation'" not in menu, "the dead TF stub is back"
+    assert "openChartTimeframe" in menu and "getElementById('tfSelect')" in menu, \
+        "the Data menu must take the user to the chart's timeframe control"
+
+
+def test_the_index_platforms_explainer_lives_in_the_data_menu():
+    menu = _text(UI / "menubar.js")
+    assert "Index funds & indices — which platform?" in menu, "the explainer row is gone"
+    assert "function explainerBlock" in menu and "explainerBlock()" in menu, "the block is gone"
+    for needle in ("mbExplainAlpaca", "mbExplainPlatforms", "mbExplainInstruments", "mbExplainBack"):
+        assert needle in menu, "the explainer lost a door: " + needle
+    assert "showView(view)" in menu, "the explainer's doors must land on real panels"
+

@@ -898,7 +898,8 @@ function renderChartKpis(vp, bias, bars) {
     }
 }
 
-$("#tfSelect").onchange = (e) => { S.tf = +e.target.value; loadChart(); };
+$("#tfSelect").onchange = (e) => { S.tf = +e.target.value; loadChart();
+    void saveUIState({ chart: { tf: S.tf } }); };
 $("#chartMode").onchange = () => { void saveChartExpression({ mode: $("#chartMode").value }); };
 $("#chartPalette").onchange = () => { void saveChartExpression({ palette: $("#chartPalette").value }); };
 /* ui.js is the FIRST module tag in the shell and the catalogue's is later in the document, so the
@@ -1463,8 +1464,8 @@ function renderSettings() {
        restored, never collected and never saved, so routing order-flow alerts to Telegram could
        not be switched on from the UI at all. It is a stored setting; show it and save it. */
     if ($("#setTgEnabled")) $("#setTgEnabled").checked = !!c.telegram.enabled;
-    /* §83: view state the user sets by hand (chart range/markers/VP, log filter) is restored from
-       the config now — a restart used to put every one of them back to factory. */
+    /* §83: view state the user sets by hand (chart range/timeframe/markers/VP, log filter) is
+       restored from the config now — a restart used to put every one of them back to factory. */
     const chartUI = (c.ui && c.ui.chart) || {};
     const rangeSel = $("#rangeSelect");
     if (rangeSel && chartUI.range) {
@@ -1472,6 +1473,16 @@ function renderSettings() {
         if (Array.from(rangeSel.options).some((o) => o.value === wanted)) {
             rangeSel.value = wanted;
             S.range = Number(chartUI.range);
+        }
+    }
+    /* §83 continued: the timeframe comes back the same way — and only when the dropdown really
+       carries the value, so a hand-edited file cannot park the chart on a bar size it cannot show. */
+    const tfSel = $("#tfSelect");
+    if (tfSel && chartUI.tf) {
+        const wantedTf = String(chartUI.tf);
+        if (Array.from(tfSel.options).some((o) => o.value === wantedTf)) {
+            tfSel.value = wantedTf;
+            S.tf = Number(chartUI.tf);
         }
     }
     if ($("#ovMarkers")) $("#ovMarkers").checked = chartUI.markers !== false;
@@ -1539,6 +1550,7 @@ async function collectSettings() {
         range: parseInt(($("#rangeSelect") || {}).value, 10) || 0,
         markers: !!($("#ovMarkers") || {}).checked,
         vp: !!($("#ovVP") || {}).checked,
+        tf: parseInt(($("#tfSelect") || {}).value, 10) || 60,
     };
     cfg.ui.logs = {
         auto: !!($("#logAuto") || {}).checked,
