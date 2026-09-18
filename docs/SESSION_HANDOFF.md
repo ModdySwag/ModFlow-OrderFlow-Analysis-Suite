@@ -5286,3 +5286,13 @@ Integration: the rail gained Journal + Calendar; every new view carries a Help t
 - **Root cause (measured, not guessed).** The test drains 296 signals through a fake socket whose 1 ms writes are, on Windows, stretched to the platform timer tick (~15.6 ms): the drain measures **4.10 s** on this machine (`--durations`) against a **5 s** deadline — ~20% headroom, crossed on a loaded runner. The never-drop path itself was never implicated (`dropped == 0` held).
 - **Fix.** The budget is now a **30 s hang guard** with a comment explaining the tick; the assertion is untouched — every signal, in order, or the test fails. File green 4× locally (durations confirm the 4.1 s drain); full suite **1400/2**.
 - **Pattern note.** Third of the same class this session (P2-3 real-time yield checks → fake clock; the NT bridge test → machine-independent stub; this one → a budget that stopped racing the platform timer). All three were real-time or machine-state dependence in the TEST, never the code under test.
+
+---
+
+**§113 — the private lane is gone: ModFlow-beta-builds made public, tester-gating wording removed, anonymous downloads verified.**
+
+- **His word:** “remove all blocks for private testers/users on github and make evrything public.”
+- **The flip.** `gh repo edit ModdySwag/ModFlow-beta-builds --visibility public --accept-visibility-change-consequences`. No pending invitations existed; the only collaborator was the owner. Read back: `visibility: public, private: false` — and an **anonymous** API call (no token) sees it as public.
+- **De-gated the copy.** Repo description and README drop “for invited testers” (README commit `1214a606…`: “Make the lane public: drop the tester-gating wording”); the floor of the README now says feedback goes through the main repository. The release notes never carried gating wording.
+- **Anonymous receipts (no auth at all).** The release `v0.1.0-beta` fetched anonymously — `prerelease: true` (kept; it is a beta), `draft: false`, all three assets `uploaded`. **SBOM downloaded anonymously → sha256 == local** (`8c3c0683…`); **Setup downloaded anonymously (41,759,968 B) → sha256 == local** (`76f53ead…`).
+- **Owed (resolved).** The “invite testers as Read collaborators” item is obsolete — the lane is open to anyone. Everything the product publishes on GitHub is public: the suite repo (source, docs, releases-of-record) and this binaries lane.

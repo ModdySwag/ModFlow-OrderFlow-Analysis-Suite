@@ -1,6 +1,16 @@
 # Resume here — ModFlow OrderFlow Analysis Suite
 
-> ## ▶ RE-ATTENDANCE (latest, 2026-09-18 — **§112: third CI flake fixed — the websocket never-drop drain budget raced the Windows timer tick (4.1 s measured vs a 5 s deadline); budget now a 30 s hang guard, assertion untouched**)
+> ## ▶ RE-ATTENDANCE (latest, 2026-09-18 — **§113: private lane retired — ModFlow-beta-builds is PUBLIC; tester-gating wording removed; anonymous downloads hash-verified**)
+>
+> **State.** Full record: SESSION_HANDOFF **§113**. `gh repo edit --visibility public` (anonymous API confirms public; no pending invites existed). Repo description + README de-gated (`1214a606…`). Receipts without auth: the release and all three assets reachable; SBOM and Setup downloaded anonymously and hash-matched (`8c3c0683…`, `76f53ead…`). The "invite testers" item is obsolete — nothing on GitHub is gated any more.
+>
+> **Gates.** (unchanged) pytest 1400 / 2 skipped; AUDIT CLEAN; ruff clean; 33/33 selftests; CI green on `42ad195`.
+>
+> **Owed.** Follow-ups: radar walls / big-trade zones, spent-state persistence, B5 migrations, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §113 closed (beta lane public; everything downloadable without auth). Owed: the standing follow-ups.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-18 — **§112: third CI flake fixed — the websocket never-drop drain budget raced the Windows timer tick (4.1 s measured vs a 5 s deadline); budget now a 30 s hang guard, assertion untouched**)
 >
 > **State.** Full record: SESSION_HANDOFF **§112**. `1112b5e` (docs-only) went red on 3.11 only; root cause measured: 296 fake writes × the 15.6 ms platform tick = a 4.1 s drain against a 5 s deadline. Fixed in `test_websocket_backpressure.py` (30 s hang-guard budget, same assertion); file green 4×; suite **1400/2**.
 >
