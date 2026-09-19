@@ -207,8 +207,26 @@
         if (at - item.at >= CACHE_MS) { delete state.cache[key]; return null; }
         return item.payload;
     }
+    /* D-01: reads expire by access, so a (symbol, expiry) key nobody asks for again stayed
+       resident for the session. A put past the cap sweeps the expired keys, then the oldest. */
+    const CACHE_MAX = 24;
+
     function cachePut(key, payload, now) {
-        state.cache[key] = { at: num(now) === null ? Date.now() : num(now), payload: payload };
+        const at = num(now) === null ? Date.now() : num(now);
+        state.cache[key] = { at: at, payload: payload };
+        if (cacheSize() > CACHE_MAX) {
+            Object.keys(state.cache).forEach(function (k) {
+                if (at - state.cache[k].at >= CACHE_MS) delete state.cache[k];
+            });
+            while (cacheSize() > CACHE_MAX) {
+                let oldest = null;
+                Object.keys(state.cache).forEach(function (k) {
+                    if (oldest === null || state.cache[k].at < state.cache[oldest].at) oldest = k;
+                });
+                if (oldest === null) break;
+                delete state.cache[oldest];
+            }
+        }
         return payload;
     }
     function cacheSize() { return Object.keys(state.cache).length; }

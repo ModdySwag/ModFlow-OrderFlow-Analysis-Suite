@@ -68,6 +68,13 @@ loose DLL sat ignored in testing, which is why the source lane above is the one 
 If the port is taken, the bridge logs the bind failure to `ntbridge.log` and to the Log tab —
 change `Port` in `ModFlowBridge.cs` (and the port in the suite's bridge card) or free the port.
 
+**Install one lane at a time.** The source lane (F5) and the prebuilt-DLL lane are two copies of
+the same bridge. A NinjaScript recompile reloads the add-on *in place* and the previous copy can
+keep the port and its threads, so a bridge installed through both lanes — or an F5 reload over a
+running one — ends with two copies in the process and possibly one zombie holding 8790. The
+bridge no longer tries to work around that at load time; if the log says the port is held after a
+recompile, restart NinjaTrader. To switch lanes, remove the old copy first.
+
 ## What the tier decides
 
 The bridge republishes **whatever your NinjaTrader is connected to**, so the honest tier map is:

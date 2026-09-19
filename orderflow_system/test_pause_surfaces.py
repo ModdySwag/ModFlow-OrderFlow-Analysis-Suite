@@ -13,20 +13,26 @@ from pathlib import Path
 UI = Path(__file__).resolve().parent / "desktop" / "ui"
 INDEX = UI / "index.html"
 
-#: surf id -> the file whose code must consult the arbiter for that surface
+#: surf id -> the file(s) whose code must consult the arbiter for that surface
 WIRED = {
-    "overview": "ui.js", "chart": "ui.js", "orderflow": "ui.js", "depth": "ui.js",
-    "tape": "ui.js", "signals": "ui.js", "marketwatch": "ui.js",
-    "ofx": "ofx-view.js", "trackers": "atlas-v2.js",
+    "overview": ("ui.js",), "chart": ("ui.js",), "orderflow": ("ui.js",), "depth": ("ui.js",),
+    "tape": ("ui.js",), "signals": ("ui.js",), "marketwatch": ("ui.js",),
+    "ofx": ("ofx-view.js",), "trackers": ("atlas-v2.js",),
+    # The last live surfaces: the map's own loader joins its overlay in honouring the hold,
+    # and CVD / profile / frames consult the arbiter before repainting (their sections
+    # already carry the surface attribute, so their gestures leased all along).
+    "heatmap": ("heatmap-pro.js", "atlas.js"), "cvd": ("atlas.js",),
+    "profile": ("atlas.js",), "frames": ("atlas.js",),
 }
 
 
 def test_every_pause_button_has_a_real_hold():
     html = INDEX.read_text(encoding="utf-8")
-    for surface, owner in WIRED.items():
+    for surface, owners in WIRED.items():
         assert f'data-surf="{surface}"' in html, f"no Pause button for {surface}"
-        code = (UI / owner).read_text(encoding="utf-8")
-        assert f"held('{surface}')" in code, f"{owner} never consults the arbiter for {surface}"
+        for owner in owners:
+            code = (UI / owner).read_text(encoding="utf-8")
+            assert f"held('{surface}')" in code, f"{owner} never consults the arbiter for {surface}"
 
 
 def test_each_wired_surface_is_declared_on_its_section():

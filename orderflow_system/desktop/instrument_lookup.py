@@ -273,6 +273,7 @@ def resolve(
     mt5_known: Optional[Iterable[str]] = None,
     nt_known: Optional[Iterable[str]] = None,
     alpaca_known: Optional[Iterable[str]] = None,
+    alpaca_by_norm: Optional[Mapping[str, str]] = None,
 ) -> dict[str, Any]:
     """What the typed symbol is, why, what to offer next. Pure — the caller supplies facts.
 
@@ -287,7 +288,10 @@ def resolve(
     engine_set = {str(s).upper() for s in engine_symbols}
     broker_by_norm = {normalise(s): s for s in (mt5_known or ())}
     broker_exact = {str(s) for s in (mt5_known or ())}
-    alpaca_by_norm = {normalise(s): s for s in (alpaca_known or ())}
+    # MEM-B-09: a caller that already holds the normalised map (the resolver's cached index)
+    # passes it in — the per-call rebuild of a several-thousand-entry dict is avoided.
+    if alpaca_by_norm is None:
+        alpaca_by_norm = {normalise(s): s for s in (alpaca_known or ())}
     hit_exact = broker_by_norm.get(q, "")
     base: dict[str, Any] = {
         "query": raw, "symbol": q, "state": "unknown", "reason": "", "hint": "", "via": None,

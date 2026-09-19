@@ -34,14 +34,22 @@ def attach_services(
     if getattr(hub, "history", None) is None:
         from orderflow_system.atlas.history import EventHistory
 
-        enabled = bool((atlas_cfg.get("history") or {}).get("enabled", True))
+        history_cfg = atlas_cfg.get("history") or {}
+        enabled = bool(history_cfg.get("enabled", True))
         if db_path is None:
             try:
                 from orderflow_system.desktop import config_store
                 db_path = str(config_store.db_path())
             except Exception:                        # pragma: no cover - fallback
                 db_path = "orderflow_data.db"
-        hub.attach_history(EventHistory(str(db_path), enabled=enabled))
+        # MEM-A2-09: the event log's retention window is the configured one, not its own 7-day
+        # default — the storage panel states one window and every store must obey it.
+        try:
+            retention_days = float(history_cfg.get("retention_days", 7.0))
+        except (TypeError, ValueError):
+            retention_days = 7.0
+        hub.attach_history(EventHistory(str(db_path), enabled=enabled,
+                                        retention_days=retention_days))
         info["history"] = True
 
     if getattr(hub, "notifier", None) is None:

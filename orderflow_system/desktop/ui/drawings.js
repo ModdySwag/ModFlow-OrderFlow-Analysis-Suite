@@ -804,6 +804,8 @@
     /* ── attach ───────────────────────────────────────────────────────────── */
     function attach(host, adapter) {
         if (!host || !adapter) return null;
+        /* D-11: attaching twice used to add a second canvas and a second subscription. */
+        if (state.host === host && state.canvas && state.canvas.isConnected) return state.canvas;
         state.host = host;
         state.adapter = adapter;
         state.tickSize = Number(adapter.tickSize) || 0.1;
@@ -834,7 +836,14 @@
         paint();
     }
 
-    root.OFAPDRAW = {
+    function detach() {
+        if (state.canvas && state.canvas.parentNode) state.canvas.parentNode.removeChild(state.canvas);
+        state.canvas = null;
+        state.ctx = null;
+        state.host = null;
+    }
+
+    root.OFAPDRAW = { detach,
         TOOLS: KINDS, state, attach, resize, paint, setTool, select, remove, clearAll, hideAll,
         duplicate, save, load, serialize,
         undo, deleteSelection, selectAll, isSelected,

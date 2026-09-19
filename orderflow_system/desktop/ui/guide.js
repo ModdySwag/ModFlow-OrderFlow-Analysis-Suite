@@ -41,6 +41,7 @@ const TIPS = {
     '.nav-item[data-view="alerts"]': 'Alert rules, the live alert log, persisted detection history and Telegram routing.',
     '.nav-item[data-view="instruments"]': 'Choose which instruments the engine subscribes to.',
     '.nav-item[data-view="alpaca"]': 'Optional: link a US brokerage account (stocks, ETFs, options, crypto) for its tape, news and market calendar. Alt+A opens it.',
+    '.nav-item[data-view="profiles"]': 'Saved setups (playbooks): feed, instruments, analysis, layout and theme switch together — save the current set, tweak a copy, share one as a file, or auto-switch by session.',
     '.nav-item[data-view="settings"]': 'Everything the app can change at runtime \u2014 saved to your user config folder, never to the source.',
     '.nav-item[data-view="logs"]': 'Live engine log with level filtering.',
     '.nav-item[data-view="guide"]': 'This guide: what the program does, how to set it up, and what every screen shows.',
@@ -1668,8 +1669,8 @@ const HELP_TOPICS = {
             { t: 'Test', d: 'Sends one real message. Because a busy market can fire alerts every few seconds, '
                 + 'email is deliberately left unticked on the rules by default — opt in per rule.' },
         ],
-        note: 'The password is stored in your local config file only. It is never displayed back and never leaves '
-            + 'this machine except in the login to your own mail server.',
+        note: 'The password is stored in your local config file only — the file the suite keeps on this machine. '
+            + 'It leaves the machine only in the login to your own mail server.',
     },
     webhook: {
         title: 'Webhook (Slack, Discord, your own script)',
@@ -2210,6 +2211,23 @@ WIZ_STEPS.splice(2, 0, {
                    <button class="btn small" data-help="${id}"
                        title="Open the step-by-step walkthrough">Open</button>
                  </div>`).join('')}`,
+    });
+    /* §117: the identity block — the competitive pass named the missing framing: a platform in
+       this niche should say what it is and is not, so the gaps stop reading as deficiencies. */
+    GUIDE_SECTIONS.push({
+        h: 'What this program is — and is not',
+        body: `<p><b>An analytics layer, not a broker terminal.</b> ModFlow reads the market in depth —
+                 order flow, CVD, profile, heatmap, depth, tape, trackers, alerts, replay — and sits
+                 beside whatever you execute in. It places no orders and holds no funds; your terminal
+                 stays your terminal.</p>
+               <p><b>The data.</b> The built-in venues (Bybit, Binance, Hyperliquid, OKX, Alpaca crypto)
+                 are free public feeds needing no key; MT5 and NinjaTrader 8 ride the terminal you
+                 already run. What a broker or exchange charges for its own data is between you and
+                 them — exactly as with any terminal.</p>
+               <p><b>The workspace is yours to keep.</b> Screen arrangements save as layouts, whole setups
+                 save as playbooks, indicator sets save as collections, and every shortcut can be
+                 re-bound — all in your own config file.
+                 <button class="btn small" data-help="start.identity">Open the topic</button></p>`,
     });
     /* the view is built lazily, but if it already exists, refresh it */
     const body = document.getElementById('guideBody');

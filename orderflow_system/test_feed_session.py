@@ -429,3 +429,31 @@ def test_a_non_data_frame_does_not_reset_the_ladder():
     session = _run(main())
     assert attempts["n"] >= 2, "the session never reconnected"
     assert session._backoff.current > 0.05, "an ack frame must not reset the ladder"
+
+
+# ── MEM-A2-04: a stop during an in-flight connect closes the socket ──────────────────────────
+def test_a_stop_during_an_in_flight_connect_closes_the_socket():
+    """The socket that becomes visible after stop() is closed, and no frame is handled."""
+    async def scenario():
+        gate = asyncio.Event()
+        handled = {"n": 0}
+        conn = FakeConn([b'{"ok":1}'], gap=0.0)
+
+        async def connect():
+            await gate.wait()                     # the connect is in flight when stop() arrives
+            return conn
+
+        async def on_frame(raw):
+            handled["n"] += 1
+            return None
+
+        session = FeedSession("test", connect=connect, on_frame=on_frame, sleep=_instant)
+        task = asyncio.create_task(session.run())
+        await asyncio.sleep(0.01)
+        await session.stop()
+        gate.set()
+        await asyncio.wait_for(task, timeout=2)
+        assert conn.closed is True, "the connection that arrived after stop() must be closed"
+        assert handled["n"] == 0, "a stopped session never hands a frame to the handler"
+
+    asyncio.run(scenario())

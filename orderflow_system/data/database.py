@@ -30,11 +30,49 @@ class Database:
         await self._db.execute("PRAGMA busy_timeout=15000")
         await self._db.execute("PRAGMA synchronous=NORMAL")
         await self._create_tables()
+        # SEC-15: the ticks table had no uniqueness of any kind, so a re-import or a replayed
+        # stream could store the same print twice. This partial unique index keys prints that
+        # CARRY a trade_id — a print without one may legitimately repeat (same ms, price, size,
+        # side). It is created here rather than in the schema script so that a legacy file which
+        # already holds duplicates still opens: the index is skipped with a warning, never a lockout.
+        try:
+            await self._db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_ticks_unique_print ON ticks("
+                "instrument, timestamp_ms, price, size, side, trade_id) "
+                "WHERE trade_id IS NOT NULL AND TRIM(trade_id) != ''")
+            await self._db.commit()
+        except Exception as exc:                       # noqa: BLE001
+            logger.warning("ticks uniqueness index not created: %s", exc)
+        # SEC-14: the derived count has to survive a rebuild, so it is a real column — legacy
+        # files get it here (CREATE TABLE IF NOT EXISTS never alters an existing table). ADD
+        # COLUMN with a default backfills every existing row in one statement, safely.
+        try:
+            cur = await self._db.execute("PRAGMA table_info(volume_profiles)")
+            cols = {row[1] for row in await cur.fetchall()}
+            if "derived_candles" not in cols:
+                await self._db.execute(
+                    "ALTER TABLE volume_profiles ADD COLUMN derived_candles INTEGER NOT NULL DEFAULT 0")
+                await self._db.commit()
+        except Exception as exc:                       # noqa: BLE001
+            logger.warning("volume_profiles.derived_candles not added: %s", exc)
+        # Profiles: a journal row remembers which playbook was active when the trade was taken —
+        # the same one-statement migration as above, so "trades under this profile" works on
+        # legacy files too ('' = no profile was active at the time).
+        try:
+            cur = await self._db.execute("PRAGMA table_info(trade_journal)")
+            cols = {row[1] for row in await cur.fetchall()}
+            if cols and "profile_id" not in cols:
+                await self._db.execute(
+                    "ALTER TABLE trade_journal ADD COLUMN profile_id TEXT NOT NULL DEFAULT ''")
+                await self._db.commit()
+        except Exception as exc:                       # noqa: BLE001
+            logger.warning("trade_journal.profile_id not added: %s", exc)
         logger.info(f"Database connected: {self.db_path}")
 
     async def close(self):
         if self._db:
             await self._db.close()
+            self._db = None          # every guard reads `if self._db:` — a closed handle must not pass
             logger.info("Database closed")
 
     async def _create_tables(self):
@@ -78,7 +116,8 @@ class Database:
                 shape TEXT,
                 poc_position_pct REAL,
                 lvn_json TEXT,
-                volume_at_price_json TEXT
+                volume_at_price_json TEXT,
+                derived_candles INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_vp_instrument_date
@@ -132,7 +171,9 @@ class Database:
             for t in ticks
         ]
         await self._db.executemany(
-            "INSERT INTO ticks (instrument, timestamp_ms, price, size, side, trade_id) "
+            # SEC-15: OR IGNORE only ever fires against the partial unique index above, so a
+            # print without a trade_id is stored exactly as before.
+            "INSERT OR IGNORE INTO ticks (instrument, timestamp_ms, price, size, side, trade_id) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             data,
         )
@@ -331,10 +372,35 @@ class Database:
             # The vacuum's own traffic parks in the WAL until a checkpoint; without this the
             # file "shrinks" while the footprint on disk does not (measured: 677 MB of WAL
             # after the first real prune on the live DB). TRUNCATE hands the space back now.
-            await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            # MEM-A2-10: the pragma's own answer is checked — (busy, log, checkpointed) —
+            # because a reader holding the WAL makes the truncate a silent no-op. busy != 0 is
+            # reported; the next storage tick retries (this runs on every prune pass).
+            cur = await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            row = await cur.fetchone()
+            busy = int(row[0]) if row else 0
             await self._db.commit()
+            if busy:
+                logger.info("wal checkpoint(TRUNCATE) was busy (a reader held the WAL) — "
+                            "the next storage pass retries")
         except Exception as exc:                           # noqa: BLE001
             logger.warning("incremental vacuum failed: %s", exc)
+
+    async def checkpoint_passive(self) -> bool:
+        """Checkpoint what can be checkpointed without blocking a reader (MEM-A2-10).
+
+        Called after every pruning pass — even one that deleted nothing — so the WAL does not
+        keep growing between trunctate-able moments. Returns True when nothing was busy.
+        """
+        if not self._db:
+            return True
+        try:
+            cur = await self._db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            row = await cur.fetchone()
+            await self._db.commit()
+            return not (row and int(row[0]))
+        except Exception as exc:                       # noqa: BLE001
+            logger.debug("passive wal checkpoint failed: %s", exc)
+            return False
 
     async def prune_other_tables(self, cutoff_ms: int) -> dict[str, int]:
         """Trim the tables the tick pass does not own, on the same retention window.
@@ -363,6 +429,17 @@ class Database:
             out["volume_profiles"] = int(cur.rowcount or 0)
         except Exception:                              # noqa: BLE001
             out["volume_profiles"] = -1
+        try:
+            # MEM-A2-09: the trade journal was never pruned at all. A row is aged by its exit
+            # (or its entry while still open); a row with neither timestamp is left alone.
+            cur = await self._db.execute(
+                "DELETE FROM trade_journal "
+                "WHERE COALESCE(exit_time_ms, entry_time_ms) IS NOT NULL "
+                "AND COALESCE(exit_time_ms, entry_time_ms) < ?",
+                (int(cutoff_ms),))
+            out["trade_journal"] = int(cur.rowcount or 0)
+        except Exception:                              # noqa: BLE001 — a missing table is not fatal
+            out["trade_journal"] = -1
         await self._db.commit()
         return out
 
@@ -446,12 +523,13 @@ class Database:
         await self._db.execute(
             "INSERT INTO volume_profiles "
             "(instrument, session_date, poc, vah, val, total_volume, shape, "
-            "poc_position_pct, lvn_json, volume_at_price_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "poc_position_pct, lvn_json, volume_at_price_json, derived_candles) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (instrument, vp.session_date, vp.poc, vp.vah, vp.val,
              vp.total_volume, vp.shape, vp.poc_position_pct,
              json.dumps(vp.lvn_levels),
-             json.dumps({str(k): v for k, v in vp.volume_at_price.items()})),
+             json.dumps({str(k): v for k, v in vp.volume_at_price.items()}),
+             int(vp.derived_candles or 0)),
         )
         await self._db.commit()
 
@@ -463,7 +541,7 @@ class Database:
         # LIMIT then cut across duplicates of a single session.
         cursor = await self._db.execute(
             "SELECT session_date, poc, vah, val, total_volume, shape, "
-            "poc_position_pct, lvn_json, volume_at_price_json "
+            "poc_position_pct, lvn_json, volume_at_price_json, derived_candles "
             "FROM volume_profiles v WHERE instrument = ? AND v.id = ("
             "  SELECT MAX(id) FROM volume_profiles x "
             "  WHERE x.instrument = v.instrument AND x.session_date = v.session_date) "
@@ -479,6 +557,7 @@ class Database:
                 total_volume=r[4], shape=r[5], poc_position_pct=r[6],
                 lvn_levels=json.loads(r[7]) if r[7] else [],
                 volume_at_price={float(k): v for k, v in vap_raw.items()},
+                derived_candles=int(r[9] or 0),
             ))
         return list(reversed(results))  # Oldest first
 
@@ -511,6 +590,7 @@ class Database:
         notes: str = "",
         entry_time_ms: int = 0,
         exit_time_ms: int = 0,
+        profile_id: str = "",
     ):
         signals_json = json.dumps([
             {"type": s.signal_type.value, "strength": s.strength,
@@ -521,10 +601,10 @@ class Database:
             "INSERT INTO trade_journal "
             "(instrument, direction, entry_time_ms, exit_time_ms, entry_price, "
             "exit_price, stop_loss, take_profit, pnl_ticks, rr_ratio, "
-            "signals_json, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "signals_json, notes, profile_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (instrument, direction, entry_time_ms, exit_time_ms,
              entry_price, exit_price, stop_loss, take_profit,
-             pnl_ticks, rr_ratio, signals_json, notes),
+             pnl_ticks, rr_ratio, signals_json, notes, profile_id),
         )
         await self._db.commit()
 def readonly_snapshot(db_path: str) -> dict:

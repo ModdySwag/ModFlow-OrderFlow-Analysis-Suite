@@ -34,8 +34,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install package (dev extras)
-        run: python -m pip install --upgrade pip && python -m pip install -e .[dev]
+      # audit F-03/E-09: this job used to install with floating floors while the dependency audit
+      # read the lockfile — a green suite did not attest the locked set. Install from uv.lock.
+      - name: Install (locked, dev extras)
+        run: |
+          python -m pip install --upgrade pip "uv==0.12.8"
+          uv export --frozen --no-hashes --no-emit-project --extra dev --output-file requirements.ci.txt
+          python -m pip install -r requirements.ci.txt
+          python -m pip install -e . --no-deps
 
       - name: Pytest suite
         run: python -m pytest orderflow_system -q
@@ -43,10 +49,10 @@ jobs:
       - name: UI reference audit (JS -> FastAPI routes / DOM ids)
         run: python scripts/audit_ui_refs.py
 
-      - name: UI selftests (each prints "N ok, 0 failed")
+      - name: UI + legacy-widget selftests (each prints "N ok, 0 failed")
         shell: bash
         run: |
-          for f in orderflow_system/desktop/ui/*.selftest.js; do
+          for f in orderflow_system/desktop/ui/*.selftest.js orderflow_system/dashboard/static/*.selftest.js; do
             printf '%-46s ' "$(basename "$f")"
             node "$f" | tail -1
           done
@@ -69,3 +75,240 @@ jobs:
         with:
           name: sbom-cyclonedx-${{ matrix.python-version }}
           path: sbom.cdx.json
+          retention-days: 14
+
+  # audit F-03: nothing in CI ever built or booted the release artifact. The six-modules-404
+  # defect class (dashboard/static) existed only in the frozen build — no test could see it.
+  # F-05: the build is gated to master / tags / a manual dispatch — a feature branch does not
+  # need a 14-minute frozen build, and the artifact set is not free.
+  build:
+    # F-05: master, tags and manual dispatches only — a push to a feature branch does not need
+    # the frozen build (and its artifact uploads).
+    if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    outputs:
+      sign_artifact_id: ${{ steps.upload-sign.outputs.artifact-id }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065   # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install (locked, dev + mt5 — what the portable build ships)
+        run: |
+          python -m pip install --upgrade pip "uv==0.12.8"
+          uv export --frozen --no-hashes --no-emit-project --extra dev --extra mt5 --output-file requirements.build.txt
+          python -m pip install -r requirements.build.txt
+
+      - name: Build the frozen exe
+        run: python scripts/build_exe.py
+
+      - name: Smoke the frozen exe (headless)
+        shell: pwsh
+        run: |
+          $exe = "dist/ModFlowOrderFlowAnalysisSuite/ModFlowOrderFlowAnalysisSuite.exe"
+          $env:APPDATA = Join-Path $PWD ".smoke-appdata"
+          New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
+          $proc = Start-Process -FilePath $exe -ArgumentList '--headless','--port','8096' -PassThru
+          $ready = $false
+          foreach ($i in 1..40) {
+            Start-Sleep -Seconds 1
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 'http://127.0.0.1:8096/healthz'
+              if ($r.StatusCode -eq 200) { $ready = $true; break }
+            } catch { }
+          }
+          if (-not $ready) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            throw "the frozen exe did not answer /healthz within 40 s"
+          }
+          $page = Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8096/desktop'
+          if ($page.StatusCode -ne 200) { throw "the frozen exe did not serve the desktop shell" }
+          # F-05: the asset root this job exists to protect — the six legacy modules the shell
+          # loads from /static (their 404 in a frozen build was the defect class this smoke is for),
+          # plus one live API route.
+          foreach ($asset in @('app.js','footprint.js','performance.js','tape.js','signals.js','microstructure.js','orderbook.js')) {
+            $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8096/static/$asset"
+            if ($r.StatusCode -ne 200) { throw "the frozen exe did not serve /static/$asset" }
+          }
+          $c = Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8096/api/candles/BTCUSDT'
+          if ($c.StatusCode -ne 200) { throw "the frozen exe did not serve /api/candles/BTCUSDT" }
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          Write-Host "frozen exe smoke: /healthz 200, /desktop 200"
+
+      - name: Install Inno Setup 6 (the installer engine)
+        shell: pwsh
+        run: |
+          choco install innosetup --version=6.4.3 --no-progress -y
+          if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") -and
+              -not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
+            throw "ISCC.exe not found after installing Inno Setup"
+          }
+
+      - name: Build the installer (Inno Setup - no licensing caveat, WebView2 chained)
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File installer\make_installer.ps1
+
+      - name: Assemble the signing input (app exe + setup, one SignPath request)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-sign | Out-Null
+          Copy-Item "dist/ModFlowOrderFlowAnalysisSuite/ModFlowOrderFlowAnalysisSuite.exe" dist-sign/
+          $setup = Get-ChildItem dist -Filter 'ModFlowOrderFlowAnalysisSuite-Setup-*.exe' |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $setup) { throw "the installer build produced no setup.exe" }
+          Copy-Item $setup.FullName "dist-sign/ModFlowOrderFlowAnalysisSuite-Setup.exe"
+          Get-ChildItem dist-sign | Select-Object Name, Length
+
+      - name: Upload the signing input
+        id: upload-sign
+        uses: actions/upload-artifact@ea165f8d65e6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: dist-sign
+          path: dist-sign/
+          retention-days: 14
+
+      - uses: actions/upload-artifact@ea165f8d65e6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: frozen-exe-windows
+          path: |
+            dist/ModFlowOrderFlowAnalysisSuite/
+            dist/ModFlowOrderFlowAnalysisSuite-Setup-*.exe
+            dist/ModFlowOrderFlowAnalysisSuite-Setup-*.exe.sha256
+          retention-days: 14
+
+  # audit F-11: the released binaries are unsigned. Signing runs through SignPath Foundation (free
+  # for qualifying open-source projects): Azure Artifact Signing is NOT available to individual
+  # developers outside the USA/Canada - which rules it out here - and an OV certificate is a
+  # purchase decision (docs/RELEASE_CHECKLIST.md section 6 has both routes).
+  #
+  # This job is SKIPPED until the repository carries the SignPath values:
+  #   variable SIGNPATH_ORGANIZATION_ID   secret SIGNPATH_API_TOKEN
+  # The artifact configuration it signs with lives in .signpath/artifact-configurations/default.xml
+  # (config is edited in the SignPath organization; the repo copy is the reviewable version).
+  sign:
+    needs: build
+    if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093   # v4
+        with:
+          name: dist-sign
+          path: dist-sign
+
+      - name: Sign the binaries (SignPath Foundation)
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092   # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ModFlow-OrderFlow-Analysis-Suite
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: default
+          github-artifact-id: ${{ needs.build.outputs.sign_artifact_id }}
+          wait-for-completion: true
+          output-artifact-directory: dist-signed
+
+      - name: Every signed binary must verify
+        shell: pwsh
+        run: |
+          $good = 0
+          Get-ChildItem dist-signed -Recurse -File | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            Write-Host ("{0}  {1}  {2}" -f $_.Name, $sig.Status, $sig.SignerCertificate.Subject)
+            if ($sig.Status -eq 'Valid') { $good++ }
+          }
+          if ($good -eq 0) { throw "no valid signature in the signed artifact" }
+
+      - uses: actions/upload-artifact@ea165f8d65e6e75b540449e92b4886f43607fa02   # v4.6.2
+        with:
+          name: signed-binaries
+          path: dist-signed/
+
+
+  # G-08: the soak gate. Thirty minutes of headless sampling with a post-warm-up RSS slope gate;
+  # manual dispatch (or a nightly schedule, uncomment the cron below) — it is too slow for a push.
+  soak:
+    if: github.event_name == 'workflow_dispatch'
+    # schedule:
+    #   - cron: '0 3 * * *'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065   # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Install (locked, dev extras)
+        run: |
+          python -m pip install --upgrade pip "uv==0.12.8"
+          uv export --frozen --no-hashes --no-emit-project --extra dev --output-file requirements.ci.txt
+          python -m pip install -r requirements.ci.txt
+          python -m pip install -e . --no-deps
+      - name: Soak (30 minutes; slope gate 0.5 MB/min after warm-up)
+        run: python scripts/soak.py --minutes 30 --csv soak.csv
+      - uses: actions/upload-artifact@ea165f8d65e6e75b540449e92b4886f43607fa02   # v4.6.2
+        if: always()
+        with:
+          name: soak-csv
+          path: soak.csv
+          retention-days: 14
+
+  # R-03 / G-03: per-node listener and timer accumulation, measured in a real browser. The audit
+  # ran `soak_probe2.py` by hand; this job is what keeps it running - five view-churn cycles over
+  # the frozen build, reporting persistent-target leaks, same-node accumulation, detached-but-
+  # retained nodes and timer growth. Uploaded as a JSON receipt on every dispatch.
+  churn:
+    if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065   # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Install (locked, dev extras) + chromium for the probe
+        run: |
+          python -m pip install --upgrade pip "uv==0.12.8"
+          uv export --frozen --no-hashes --no-emit-project --extra dev --output-file requirements.ci.txt
+          python -m pip install -r requirements.ci.txt
+          python -m pip install -e . --no-deps
+          python -m playwright install chromium
+      - name: Build the frozen app (the probe drives the shipped payload)
+        run: python scripts/build_exe.py
+      - name: Boot the frozen app and run the churn probe
+        shell: pwsh
+        run: |
+          $exe = "dist/ModFlowOrderFlowAnalysisSuite/ModFlowOrderFlowAnalysisSuite.exe"
+          $env:APPDATA = Join-Path $PWD ".churn-appdata"
+          New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
+          $proc = Start-Process -FilePath $exe -ArgumentList '--headless','--port','8099' -PassThru
+          foreach ($i in 1..40) {
+            Start-Sleep -Seconds 1
+            try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 'http://127.0.0.1:8099/healthz'; if ($r.StatusCode -eq 200) { break } } catch { }
+          }
+          python scripts/churn_probe.py --port 8099 --cycles 5 --dwell 0.4
+          python scripts/hover_audit.py --port 8099 --csv hover_audit.json
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@ea165f8d65e6e75b540449e92b4886f43607fa02   # v4.6.2
+        if: always()
+        with:
+          name: churn-receipt
+          path: |
+            churn_*.json
+            hover_audit.json
+          retention-days: 14
+          if-no-files-found: warn

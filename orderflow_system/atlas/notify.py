@@ -67,14 +67,26 @@ class TelegramNotifier:
             self.last_error = "python-telegram-bot not installed"
             logger.warning("atlas Telegram notifier: %s", self.last_error)
         except Exception as exc:
-            self.last_error = f"{type(exc).__name__}: {exc}"
+            from orderflow_system.desktop.logs import redact
+
+            # SEC-01: same exception family as the alerts bot — and `last_error` is served by
+            # the UI stats, so it must not carry the token either.
+            self.last_error = redact(f"{type(exc).__name__}: {exc}")
             logger.error("atlas Telegram notifier failed to connect: %s", self.last_error)
         self._ready = False
         return False
 
     async def stop(self) -> None:
-        self._bot = None
+        # MEM-A1-03: close the bot's HTTP pool before dropping the reference — a started
+        # network client is closed by whoever started it, on the engine's stop path. The
+        # reference drop alone left one aiohttp/httpx pool per engine restart for the GC.
+        bot, self._bot = self._bot, None
         self._ready = False
+        if bot is not None:
+            try:
+                await bot.shutdown()
+            except Exception:                      # a Telegram outage must not fail the stop
+                logger.debug("atlas Telegram bot shutdown failed", exc_info=True)
 
     @property
     def ready(self) -> bool:

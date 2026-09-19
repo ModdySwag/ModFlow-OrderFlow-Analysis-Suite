@@ -107,17 +107,29 @@ class FootprintChart {
         this._resizeBound = () => this._resize();
         window.addEventListener('resize', this._resizeBound);
 
-        // Mouse
-        this.container.addEventListener('mousedown', (e) => this._onMouseDown(e));
-        this.container.addEventListener('mousemove', (e) => this._onMouseMove(e));
-        this.container.addEventListener('mouseup', () => this._onMouseUp());
-        this.container.addEventListener('mouseleave', () => this._onMouseLeave());
-        this.container.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
+        // Mouse — named handlers, so destroy() can remove exactly what this constructor added
+        // (D-07: the old shape handed over anonymous arrows and a destroy() that could only
+        // remove the window resize listener, leaving the container subscribed forever).
+        this._handlers = {
+            mousedown: (e) => this._onMouseDown(e),
+            mousemove: (e) => this._onMouseMove(e),
+            mouseup: () => this._onMouseUp(),
+            mouseleave: () => this._onMouseLeave(),
+            wheel: (e) => this._onWheel(e),
+            touchstart: (e) => this._onTouchStart(e),
+            touchmove: (e) => this._onTouchMove(e),
+            touchend: () => { this._isDragging = false; this._pinchDist = null; },
+        };
+        this.container.addEventListener('mousedown', this._handlers.mousedown);
+        this.container.addEventListener('mousemove', this._handlers.mousemove);
+        this.container.addEventListener('mouseup', this._handlers.mouseup);
+        this.container.addEventListener('mouseleave', this._handlers.mouseleave);
+        this.container.addEventListener('wheel', this._handlers.wheel, { passive: false });
 
         // Touch
-        this.container.addEventListener('touchstart', (e) => this._onTouchStart(e), { passive: false });
-        this.container.addEventListener('touchmove', (e) => this._onTouchMove(e), { passive: false });
-        this.container.addEventListener('touchend', () => { this._isDragging = false; this._pinchDist = null; });
+        this.container.addEventListener('touchstart', this._handlers.touchstart, { passive: false });
+        this.container.addEventListener('touchmove', this._handlers.touchmove, { passive: false });
+        this.container.addEventListener('touchend', this._handlers.touchend);
     }
 
     _resize() {
@@ -160,6 +172,8 @@ class FootprintChart {
         if (!bar || !bar.time) return;
         const idx = this.data.findIndex(b => b.time === bar.time);
         if (idx >= 0) this.data[idx] = bar; else this.data.push(bar);
+        /* D-07: the series was unbounded — keep the visible window plus a margin, like tape.js. */
+        if (this.data.length > 600) this.data.splice(0, this.data.length - 600);
         this.currentPrice = bar.close;
         this.render();
     }
@@ -168,6 +182,18 @@ class FootprintChart {
 
     destroy() {
         window.removeEventListener('resize', this._resizeBound);
+        this._resizeBound = null;
+        /* D-07: the container listeners added in the constructor are removed here, so a chart
+           that is thrown away (a layout change, a second init) leaves no handlers behind. */
+        if (this._handlers) {
+            const passiveFalse = { passive: false };
+            Object.keys(this._handlers).forEach((type) => {
+                const opts = (type === 'wheel' || type === 'touchstart' || type === 'touchmove')
+                    ? passiveFalse : undefined;
+                this.container.removeEventListener(type, this._handlers[type], opts);
+            });
+            this._handlers = null;
+        }
         this.container.innerHTML = '';
     }
 

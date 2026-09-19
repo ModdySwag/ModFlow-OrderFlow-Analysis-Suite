@@ -50,11 +50,17 @@ The design is a single-user desktop app. Some things are deliberate and document
 - **Market data, no execution.** The app places no orders on any venue. The Alpaca
   integration is read-only (account state, positions, order *history*) plus market data. A
   defect that could trade for you would be critical — please report it immediately.
-- **Credentials stay local.** Keys and tokens live in your per-user config file
-  (`%APPDATA%\OrderFlowAnalysisPro\config.json`), are never written to logs, never committed,
-  and are only ever sent to the provider you configured.
-- **No telemetry.** No analytics, no update phone-home: the only traffic is the feeds and
-  notification channels you enabled.
+- **Credentials stay local, and are write-only over the API.** Keys and tokens live in your
+  per-user config file (`%APPDATA%\OrderFlowAnalysisPro\config.json`), are never written to logs,
+  never committed, and are only ever sent to the provider you configured. The control API never
+  hands a stored credential back: `GET /config` and `/bootstrap` return a mask in place of every
+  non-empty secret, a masked value posted back means "unchanged", and pressing Test with an
+  untouched field tests the stored credential rather than the mask.
+- **No telemetry.** No analytics, no crash reporting, no usage reporting. One release check
+  does run: while the app is open it asks GitHub (`api.github.com`) for the newest published
+  release, no more often than the interval you set in Updates (6 h by default) — that request
+  carries nothing about you or your data, and there is no other unrequested traffic. Everything
+  else that leaves the machine is a feed or a notification channel you enabled.
 - **The study engine runs JavaScript you paste yourself** ("Studies" view). Treat a pasted
   module as code you chose to run, exactly like a browser console snippet.
 - The bundled chart library is a local copy of TradingView's *Lightweight Charts* v4.1.3

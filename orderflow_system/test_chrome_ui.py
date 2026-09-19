@@ -40,3 +40,16 @@ def test_the_css_rules_exist_for_every_toggle():
     assert ".app.status-hidden .statusbar { display: none; }" in css
     assert ".chrome-toggle" in css, "the persistent toggles carry a style"
     assert ".app.rail-hidden .rail-reveal" in css, "the edge return arrow shows when the rail is hidden"
+
+
+def test_the_menu_bar_toggle_wears_its_next_action_in_words():
+    """§94 — no glyph beside the menu bar; the label IS the face (menu hide / menu show)."""
+    import re
+
+    html = (UI / "index.html").read_text(encoding="utf-8")
+    code = (UI / "chrome.js").read_text(encoding="utf-8")
+    m = re.search(r'<button id="menubarToggle"[^>]*>(.*?)</button>', html, re.S)
+    assert m, "the menubar toggle button is gone"
+    assert m.group(1).strip() == "menu hide", f"label is {m.group(1)!r}, not the visible-state face"
+    assert "ct-face" not in html, "the toggle grew a glyph back"
+    assert "'menu hide', 'menu show'" in code, "the face pair must live in chrome.js"

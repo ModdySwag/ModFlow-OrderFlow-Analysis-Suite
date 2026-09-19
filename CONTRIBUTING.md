@@ -22,9 +22,9 @@ Every change must leave these green — CI runs exactly the same commands on Pyt
 3.12, plus the lint baseline and a dependency audit (`.github/workflows/ci.yml`):
 
 ```bash
-python -m pytest orderflow_system -q                     # full suite (baseline: 1412 passed / 2 skipped)
+python -m pytest orderflow_system -q                     # full suite (baseline: 1584 passed / 3 skipped)
 python scripts/audit_ui_refs.py                          # JS → FastAPI routes / DOM ids (baseline: AUDIT CLEAN)
-for f in orderflow_system/desktop/ui/*.selftest.js; do node "$f"; done   # 33 selftests (needs Node)
+for f in orderflow_system/desktop/ui/*.selftest.js; do node "$f"; done   # 35 selftests (needs Node)
 ```
 
 There is also a lint baseline:
@@ -37,8 +37,10 @@ ruff check orderflow_system scripts                      # config lives in pypro
   with `pip-audit` over the locked set.
 - Run the audit after **any** edit under `orderflow_system/desktop/ui/` or `dashboard/` — it catches broken
   API paths, dead element ids and JS syntax errors without opening the app.
-- The analytics engines are **stdlib-only** (`analytics/delta.py`, `analytics/volume_profile.py`): the
-  frozen build excludes numpy, and `test_no_numpy.py` fails if a numpy import creeps back in. Their
+- The analytics engines are **stdlib-only** (`analytics/delta.py`, `analytics/volume_profile.py`):
+  `test_no_numpy.py` fails if a numpy import creeps into them, and they stay importable with numpy
+  blocked. (The frozen build *does* ship numpy — the MetaTrader 5 bridge's native core needs it; see
+  `scripts/build_exe.py`.) Their
   numbers are pinned by `test_analytics_golden.py` against `testdata/analytics_golden.json` — regenerate
   deliberately with `python scripts/regen_analytics_golden.py --write` and review the diff.
 - `orderflow_system/test_integration.py` is the fast smoke for the analytics pipeline; `test_alpaca.py`

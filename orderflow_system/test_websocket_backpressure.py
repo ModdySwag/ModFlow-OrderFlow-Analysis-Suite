@@ -24,9 +24,13 @@ class FakeWS:
         self.fail_after = fail_after
         self.sent: list[dict] = []
         self._accepted = False
+        self.closed = 0
 
     async def accept(self) -> None:
         self._accepted = True
+
+    async def close(self) -> None:
+        self.closed += 1
 
     async def send_text(self, message: str) -> None:
         if self.hang:
@@ -115,6 +119,51 @@ def test_a_wedged_client_is_dropped_by_the_write_timeout(monkeypatch):
         assert manager.client_count == 0, "the writer removed the client it could not talk to"
 
     monkeypatch.setattr(wm, "WRITE_TIMEOUT_S", 0.05)
+    _run(scenario())
+
+
+def test_a_timed_out_client_is_closed_not_just_forgotten(monkeypatch):
+    """MEM-A1-02: the writer closes the socket it gave up on, so the endpoint's `receive_text()`
+    raises and its finally runs `disconnect()` — `_forget` alone parked the endpoint forever."""
+
+    async def scenario():
+        manager = WebSocketManager()
+        wedged = FakeWS(hang=True)
+        await manager.connect(wedged)
+        await manager.broadcast(Channel.TICK, {"i": 1}, symbol="BTCUSDT")
+        await asyncio.sleep(wm.WRITE_TIMEOUT_S + 0.3)
+        assert manager.client_count == 0, "the writer removed the client it could not talk to"
+        assert wedged.closed >= 1, "and closed its socket, so the endpoint cannot stay parked"
+
+        # the endpoint's own disconnect path stays harmless afterwards (idempotent)
+        await manager.disconnect(wedged)
+        assert manager.client_count == 0
+        assert wedged.closed == 1, "one close per dropped socket"
+
+    monkeypatch.setattr(wm, "WRITE_TIMEOUT_S", 0.05)
+    _run(scenario())
+
+
+def test_a_must_arrive_broadcast_never_waits_the_old_ten_seconds(monkeypatch):
+    """MEM-A1-05: a stalled client's full queue bounds the producer at MUST_ARRIVE_WAIT_S,
+    not at WRITE_TIMEOUT_S * 2 — and the miss is counted instead of hidden."""
+
+    async def scenario():
+        manager = WebSocketManager()
+        wedged = FakeWS(hang=True)
+        await manager.connect(wedged)
+        await manager.broadcast(Channel.TICK, {"i": 0}, symbol="BTCUSDT")   # parks the writer
+        client = manager._connections[0]
+        await asyncio.sleep(0.05)            # let the writer take its message and hang in send_text
+        while not client.queue.full():
+            client.queue.put_nowait("x")     # a full, never-draining queue
+        started = asyncio.get_running_loop().time()
+        await manager.broadcast(Channel.SIGNAL, {"s": 1})
+        elapsed = asyncio.get_running_loop().time() - started
+        assert elapsed < 1.0, f"the producer waited {elapsed:.2f}s on a stalled client"
+        assert manager.delivery_stats()["dropped"] >= 1, "the miss is counted, not silent"
+
+    monkeypatch.setattr(wm, "MUST_ARRIVE_WAIT_S", 0.2)
     _run(scenario())
 
 

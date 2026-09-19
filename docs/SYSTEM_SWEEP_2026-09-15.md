@@ -386,8 +386,8 @@ re-checked against the code or the live instance before acting. Split into outco
 Sandbox instance (does not touch your install):
 
 ```bash
-cd C:/Users/Moddy/OrderFlow-Analysis-Pro
-APPDATA="C:/Users/Moddy/AppData/Local/Temp/ofap_sweep" .venv/Scripts/python.exe \
+cd C:/Users/<you>/OrderFlow-Analysis-Pro
+APPDATA="C:/Users/<you>/AppData/Local/Temp/ofap_sweep" .venv/Scripts/python.exe \
     -m orderflow_system.desktop --headless --port 8099
 curl -X POST http://127.0.0.1:8099/api/control/engine/start -H 'Content-Type: application/json' -d '{}'
 ```
@@ -413,7 +413,7 @@ let ink = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) ink++; console.
 ```
 
 Edit scripts used by this pass (fail-loud, anchor-checked, kept outside the repo):
-`C:/Users/Moddy/AppData/Local/Temp/ofap_edit_ofx.py`, `ofap_edit_pass2.py`, `ofap_edit_pass3.py`,
+`C:/Users/<you>/AppData/Local/Temp/ofap_edit_ofx.py`, `ofap_edit_pass2.py`, `ofap_edit_pass3.py`,
 `ofap_edit_pass4.py`; DB probe `ofap_dbprobe.py`.
 
 

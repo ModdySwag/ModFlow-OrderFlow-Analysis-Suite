@@ -8,6 +8,7 @@
     const SYM_FALLBACK = 'BTCUSDT';
     const POLL_MS = 2500;
     const view = { symbol: '', timer: 0, booted: false, poll: 0, lastError: '' };
+    let loadSeq = 0;      // newest load wins: a superseded payload must not paint (audit B-JS-02)
     /* §82: the look-up's last answer for the typed symbol — the chip, the panel and the
        stage note all read this one object, so they can never disagree. */
     let streamState = null;
@@ -48,6 +49,7 @@
 
     async function load() {
         const s = sym();
+        const seq = ++loadSeq;
         /* §82: a failed read is remembered, never swallowed. The footprint route answers 404
            "Unknown symbol" for anything the engine does not stream, and the old blanket
            `.catch(() => [])` turned that sentence into a blank stage with a note about depth
@@ -62,17 +64,16 @@
             grab(`/api/footprint/${s}`, []),
             grab(`/api/candles/${s}?timeframe=1m`, []),
             grab(`/api/delta/${s}`, []),
-            grab(`/api/tape/${s}?count=200`, []),            /* §56 measured: the JSON route parses+adapts a 29 k-cell snapshot in 0.8 ms and the
-               typed /bin sibling in 0.7 ms — and the bin is BIGGER on sparse books (fixed 4 B per
-               cell per section vs "0,"). The JSON route stays the view's path; the wire is built,
-               tested and available, re-measure it when a snapshot's JSON text passes ~2 MB or an
-               adapt pass passes ~8 ms. (What §56 actually fixed here was the axis contract — see
-               adaptHeat's note.) */
+            grab(`/api/tape/${s}?count=200`, []),            /* §56's 0.8 ms claim did not survive re-measurement (audit PF-07): the real 692 KiB
+               snapshot parses in ~3.3 ms and parse+adapt lands at ~8.7 ms, not 0.8 ms. The JSON
+               route stays the view's path (the typed /bin sibling is barely smaller on this
+               payload), and the axis contract §56 fixed is unaffected — see adaptHeat's note. */
             grab(`/api/atlas/heatmap/${s}`, {}),
             /* §3 level reads: unfinished auctions + node runs. `null` (not []) so a symbol the
                trackers have not seen draws nothing rather than an invented level. */
             grab(`/api/atlas/levels/${s}`, null),
         ]);
+        if (seq !== loadSeq) return;             // a newer load owns the stage (audit B-JS-02)
         const bars = mergeBars(fp, candles, delta);
         const levelsByTime = new Map();
         for (const bar of fp || []) levelsByTime.set(bar.time, OFX.indexLevels(bar));
@@ -139,6 +140,7 @@
                 /* B2: the heat dials ride the same block; an absent key is skipped by setParams'
                    own guards, so an older config keeps the shipped look. */
                 heatContrast: p.heat_contrast, heatFloor: p.heat_floor, heatFloorPct: p.heat_floor_pct,
+                heatDim: p.heat_dim, heatHighlight: p.heat_highlight,
                 heatSmooth: p.heat_smooth,
                 /* P1-8: the depth ramp is a stored display parameter now — it used to live only in
                    browser storage, which config_store's own rule says is never the record. */
@@ -227,7 +229,8 @@
        what the controls adopt. Nothing here touches the feed or the ingest: it is drawing only. */
 
     const HEAT_PATHS = {
-        ofx: { contrast: 'ofx.heat_contrast', floor: 'ofx.heat_floor', floorPct: 'ofx.heat_floor_pct' },
+        ofx: { contrast: 'ofx.heat_contrast', floor: 'ofx.heat_floor', floorPct: 'ofx.heat_floor_pct',
+            dim: 'ofx.heat_dim', highlight: 'ofx.heat_highlight' },
         heatmap: { contrast: 'atlas.heatmap.contrast', floor: 'atlas.heatmap.floor',
             floorPct: 'atlas.heatmap.floor_pct' },
     };
@@ -254,6 +257,8 @@
             floor: Number(get(P.floor, 0)) || 0,
             floor_pct: Number(get(P.floorPct, 0)) || 0,
             contrast: Number(get(P.contrast, 1)) || 1,
+            dim: Number(get(P.dim, 0)) || 0,
+            highlight: Number(get(P.highlight, 0)) || 0,
         };
         dials.scheme = mod ? mod.matchScheme(dials) : 'custom';
         return dials;
@@ -271,6 +276,8 @@
         if (path === HEAT_PATHS.ofx.contrast) OFX.setParams({ heatContrast: applied });
         if (path === HEAT_PATHS.ofx.floor) OFX.setParams({ heatFloor: applied });
         if (path === HEAT_PATHS.ofx.floorPct) OFX.setParams({ heatFloorPct: applied });
+        if (path === HEAT_PATHS.ofx.dim) OFX.setParams({ heatDim: applied });
+        if (path === HEAT_PATHS.ofx.highlight) OFX.setParams({ heatHighlight: applied });
         paintLegend();
         syncHeatControls();
     }
@@ -323,6 +330,8 @@
         if (el('ofxHeatScheme')) el('ofxHeatScheme').value = d.scheme;
         if (el('ofxHeatContrast')) el('ofxHeatContrast').value = String(d.contrast);
         if (el('ofxHeatFloor')) el('ofxHeatFloor').value = String(d.floor);
+        if (el('ofxHeatDim')) el('ofxHeatDim').value = String(d.dim);
+        if (el('ofxHeatHighlight')) el('ofxHeatHighlight').value = String(d.highlight);
         if (el('ofxHeatSmooth')) el('ofxHeatSmooth').value = String(OFX.state.params.heatSmooth || 'auto');
         if (el('ofxDegrade')) el('ofxDegrade').checked = OFX.state.params.degrade !== false;
     }
@@ -570,9 +579,17 @@
     };
     const row2 = (label, value, cls) => `<div class="ofx-ro-row"><span class="ofx-ro-k">${label}</span><span class="ofx-ro-v ${cls || ''}">${value}</span></div>`;
 
+    let readoutKey = '';
     function paintReadout(h) {
         const box = el('ofxReadout');
         if (!box) return;
+        /* D-03: a hover sweep repainted the whole readout with innerHTML on every pointer frame.
+           Same bar + same price bucket + same level ⇒ nothing to say. */
+        const key = h && h.bar
+            ? [h.barTime, Math.round((h.price || 0) * 100), h.level ? Math.round(h.level.price * 100) : 0].join('|')
+            : 'engine';
+        if (key === readoutKey) return;
+        readoutKey = key;
         const sym = OFX.state.symbol;
         if (!h || !h.bar) {
             const s = OFX.stats();
@@ -1089,11 +1106,25 @@
         sel.innerHTML = html;
     }
 
+    /* The top bar is the app-wide instrument. A pick made in the Engine's own head is mirrored
+       back to it — guarded twice: only a symbol the bar actually lists may be adopted, and an
+       equal value returns before anything is dispatched, so the two listeners cannot loop
+       (audit B-JS-03). */
+    function syncTopBar(symbol) {
+        const sel = document.getElementById('symbolSelect');
+        if (!sel) return;
+        const listed = Array.from(sel.options || []).some((opt) => opt.value === symbol);
+        if (!listed || sel.value === symbol) return;
+        sel.value = symbol;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
     async function pickSymbol(symbol) {
         const name = String(symbol || '').toUpperCase();
         if (!name) return;
         if (el('ofxSymbol')) el('ofxSymbol').value = name;
         view.symbol = name;
+        syncTopBar(name);
         await saveParams();
         const payload = await resolveSymbol(name);
         const state = payload ? String(payload.state || '') : '';
@@ -1241,6 +1272,17 @@
         OFX.state.onSelection = (st) => { paintSelStrip(st); };
         OFX.start();
 
+        /* The top bar announces its instrument; the stage adopts it (audit B-JS-03). An equal
+           symbol returns immediately — that is what keeps the two directions loop-free. */
+        document.addEventListener('ofap:symbol', (ev) => {
+            const name = String((ev && ev.detail && ev.detail.symbol) || '').toUpperCase();
+            if (!name || name === view.symbol) return;
+            void pickSymbol(name);
+        });
+        /* Defence in depth for the pointer leaving the stage: the engine clears its own hover on
+           the canvas's own mouseleave; the DOM tip and trace are painted here (audit B-JS-04). */
+        stage.addEventListener('mouseleave', () => paintTip(null));
+
         if (el('ofxSnap')) el('ofxSnap').addEventListener('click', () => { OFX.snapToLive(); paintChip(); });
         if (el('ofxFit')) el('ofxFit').addEventListener('click', () => { OFX.fitSession(); paintChip(); });
         /* Double-click on the stage = show the whole session; the same thing the fit button does. */
@@ -1302,7 +1344,8 @@
                 void applyHeatScheme(el('ofxHeatScheme').value, 'ofx');
             });
         }
-        [['ofxHeatContrast', 'ofx.heat_contrast'], ['ofxHeatFloor', 'ofx.heat_floor']].forEach((pair) => {
+        [['ofxHeatContrast', 'ofx.heat_contrast'], ['ofxHeatFloor', 'ofx.heat_floor'],
+         ['ofxHeatDim', 'ofx.heat_dim'], ['ofxHeatHighlight', 'ofx.heat_highlight']].forEach((pair) => {
             if (!el(pair[0])) return;
             el(pair[0]).addEventListener('change', () => void writeHeatDial(pair[1], el(pair[0]).value));
         });
@@ -1405,7 +1448,21 @@
         /* One timer, one cadence: the stats line every second, the legend's live numbers every
            fifth tick. (A separate timer guarded on a flag that does not exist never fired.) */
         let legendTicks = 0;
+        let wasOnScreen = true;
         setInterval(() => {
+            /* D-04: this tick ran behind every other view and behind a hidden window — two DOM
+               passes a second for a panel nobody is looking at. On return it repaints at once. */
+            const section = document.querySelector('.view[data-view="ofx"]');
+            const onScreen = !document.hidden
+                && !!section && (section.classList.contains('active') || section.style.display === 'flex');
+            if (!onScreen) { wasOnScreen = false; return; }
+            if (!wasOnScreen) {
+                wasOnScreen = true;
+                paintStats();
+                paintHiddenBlocks();
+                paintLegend();
+                return;
+            }
             paintStats();
             paintHiddenBlocks();
             legendTicks += 1;
@@ -1430,8 +1487,9 @@
                     + 'interpolates into volume profiles (LOD).',
                     'Scrolling left of the newest bar switches to Historical Analysis Mode and raises the '
                     + 'snap-to-live chip with a live sparkline.',
-                    'R is the diagonal imbalance ratio (Bid[Y] vs Ask[Y+1]); stacks need at least 3 adjacent '
-                    + 'levels once R is cleared. Lambda sets the depth fade (500ms = one e-fold).',
+                    'R is the diagonal imbalance ratio (Ask[Y] vs Bid[Y−1] for a buy, Bid[Y] vs ',
+                    'Ask[Y+1] for a sell); stacks need at least 3 adjacent levels once R is cleared. ',
+                    'Lambda sets the depth fade (500ms = one e-fold).',
                 ],
             };
         }

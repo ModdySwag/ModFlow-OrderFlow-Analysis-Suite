@@ -35,6 +35,7 @@
     const CONTRAST_MIN = 0.5;
     const CONTRAST_MAX = 2.5;
     const FLOOR_PCT_MAX = 50.0;
+    const DIM_MAX = 0.8;          /* B5: past this the map stops being a map */
 
     /* T10/B3: vertical smoothing — the blend strength and the compression band. */
     const SMOOTH_STRENGTH = 0.6;
@@ -181,6 +182,8 @@
         SMOOTH_STRENGTH, SMOOTH_ENGAGE_PX, SMOOTH_RELEASE_PX, SMOOTH_LIST,
         smoothVector, smoothDecision, smoothMode,
         clampContrast: (v) => clamp(v, CONTRAST_MIN, CONTRAST_MAX, 1),
+        clampDim: (v) => clamp(v, 0, DIM_MAX, 0),
+        clampHighlight: (v) => clamp(v, 0, 1, 0),
         clampFloor: (v) => Math.max(0, Number(v) || 0),
         clampFloorPct: (v) => clamp(v, 0, FLOOR_PCT_MAX, 0),
     };

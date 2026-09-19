@@ -407,6 +407,49 @@ def test_feed_streams_ticks_and_the_ladder():
     server.join(timeout=1.0)
 
 
+def test_feed_unsubscribes_every_symbol_before_closing():
+    """MEM-E-01: stop() asks the bridge to drop each subscription before the socket closes."""
+    from orderflow_system.data.ninjatrader_feed import NinjaTraderFeed
+
+    server = MockNtBridge(frames=3)
+    server.start()
+
+    async def main() -> None:
+        feed = NinjaTraderFeed(symbols={"NQ": "NQ", "ES": "ES"}, host="127.0.0.1", port=server.port)
+        task = asyncio.create_task(feed.start())
+        await asyncio.sleep(0.8)
+        await feed.stop()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(main())
+    server.join(timeout=1.0)
+
+    subscribed = [m["Instrument"] for m in server.received if m.get("Type") == "subscribe"]
+    unsubscribed = [m["Instrument"] for m in server.received if m.get("Type") == "unsubscribe"]
+    assert subscribed, "the feed subscribes on start"
+    assert sorted(unsubscribed) == sorted(subscribed), (subscribed, unsubscribed)
+
+
+def test_the_bridge_source_keeps_the_heartbeat_and_teardown_guards():
+    """MEM-E-01/E-02/E-03 (source pin): one heartbeat, interrupted on Shutdown; a disconnect
+    tears its own session down; and no load-kick thread survives in the static constructor."""
+    from pathlib import Path
+
+    src = (Path(__file__).parent / "data" / "ninjatrader_bridge" / "src" / "ModFlowBridge.cs") \
+        .read_text(encoding="utf-8", errors="replace")
+    assert "if (existing != null && existing.IsAlive) return;" in src, "one heartbeat thread per bridge"
+    assert "hb.Interrupt()" in src, "Shutdown must break the heartbeat's sleep"
+    assert "while (client != null)" in src, "the heartbeat loop must end with the session"
+    assert "if (ReferenceEquals(client, conn))" in src, "a disconnect tears down its own session"
+    assert "queue.CompleteAdding()" in src and "SubscribeCleanup();" in src
+    assert "ModFlowBridge.LoadKick" not in src, "MEM-E-03: the static-ctor kick thread is gone"
+    assert "restart NinjaTrader to clear it" in src, "the bind failure names the stale-copy case"
+
+
 def test_feed_drops_a_non_finite_trade_and_counts_it():
     from orderflow_system.data.ninjatrader_feed import NinjaTraderFeed
 

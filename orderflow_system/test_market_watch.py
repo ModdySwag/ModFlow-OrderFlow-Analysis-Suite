@@ -225,3 +225,42 @@ def test_launch_headless_spawns_its_own_console(monkeypatch):
     assert "--headless" in seen["args"] and "8099" in seen["args"]
     assert "history store" in out["note"]           # the honest sentence about the shared store
     assert seen["creationflags"] == getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+
+
+# ── MEM-B-07: the marketwatch maps are bounded ────────────────────────────────────────────────
+def test_the_marketwatch_caches_are_bounded(monkeypatch):
+    """Paging thousands of broker symbols must not grow _MT5_OPEN, and a stale board must not
+    pin its rows in _BOARD_CACHE."""
+    import time as _time
+
+    now = _time.time()
+
+    class _MT5:
+        TIMEFRAME_D1 = 1
+
+        @staticmethod
+        def copy_rates_from_pos(symbol, timeframe, start, count):
+            return [{"open": 1.0}]
+
+    mw._MT5_OPEN.clear()
+    for i in range(mw._MT5_OPEN_MAX):
+        mw._MT5_OPEN[f"S{i}"] = (now, 1.0)          # all fresh: the TTL sweep cannot help
+    assert mw._mt5_daily_open(_MT5(), "NEW") == 1.0
+    assert len(mw._MT5_OPEN) <= mw._MT5_OPEN_MAX, "the hard cap holds when nothing is expired"
+    assert "NEW" in mw._MT5_OPEN, "and the symbol that was asked for is the one kept"
+
+    mw._BOARD_CACHE.clear()
+    stale = now - mw._BOARD_TTL_S * 10
+    for i in range(6):
+        mw._BOARD_CACHE[f"old{i}"] = (stale, [])
+
+    def fake_urlopen(request, timeout=10):
+        return _FakeHTTP({"symbols": [{"contractType": "PERPETUAL", "status": "TRADING",
+                                       "quoteAsset": "USDT", "symbol": "BTCUSDT"}]})
+
+    monkeypatch.setattr(mw.urllib.request, "urlopen", fake_urlopen)
+    rows = mw._exchange_board("binance")
+    assert rows and rows[0]["symbol"] == "BTCUSDT"
+    assert list(mw._BOARD_CACHE) == ["binance"], "the stale boards were dropped on insert"
+    assert len(mw._BOARD_CACHE) <= mw._BOARD_CACHE_MAX
+

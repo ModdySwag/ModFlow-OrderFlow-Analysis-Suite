@@ -104,10 +104,18 @@ class FootprintBar:
         return analyse_levels(rows, tick_size=tick_size, threshold=threshold, mode=mode)
 
     def max_volume_level(self) -> Optional[tuple[float, FootprintLevel]]:
-        """Price level with highest total volume = POC of this bar."""
+        """Price level with highest total volume = POC of this bar.
+
+        Delegates to ``calculated_values()["poc"]`` so this bar's POC and every other POC rule
+        (the profile engine, the API, the chart) answer with the same tie-break (audit C-14).
+        """
         if not self.levels:
             return None
-        return max(self.levels.items(), key=lambda x: x[1].total_volume)
+        poc = self.calculated_values().get("poc") or {}
+        price = poc.get("price")
+        if price is None or price not in self.levels:
+            return None
+        return price, self.levels[price]
 
     def absorption_at_level(self, price: float, tolerance: float = 0.0) -> Optional[FootprintLevel]:
         """Get footprint data at a specific price level."""

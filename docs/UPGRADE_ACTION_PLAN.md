@@ -1,6 +1,6 @@
 # Upgrade action plan — ModFlow OrderFlow Analysis Suite
 
-**Date:** 2026-09-16 · **Tree:** `C:\Users\Moddy\OrderFlow-Analysis-Pro` · **HEAD:** `bcb94ea` · tree clean, nothing pushed
+**Date:** 2026-09-16 · **Tree:** `C:\Users\<you>\OrderFlow-Analysis-Pro` · **HEAD:** `bcb94ea` · tree clean, nothing pushed
 **Built from:** `report1.txt` (the engine audit on the owner's Desktop, 294 lines) — re-verified line by line
 against the tree, then reconciled with `docs/SESSION_HANDOFF.md` §25–§30, `docs/SYSTEM_SWEEP_2026-09-15.md`
 §4 (R2–R7), `docs/AI_AGENT_BUILD_PROMPT.md` (workstreams A–I) and `docs/RESUME.md`.

@@ -1070,7 +1070,7 @@
                 + 'placeholder="Search the help and the program…" style="flex:1;background:var(--bg-secondary);'
                 + 'border:1px solid var(--border-strong);border-radius:6px;color:var(--text-primary);padding:6px 8px;font-size:12.5px">'
                 + '<button class="btn small" id="helpQuickOpen" title="Open the full Help Centre">Open</button>'
-                + '<button class="btn small" id="helpQuickX" title="Close">×</button></div>'
+                + '<button class="btn small" id="helpQuickX" title="Close the quick help (Esc)">×</button></div>'
                 + '<div class="help-suggest" id="helpQuickSuggest"></div>'
                 + '<div class="help-quick-results" id="helpQuickResults"></div>'
                 + '<div class="help-quick-foot">Enter opens the first match · the full Help Centre is on F1</div>';

@@ -136,6 +136,18 @@ class DtcSession:
                 "symbol": self.symbol, "symbol_id": self.symbol_id, "last": self.last}
 
 
+#: E-08: a frame buffer with no valid header must not grow without limit, and the reject list is
+#: a diagnostic window, not an archive.
+MAX_FRAME = 1 << 20
+MAX_REJECTS = 32
+
+
+def note_reject(session: Any, text: str) -> None:
+    """Append a reject reason, bounded (E-08)."""
+    if len(session.rejects) < MAX_REJECTS:
+        session.rejects.append(text)
+
+
 def encode_encoding_request(encoding: int = ENCODING_JSON) -> bytes:
     """The fixed-length binary ENCODING_REQUEST: 4-byte header + int32 version + int32
     encoding + 4-byte protocol type = 16 bytes, exactly as ``s_EncodingRequest``."""
@@ -222,6 +234,11 @@ class DtcClient:
         if not chunk:
             raise DtcError("recv", "server closed the connection")
         self._buf += chunk
+        if len(self._buf) > MAX_FRAME:
+            # E-08: the same discipline the other two clients use — a runaway stream without a
+            # usable frame is a protocol error, not a reason to grow the process.
+            self._buf = b""
+            raise DtcError("decode", f"frame buffer exceeded {MAX_FRAME} bytes without a valid frame")
         return True
 
     def read_binary_message(self) -> tuple[int, bytes]:
@@ -252,7 +269,7 @@ class DtcClient:
                 try:
                     parsed = json.loads(text)
                 except ValueError:
-                    self.session.rejects.append(f"unparsable JSON frame: {text[:80]}")
+                    note_reject(self.session, f"unparsable JSON frame: {text[:80]}")
                     continue
                 return parsed if isinstance(parsed, dict) else {"Type": 0, "raw": parsed}
             remaining = deadline - time.time()
@@ -351,7 +368,7 @@ class DtcClient:
             self.session.last = {"kind": "quote", "bid": message.get("BidPrice"),
                                  "ask": message.get("AskPrice"), "ts": message.get("DateTime")}
         elif mtype == T_MARKET_DATA_REJECT:
-            self.session.rejects.append(str(message.get("RejectText") or "market data rejected"))
+            note_reject(self.session, str(message.get("RejectText") or "market data rejected"))
         elif mtype == T_SECURITY_DEFINITION_RESPONSE:
             if not self.session.symbol_id and message.get("SymbolID"):
                 self.session.symbol_id = int(message["SymbolID"])

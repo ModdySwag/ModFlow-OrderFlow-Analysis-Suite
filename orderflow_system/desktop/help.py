@@ -380,6 +380,64 @@ def check_report(cfg: dict[str, Any] | None = None,
             "your network cannot reach them, and market data is pulled from the public venues "
             "without an account."))
 
+    # ── lifetime / memory (G-04) ────────────────────────────────────────────────
+    # Three cheap, deterministic facts the audit's G lane asked for: none needs psutil, all three
+    # read state the process already holds.
+    try:
+        from orderflow_system.desktop import logs as logs_mod
+
+        held = len(getattr(logs_mod, "_buffer", []) or [])
+        limit = int(getattr(logs_mod, "MAX_LINES", 0) or 0)
+        if limit and held >= limit:
+            checks.append(_finding(
+                "mem.log_buffer", "warn", f"The log ring is full ({held}/{limit} lines)",
+                "The in-memory log ring holds the newest lines only — that is by design; this row "
+                "goes red only if the bound itself ever stops holding.",
+                view="logs"))
+        else:
+            checks.append(_finding(
+                "mem.log_buffer", "ok", f"Log ring {held}/{limit or '—'} lines",
+                "The in-memory log buffer is bounded; older lines live in the log file."))
+    except Exception:                                # noqa: BLE001 — a check must never raise
+        checks.append(_finding("mem.log_buffer", "notice", "Log ring not readable",
+                               "The logging module was not available to the check."))
+    try:
+        import asyncio as _asyncio
+
+        try:
+            tasks = len(_asyncio.all_tasks(_asyncio.get_running_loop()))
+            running_loop = True
+        except RuntimeError:                         # called off the loop (tests, CLI)
+            tasks = 0
+            running_loop = False
+        checks.append(_finding(
+            "lifetime.tasks", "ok" if running_loop else "notice",
+            f"{tasks} live asyncio task(s)" if running_loop else "no running event loop here",
+            "Detections and broadcasts are owned tasks; this number returning to its baseline "
+            "after an engine stop is the property the audit's soak watches."))
+    except Exception:                                # noqa: BLE001
+        checks.append(_finding("lifetime.tasks", "notice", "Task count not readable",
+                               "The event loop was not available to the check."))
+    try:
+        from orderflow_system.desktop import engine as _engine_mod
+
+        st = _engine_mod.engine.status()
+        state = str(st.get("state") or "")
+        held_system = _engine_mod.engine.system is not None
+        if state in ("stopped", "error") and held_system:
+            checks.append(_finding(
+                "lifetime.engine", "warn", "A stopped engine still holds a live system",
+                "The controller reports no run but still references a system — memory and handles "
+                "would be retained. Restart the app if this persists.",
+                view="logs"))
+        else:
+            checks.append(_finding(
+                "lifetime.engine", "ok", f"Engine {state or 'unknown'} · no stale system held",
+                "The controller's reference matches its state."))
+    except Exception:                                # noqa: BLE001
+        checks.append(_finding("lifetime.engine", "notice", "Engine lifetime not readable",
+                               "The engine controller was not available to the check."))
+
     order = {level: idx for idx, level in enumerate(LEVELS)}
     checks.sort(key=lambda c: (order.get(c["level"], 9), c["id"]))
     counts = {level: sum(1 for c in checks if c["level"] == level) for level in LEVELS}

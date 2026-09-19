@@ -277,12 +277,17 @@ html.ui-compact .ofx-readout { flex-basis: 206px; width: 206px; font-size: 9.5px
 
 
 /* pause-while-you-work control (topbar, right) */
-.ofap-pause { margin-left: auto; padding: 4px 12px; border-radius: 999px; cursor: pointer;
+.ofap-pause { margin-left: auto; padding: 4px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap;
   font: 600 11px ui-monospace, monospace; letter-spacing: .02em;
   border: 1px solid rgba(var(--of-steel-rgb),.45); background: rgba(var(--of-steel-rgb),.12); color: var(--of-ink-2); }
 .ofap-pause:hover { border-color: rgba(var(--of-steel-hi-rgb),.7); }
 .ofap-pause.on { border-color: rgba(var(--of-gold-rgb),.65); background: rgba(var(--of-gold-rgb),.16); color: var(--of-gold);
   box-shadow: 0 0 12px rgba(var(--of-gold-rgb),.25); }
+/* §94 — the wrapped status controls scale instead of clipping: one compact step each. */
+@media (max-width: 1180px) {
+  .ofap-pause { padding: 2px 9px; font-size: 10.5px; }
+  .chrome-toggle.mb-toggle { height: 22px; padding: 0 9px; font-size: 10.5px; }
+}
 
 
 /* main menu (purpose-grouped panels), hotkey sheet, status bar */
@@ -364,7 +369,11 @@ html.ui-compact .topbar { padding-top: 4px; padding-bottom: 4px; }
 html, body { height: 100%; }
 body { display: flex; flex-direction: column; overflow: hidden; }
 .app { flex: 1 1 auto; min-height: 0; height: auto !important; min-width: 0; overflow: hidden; }
-.topbar { flex-wrap: wrap; row-gap: 4px; min-width: 0; }
+.topbar { flex-wrap: wrap; row-gap: 4px; min-width: 0; height: auto; min-height: var(--top-h); flex: 0 0 auto; }
+/* §94 — and it OWNS its content height: while the wrap above was allowed, the bar kept ui.css's
+   fixed 56px box, so the second row (the live chip + the menu toggle, the bottom-most items) hung
+   below it — +16px at 1440, +45px at 1024, +81px at 800 — and painted over the views. min-height
+   keeps the one-row look; a wrapped row now grows the bar instead of escaping it. */
 .topbar > * { min-width: 0; }
 .search-wrap { flex: 1 1 200px; min-width: 150px; max-width: 340px; }
 .search-wrap input { width: 100%; min-width: 0; box-sizing: border-box; }
@@ -747,3 +756,34 @@ body.wf-gesture .wf-body { pointer-events: none; }
 /* §92: the shortcut line inside a hover card (keys.js annotates the target, hint.js shows it). */
 .hint-shortcut { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(var(--of-steel-rgb),.25);
   color: var(--of-ink-dim2); font: 500 11px ui-monospace, monospace; }
+
+/* ── §118: the ladder, the bracket row and the session ledger (Replay-local) ── */
+
+.pp-strip { margin-bottom: 10px; }
+.pp-strip .field { flex-direction: row; align-items: center; gap: 6px; }
+.pp-strip .field label { margin-bottom: 0; }
+.ld-grid { display: flex; flex-direction: column; font-variant-numeric: tabular-nums; user-select: none; }
+.ld-row { display: flex; align-items: center; gap: 10px; padding: 2px 12px; min-height: 21px;
+    border-bottom: 1px solid rgba(var(--of-steel-rgb), .10); cursor: crosshair; }
+.ld-row:hover { background: rgba(var(--of-accent-rgb), .07); }
+.ld-price { width: 96px; text-align: right; font: 500 12px var(--of-font-mono), monospace; opacity: .92; }
+.ld-last { background: rgba(var(--of-gold-rgb), .12); }
+.ld-last .ld-price { font-weight: 700; }
+.ld-marks { width: 132px; display: flex; gap: 4px; justify-content: flex-end; }
+.ld-mark { font: 600 10px var(--of-font-mono), monospace; padding: 0 5px; border-radius: 7px;
+    border: 1px solid currentColor; opacity: .9; }
+.ld-mark-entry { color: var(--of-ink-bright); }
+.ld-mark-stop { color: var(--of-err); }
+.ld-mark-target { color: var(--of-ok); }
+.ld-orders { display: flex; gap: 6px; flex-wrap: wrap; }
+.ld-order { font: 500 10.5px var(--of-font-mono), monospace; padding: 1px 6px; border-radius: 7px;
+    border: 1px solid rgba(var(--of-steel-rgb), .5); background: transparent; color: var(--of-ink-dim);
+    cursor: pointer; }
+.ld-order-buy { color: var(--of-ok); border-color: rgba(var(--of-ok-rgb), .45); }
+.ld-order-sell { color: var(--of-err); border-color: rgba(var(--of-err-rgb), .45); }
+.ld-order:hover { border-color: var(--of-ink-bright); color: var(--of-ink-bright); }
+.ld-ledger { max-height: 148px; overflow: auto; font: 500 11px var(--of-font-mono), monospace;
+    padding: 6px 12px; }
+.ld-ledger-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 1px 0; opacity: .9; }
+.ld-ledger-reject, .ld-ledger-cancel { opacity: .65; }
+.ld-ledger-end, .ld-ledger-start { opacity: .6; font-style: italic; }

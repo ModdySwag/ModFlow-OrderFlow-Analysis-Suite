@@ -12,7 +12,8 @@
     const P = { last: null, sel: null, mode: 'inspect', markers: [], hud: null, dragging: false, symbol: null };
 
     const $ = (s) => document.querySelector(s);
-    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    /* SEC-18: the apostrophe is escaped too — `title='…'` contexts exist. */
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
     /* Buckets arrive as epoch milliseconds; a desk reads clock time, not a 13-digit number. */
     const fmtBucket = (b) => {
@@ -79,11 +80,16 @@
         }
         if (P.busy && !force) return;
         P.busy = true;
+        const seq = (P.pullSeq || 0) + 1;      // D-10: a forced pull must not be overtaken
+        P.pullSeq = seq;
         try {
             const sym = await symbol();
             if (!sym) return;
+            if (seq !== P.pullSeq) return;
             if (P.markersFor !== sym) { P.markersFor = sym; P.markers = []; void markersLoad(sym); }
-            P.last = await api('/api/atlas/heatmap/' + encodeURIComponent(sym) + '?columns=' + cols() + '&rows=' + rows());
+            const payload = await api('/api/atlas/heatmap/' + encodeURIComponent(sym) + '?columns=' + cols() + '&rows=' + rows());
+            if (seq !== P.pullSeq) return;     // a newer pull is in flight: its answer wins
+            P.last = payload;
             if ((!P.last || !(P.last.buckets || []).length) && !P.reResolved) {
                 P.reResolved = true;                 // one retry, then accept the empty map
                 P.symbol = null;
@@ -107,7 +113,11 @@
     function geom() {
         const c = stage();
         if (!c) return null;
-        const r = c.getBoundingClientRect();
+        const box = c.getBoundingClientRect();
+        /* C-05: the SIZE comes from the same box prepCanvas used (clientWidth/clientHeight — no
+           border, no scrollbar); only the origin comes from the rect. The border box disagreed
+           with the canvas by the border and mis-registered this overlay on narrow layouts. */
+        const r = { left: box.left, top: box.top, width: c.clientWidth, height: c.clientHeight };
         const nc = (P.last && P.last.buckets && P.last.buckets.length) || 1;
         const nr = (P.last && P.last.prices && P.last.prices.length) || 1;
         /* The map owns its insets (atlas.js's HEAT_INSET): reading them off the window keeps this
@@ -142,7 +152,6 @@
     }
 
     function draw() {
-        if (window.OFAPFREEZE && OFAPFREEZE.held('heatmap')) return;   // T4/A7
         const c = stage(), ov = overlay();
         if (!c || !ov || !P.last) return;
         const dpr = window.devicePixelRatio || 1;
@@ -538,8 +547,8 @@
         }
         box.innerHTML = 'selected <b>' + st.buckets + ' &times; ' + st.rows + '</b> cells · resting <b>' + st.total_depth.toFixed(1) +
             '</b> · heaviest <b>' + (st.heaviest.price == null ? '--' : st.heaviest.price) + '</b> (' + st.heaviest.size.toFixed(2) + ')' +
-            '<input class="hm-note" data-hm-pro-tol type="number" step="0.1" min="0" placeholder="± tol" title="price tolerance for the alert level — leave empty for the default, two drawn price steps">' +
-            '<input class="hm-note" data-hm-pro-mins type="number" step="1" min="1" placeholder="min" title="how many minutes the level must hold before the hold-alert fires (default 2)">' +
+            '<input class="hm-note" data-hm-pro-tol type="number" step="0.1" min="0" placeholder="± tol" title="Price tolerance for the alert level — leave empty for the default, two drawn price steps">' +
+            '<input class="hm-note" data-hm-pro-mins type="number" step="1" min="1" placeholder="min" title="How many minutes the level must hold before the hold-alert fires (default 2)">' +
             ' <button class="btn small" data-hm-pro="alert-heavy">Alert: heaviest level</button>' +
             ' <button class="btn small" data-hm-pro="alert-hold">Alert: if this level holds</button>' +
             ' <button class="btn small" data-hm-pro="alert-stack">Alert: stacking here</button>' +

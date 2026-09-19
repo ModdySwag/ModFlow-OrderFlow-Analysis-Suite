@@ -32,6 +32,9 @@
     }
 
     function paint() {
+        /* C-04: the pause registry is opt-in, and this 2 s loop never asked - a held board kept
+           reading layout and writing labels. The chip already says "held"; nothing to repaint. */
+        if (window.OFAP_PAUSED) return;
         VIEWS.forEach(function (view) {
             var section = document.querySelector('.view[data-view="' + view + '"]');
             if (!section) return;
@@ -54,7 +57,13 @@
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', paint);
         else paint();
         document.addEventListener('ofap:relayout', paint);
-        if (typeof setInterval === 'function') setInterval(paint, 2000);
+        if (typeof setInterval === 'function') {
+            const watermarkTimer = setInterval(paint, 2000);
+            /* Registered with the pause registry: pause clears it, resume rebuilds it and repaints. */
+            if (window.OFAPPause && typeof OFAPPause.register === 'function') {
+                OFAPPause.register(watermarkTimer, () => setInterval(paint, 2000));
+            }
+        }
     }
     window.OFAPWATERMARK = { paint: paint, label: label, VIEWS: VIEWS };
 })();

@@ -65,7 +65,8 @@ logger = logging.getLogger(__name__)
 
 #: THE declared User-Agent — one constant, every EDGAR request. sec.gov answers 403 to anything
 #: that does not name an application and a contact (verified from this machine, both ways).
-USER_AGENT = "ModFlow-OrderFlow-Suite/1.0 (moddy@moddys.net)"
+USER_AGENT = ("ModFlow-OrderFlow-Analysis-Suite/1.0 "
+              "(+https://github.com/ModdySwag/ModFlow-OrderFlow-Analysis-Suite)")
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
@@ -74,6 +75,12 @@ COINGECKO_MARKETS_URL = "https://api.coingecko.com/api/v3/coins/markets"
 #: How long each answer is kept. The ticker map changes when a company lists; a filer's facts change
 #: quarterly (a refresh within the hour is already generous); CoinGecko's prices are the only thing
 #: here that moves by the minute.
+#: MEM-B-03: the cache holds *parsed documents* (a companyfacts doc is ~3.8 MB raw and the parsed
+#: object graph is larger), so it is bounded by construction, not by read-time TTL alone:
+#: expired entries are swept first, then the oldest fall out. 48 entries covers a hundred-symbol
+#: browsing session without ever approaching the ~1.5 GB the unbounded map measured at 100 symbols.
+MAX_CACHE_ENTRIES = 48
+
 TTL_TICKERS_S = 21600.0
 TTL_FACTS_S = 21600.0
 TTL_CRYPTO_S = 60.0
@@ -359,7 +366,8 @@ class FundamentalsService:
                  ttl_tickers_s: float = TTL_TICKERS_S,
                  ttl_facts_s: float = TTL_FACTS_S,
                  ttl_crypto_s: float = TTL_CRYPTO_S,
-                 min_interval_s: float = MIN_INTERVAL_S) -> None:
+                 min_interval_s: float = MIN_INTERVAL_S,
+                 max_cache_entries: int = MAX_CACHE_ENTRIES) -> None:
         self._fetch = fetch or http_json
         self._clock = clock
         self._sleep = sleep
@@ -367,7 +375,10 @@ class FundamentalsService:
         self.ttl_facts_s = ttl_facts_s
         self.ttl_crypto_s = ttl_crypto_s
         self.min_interval_s = min_interval_s
-        self._cache: dict[str, tuple[float, Any]] = {}
+        self.max_cache_entries = int(max_cache_entries)
+        #: key → (loaded_at, value, ttl_s) — the ttl rides along so the sweep can tell a
+        #: stale crypto quote from a still-fresh filing on the same insert pass.
+        self._cache: dict[str, tuple[float, Any, float]] = {}
         self._last_call = 0.0
         self.counters = {"requests": 0, "cache_hits": 0, "ticker_maps": 0, "facts": 0, "crypto": 0}
 
@@ -380,8 +391,30 @@ class FundamentalsService:
             self.counters["cache_hits"] += 1
             return held[1]
         value = producer()                       # a failure is NOT cached: the next ask retries
-        self._cache[key] = (self._clock(), value)
+        self._cache[key] = (self._clock(), value, float(ttl_s))
+        self._evict()
         return value
+
+    def _evict(self) -> int:
+        """Bound the cache: expired keys first, then oldest-first (MEM-B-03).
+
+        TTL honoured on read alone left every distinct filer's parsed document resident until
+        process exit — ~15 MB per US company, ~1.5 GB after a hundred symbols. The sweep runs
+        on insert, so the bound holds whether or not the user ever revisits a symbol.
+        """
+        dropped = 0
+        now = self._clock()
+        if len(self._cache) > self.max_cache_entries:
+            for stale in [k for k, (at, _v, ttl) in self._cache.items() if (now - at) >= ttl]:
+                del self._cache[stale]
+                dropped += 1
+        while len(self._cache) > self.max_cache_entries:
+            oldest = min(self._cache.items(), key=lambda item: item[1][0])[0]
+            del self._cache[oldest]
+            dropped += 1
+        if dropped:
+            logger.debug("fundamentals cache evicted %d entries", dropped)
+        return dropped
 
     def _get_json(self, url: str) -> Any:
         wait = self.min_interval_s - (self._clock() - self._last_call)
@@ -428,7 +461,10 @@ class FundamentalsService:
                     "note": NO_SOURCE_NOTE.format(symbol=symbol)}
         entry = table.get(symbol) or {}
         doc = self.company_facts(cik)
-        rows = reduce_company_facts(doc)
+        # MEM-B-08: the reduction is cached too — a 3.8 MB document was re-reduced into panel
+        # rows on every request for the same filer.
+        rows = self._cached(f"edgar:rows:{cik}", self.ttl_facts_s,
+                            lambda: reduce_company_facts(doc))
         company = {"cik": cik, "ticker": symbol,
                    "name": str(entry.get("title") or (doc or {}).get("entityName") or "")}
         payload: dict[str, Any] = {"ok": True, "symbol": symbol, "source": "edgar",

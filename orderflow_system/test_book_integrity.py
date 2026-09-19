@@ -25,7 +25,11 @@ class FakeWS:
         self.sent.append(json.loads(payload))
 
 
-def _snapshot(u: int, bids, asks):
+def _snapshot(u: int, bids, asks=None):
+    """A snapshot whose book is two-sided by default: Bybit refuses one-sided "books" (audit
+    D-09), and these tests are about reorders/gaps, not about one-sidedness."""
+    if not asks:
+        asks = [["101.0", "1"]]
     return {"topic": TOPIC, "type": "snapshot", "data": {"u": u, "b": bids, "a": asks}}
 
 
@@ -114,12 +118,41 @@ def test_a_gap_on_one_symbol_does_not_touch_another():
     feed, _ = _feed()
 
     async def scenario():
-        await feed._handle_orderbook(_snapshot(1, [["100.0", "1"]], []))
+        await feed._handle_orderbook(_snapshot(1, [["100.0", "1"]]))
         await feed._handle_orderbook({"topic": "orderbook.50.ETHUSDT", "type": "snapshot",
-                                      "data": {"u": 1, "b": [["10.0", "1"]], "a": []}})
+                                      "data": {"u": 1, "b": [["10.0", "1"]], "a": [["10.5", "1"]]}})
         await feed._handle_orderbook(_delta(5, [["100.0", "2"]]))          # BTCUSDT gap
         assert feed._orderbooks["BTCUSDT"].stale is True
         assert feed._orderbooks["ETHUSDT"].stale is False, "the other book is untouched"
 
     asyncio.run(scenario())
     assert feed.book_health()["stale"] == ["BTCUSDT"]
+
+
+# ── MEM-A2-02 / MEM-A2-08: the local book is capped, and copies are published ────────────────
+def test_the_local_book_is_capped_and_publishes_copies():
+    from orderflow_system.data.bybit_feed import MAX_LEVELS
+    from orderflow_system.data.models import OrderbookSnapshot
+
+    feed = BybitFeed.__new__(BybitFeed)            # the delta applier only: no socket, no feed
+    feed._junk_values = 0
+    feed._book_evictions = 0
+    book = OrderbookSnapshot(timestamp_ms=0)
+
+    bids = [[str(1000.0 - i * 0.5), "1"] for i in range(MAX_LEVELS + 25)]
+    feed._apply_delta(book, {"b": bids, "a": [["2000.0", "1"]]})
+    assert len(book.bids) == MAX_LEVELS, f"{len(book.bids)} levels kept — the cap is the contract"
+    assert feed._book_evictions == 25
+    assert book.bids[0].price == 1000.0, "the best levels survive the trim"
+    assert book.bids == sorted(book.bids, key=lambda level: -level.price), "sorted once, still sorted"
+
+    top = book.bids[0].price
+    feed._apply_delta(book, {"b": [[str(top), "0"]], "a": []})
+    assert all(level.price != top for level in book.bids), "qty 0 still removes exactly that level"
+    assert len(book.bids) == MAX_LEVELS - 1
+
+    published = BybitFeed._copy(book)
+    book.bids[0].quantity = 999.0
+    assert published is not None and published.bids[0].quantity != 999.0, \
+        "a published snapshot is a copy — the venue loop keeps mutating the original"
+    assert BybitFeed._copy(None) is None

@@ -20,7 +20,8 @@
    and the tutorial tool modules are mapped onto StudyAPI's helpers.
    ══════════════════════════════════════════════════════════════════════════════ */
 
-const STUDIES = { library: [], active: [], signals: [], errors: [], loaded: false, seq: 0 };
+const STUDIES = { library: [], active: [], signals: [], errors: [], loaded: false, seq: 0,
+                  collStatus: '', collSel: '', collDraft: '' };
 
 function stEsc(v) {
     return String(v === null || v === undefined ? '' : v)
@@ -33,7 +34,7 @@ function stInjectModule(source, label) {
        loader is exercised by the Node self-test. This wrapper only collects the errors. */
     const result = StudyAPI.loadModuleSource(source, { label });
     if (!result.ok) {
-        STUDIES.errors.push(...(result.errors || [`${label}: refused`]));
+        noteError(...(result.errors || [`${label}: refused`]));
         return false;
     }
     return true;
@@ -52,7 +53,7 @@ function stLoadScript(url) {
         tag.src = `${url}${url.includes('?') ? '&' : '?'}r=${stLoadScript.round}`;
         tag.dataset.study = url;                       // the canonical path, counter stripped
         tag.onload = () => resolve(true);
-        tag.onerror = () => { STUDIES.errors.push(`${url}: could not be loaded`); resolve(false); };
+        tag.onerror = () => { noteError(`${url}: could not be loaded`); resolve(false); };
         document.body.appendChild(tag);
     });
 }
@@ -60,12 +61,21 @@ function stLoadScript(url) {
 async function studiesLoadLibrary(force) {
     if (STUDIES.loaded && !force) return;
     STUDIES.errors = [];
+    /* The error list is a diagnostic surface, not a log file: cap it so a library that fails on
+       every poll cannot grow it for the whole session (audit B-JS-10). */
+    const STUDIES_ERROR_MAX = 50;
+    const noteError = (...messages) => {
+        STUDIES.errors.push(...messages);
+        if (STUDIES.errors.length > STUDIES_ERROR_MAX) {
+            STUDIES.errors.splice(0, STUDIES.errors.length - STUDIES_ERROR_MAX);
+        }
+    };
     StudyAPI.registry.clear();
     let payload = { modules: [], custom: [] };
     try {
         payload = await api('/api/control/studies/library');
     } catch (err) {
-        STUDIES.errors.push(`library listing failed: ${err}`);
+        noteError(`library listing failed: ${err}`);
     }
     for (const url of payload.modules || []) {
         await stLoadScript(url);
@@ -79,7 +89,7 @@ async function studiesLoadLibrary(force) {
     if (listed && !STUDIES.library.length) {
         /* The one failure that looked like "the feature is missing" instead of an error:
            files listed, nothing registered. Say what it means. */
-        STUDIES.errors.push(`the server listed ${listed} module file(s) but none registered — if this window was opened before an update, close and relaunch the app`);
+        noteError(`the server listed ${listed} module file(s) but none registered — if this window was opened before an update, close and relaunch the app`);
     }
 }
 
@@ -103,6 +113,12 @@ function stActiveList() {
     return Array.isArray(list) ? list : (STUDIES.active || []);
 }
 
+/* §117: the saved sets, straight from the config the server owns. */
+function stCollections() {
+    const c = stActiveConfig().collections;
+    return (c && typeof c === 'object') ? c : {};
+}
+
 async function studiesSave(active) {
     STUDIES.active = active;
     try {
@@ -111,7 +127,7 @@ async function studiesSave(active) {
         S.config.studies = { ...(S.config.studies || {}), ...(saved.studies || { active }) };
         S.config.studies.active = active;
     } catch (err) {
-        STUDIES.errors.push(`saving studies failed: ${err}`);
+        noteError(`saving studies failed: ${err}`);
     }
     studiesApply();
     studiesRender();
@@ -149,7 +165,7 @@ function studiesApply() {
         const run = StudyAPI.run(def, bars, entry.params || {}, { symbol: S.symbol, tickSize });
         S.studyResults[entry.name] = run;
         if (!run.ok && run.errors.length) {
-            STUDIES.errors.push(`${entry.name}: ${run.errors[0]}`);
+            noteError(`${entry.name}: ${run.errors[0]}`);
         }
         for (const signal of run.alerts) S.studySignals.push({ ...signal, study: def.description || def.name });
         const marks = run.markers.slice(-200);
@@ -191,10 +207,10 @@ function studiesApply() {
                     });
                 }
             } catch (err) {
-                STUDIES.errors.push(`${entry.name}/${plot}: ${err && err.message ? err.message : err}`);
+                noteError(`${entry.name}/${plot}: ${err && err.message ? err.message : err}`);
                 continue;
             }
-            try { series.setData(data); } catch (err) { STUDIES.errors.push(`${entry.name}/${plot}: ${err}`); }
+            try { series.setData(data); } catch (err) { noteError(`${entry.name}/${plot}: ${err}`); }
             S.studySeries.push(series);
             applied += 1;
         }
@@ -335,12 +351,27 @@ function studiesRender() {
     }).join('');
 
     const signals = (S.studySignals || []).slice(-12).reverse();
+    const colls = stCollections();
+    const collNames = Object.keys(colls).sort((a, b) => a.localeCompare(b));
+    const collOptions = collNames.map((name) =>
+        `<option value="${stEsc(name)}"${name === STUDIES.collSel ? ' selected' : ''}>`
+        + `${stEsc(name)} · ${((colls[name] || {}).active || []).length} studies</option>`).join('')
+        || '<option value="">nothing saved yet</option>';
     const errors = (STUDIES.errors || []).slice(-8);
     host.innerHTML = `
         <div class="card"><div class="card-head"><span class="card-title">On the chart (${active.length})</span>
             <div class="spacer"></div><span class="dim">${(STUDIES.library || []).length} module(s) loaded</span></div>
             <div class="card-body">${activeCards || '<div class="dim">nothing applied yet</div>'}
             ${errors.length ? `<div class="st-errors">${errors.map((e) => `<div class="dim st-warn">${stEsc(e)}</div>`).join('')}</div>` : ''}
+            </div></div>
+        <div class="card"><div class="card-head"><span class="card-title">Saved setups</span>
+            <div class="spacer"></div><span class="dim" id="stCollStatus">${stEsc(STUDIES.collStatus || 'switch a whole indicator set in one move — saved in your config file')}</span></div>
+            <div class="card-body">
+                <div class="st-row"><select id="stCollSelect" class="grow" title="A named set of studies — Apply swaps the whole list below in one move">${collOptions}</select>
+                    <button class="btn small" id="stCollApply">Apply</button>
+                    <button class="btn small" id="stCollDelete">Delete</button></div>
+                <div class="st-row"><input id="stCollName" maxlength="32" placeholder="name this setup — e.g. Scalp reads" value="${stEsc(STUDIES.collDraft || '')}">
+                    <button class="btn small" id="stCollSave">Save current as…</button></div>
             </div></div>
         <div class="card"><div class="card-head"><span class="card-title">Library</span>
             <div class="spacer"></div><button class="btn small" id="stReload">Reload modules</button></div>
@@ -392,6 +423,61 @@ function studiesWire() {
             await studiesSave(active);
         };
     });
+    const collApply = document.getElementById('stCollApply');
+    if (collApply) collApply.onclick = async () => {
+        const sel = document.getElementById('stCollSelect');
+        const name = sel && sel.value;
+        if (!name) return;
+        try {
+            const saved = await api('/api/control/studies', { method: 'POST', body: { collection: { action: 'apply', name } } });
+            STUDIES.collStatus = saved.ok ? ('applied “' + name + '”') : (saved.error || 'could not apply');
+            if (saved.ok) {
+                S.config = S.config || {};
+                S.config.studies = { ...(S.config.studies || {}), ...(saved.studies || {}) };
+                STUDIES.active = (saved.studies || {}).active || [];
+                studiesApply();
+            }
+        } catch (err) { STUDIES.collStatus = String(err); }
+        studiesRender();
+    };
+    const collSave = document.getElementById('stCollSave');
+    if (collSave) collSave.onclick = async () => {
+        const box = document.getElementById('stCollName');
+        const name = ((box && box.value) || STUDIES.collDraft || '').trim();
+        if (!name) { STUDIES.collStatus = 'give the setup a name first'; studiesRender(); return; }
+        try {
+            const saved = await api('/api/control/studies', { method: 'POST',
+                body: { collection: { action: 'save', name, active: stActiveList() } } });
+            STUDIES.collStatus = saved.ok ? ('saved “' + name + '”') : (saved.error || 'could not save');
+            if (saved.ok) {
+                STUDIES.collSel = name;
+                STUDIES.collDraft = '';
+                S.config = S.config || {};
+                S.config.studies = { ...(S.config.studies || {}), ...(saved.studies || {}) };
+            }
+        } catch (err) { STUDIES.collStatus = String(err); }
+        studiesRender();
+    };
+    const collDelete = document.getElementById('stCollDelete');
+    if (collDelete) collDelete.onclick = async () => {
+        const sel = document.getElementById('stCollSelect');
+        const name = sel && sel.value;
+        if (!name) return;
+        try {
+            const saved = await api('/api/control/studies', { method: 'POST', body: { collection: { action: 'delete', name } } });
+            STUDIES.collStatus = saved.ok ? ('deleted “' + name + '”') : (saved.error || 'could not delete');
+            if (saved.ok) {
+                if (STUDIES.collSel === name) STUDIES.collSel = '';
+                S.config = S.config || {};
+                S.config.studies = { ...(S.config.studies || {}), ...(saved.studies || {}) };
+            }
+        } catch (err) { STUDIES.collStatus = String(err); }
+        studiesRender();
+    };
+    const collSel = document.getElementById('stCollSelect');
+    if (collSel) collSel.onchange = () => { STUDIES.collSel = collSel.value; };
+    const collNameBox = document.getElementById('stCollName');
+    if (collNameBox) collNameBox.oninput = () => { STUDIES.collDraft = collNameBox.value; };
     const reload = document.getElementById('stReload');
     if (reload) reload.onclick = async () => { await studiesLoadLibrary(true); studiesRender(); };
     const test = document.getElementById('stTest');

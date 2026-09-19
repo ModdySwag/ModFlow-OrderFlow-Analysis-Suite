@@ -25,21 +25,28 @@ check('weight: monotone in volume',
     math.fontWeight(50, 100) <= math.fontWeight(200, 100) && math.fontWeight(200, 100) <= math.fontWeight(400, 100));
 check('weight: lands on century steps', math.fontWeight(137, 100) % 100 === 0);
 
-/* ── diagonal processing matrix ──────────────────────────────────────────── */
+/* ── diagonal processing matrix (the footprint.py convention) ──────────────
+   One rule, two runtimes: analytics/footprint.py's diagonal branch is the reference. */
 const ladder = [
-    { price: 100, bid: 100, ask: 2 },     // 100 / ask(101)=20 = 5x   -> buying
-    { price: 101, bid: 1, ask: 20 },      // 20  / bid(102)=2  = 10x  -> selling
-    { price: 102, bid: 2, ask: 3 },       // nothing above: neither side can be judged
+    { price: 100, bid: 100, ask: 2 },     // sell: bid 100 / ask(101) 20 = 5x
+    { price: 101, bid: 1, ask: 20 },      // quiet: ask 20 / bid(100) 100 = 0.2x
+    { price: 102, bid: 2, ask: 40 },      // buy:  ask 40 / bid(101) 1   = 40x
 ];
 const diag = math.diagonalImbalance(ladder, 4.0);
-check('diagonal: buying imbalance flags bid[Y] vs ask[Y+1]', diag.rows[0].buy && diag.rows[0].side === 'buy');
-check('diagonal: selling imbalance is the reciprocal comparison', diag.rows[1].sell && diag.rows[1].side === 'sell');
-check('diagonal: quiet level is unflagged', diag.rows[2].side === '');
+check('diagonal: buying imbalance flags ask[Y] vs bid[Y-1]', diag.rows[2].buy && diag.rows[2].side === 'buy');
+check('diagonal: selling imbalance flags bid[Y] vs ask[Y+1]', diag.rows[0].sell && diag.rows[0].side === 'sell');
+check('diagonal: quiet level is unflagged', diag.rows[1].side === '');
 check('diagonal: counts add up', diag.buyCount === 1 && diag.sellCount === 1, JSON.stringify([diag.buyCount, diag.sellCount]));
-check('diagonal: R is honoured (higher R clears the flag)',
-    math.diagonalImbalance(ladder, 25.0).rows[0].side === '');
-check('diagonal: a zero next level does not fake an imbalance',
-    math.diagonalImbalance([{ price: 1, bid: 5, ask: 0 }, { price: 2, bid: 0, ask: 0 }], 4).rows[0].side === '');
+check('diagonal: R is honoured (higher R clears the 5x row and keeps the 40x row)',
+    math.diagonalImbalance(ladder, 25.0).rows[0].side === '' && math.diagonalImbalance(ladder, 25.0).rows[2].side === 'buy');
+check('diagonal: the ladder edge falls back to the same-price comparison (footprint.py parity)',
+    math.diagonalImbalance([{ price: 1, bid: 5, ask: 0 }, { price: 2, bid: 0, ask: 0 }], 4).rows[0].side === 'sell');
+/* Pinned cross-runtime case: analytics/footprint.py answers [(100, 'sell')] for this ladder. */
+const diagParity = math.diagonalImbalance(
+    [{ price: 100, bid: 40, ask: 0 }, { price: 100.5, bid: 0, ask: 4 }], 4.0);
+check('diagonal: matches footprint.py on the pinned ladder',
+    diagParity.rows[0].side === 'sell' && diagParity.rows[1].side === '' && diagParity.buyCount === 0,
+    JSON.stringify(diagParity.rows.map((r) => r.side)));
 
 /* ── stacked imbalance zones ─────────────────────────────────────────────── */
 const stacked = math.stackedZones([
@@ -199,8 +206,9 @@ check('group: no tick step means no grouping', math.tickGroup(0, 2, 9) === 1);
 const groupedRows = math.groupLevels([{ price: 1, bid: 2, ask: 3 }, { price: 2, bid: 4, ask: 5 }, { price: 3, bid: 1, ask: 1 }], 2);
 check('group: grouped rows sum bid and ask', groupedRows.length === 2 && groupedRows[0].bid === 6 && groupedRows[0].ask === 8,
     JSON.stringify(groupedRows));
-check('group: a group keeps the price of its last tick and its tick count',
-    groupedRows[0].price === 2 && groupedRows[0].ticks === 2 && groupedRows[1].ticks === 1);
+check('group: a group is centred on its band and keeps its tick count (C-04)',
+    groupedRows[0].price === 1.5 && groupedRows[0].label === 2 && groupedRows[0].ticks === 2
+    && groupedRows[1].ticks === 1);
 check('group: k=1 is a pass-through', math.groupLevels([{ price: 1, bid: 2, ask: 3 }], 1)[0].bid === 2);
 
 /* ── two-sided blocks ────────────────────────────────────────────────────── */
@@ -467,6 +475,23 @@ check('zoom: the price scale clamps at both limits',
             !!h && h.index === hi && h.prints === o.prints && near(h.sweep, o.sweep, 1e-9)
             && near(h.depth, o.depth, 1e-9) && near(h.cvd, o.cvd, 1e-9),
             JSON.stringify([h && [h.index, h.prints, h.sweep, h.depth, h.cvd], o]));
+
+        /* D-05: the same bar and the same parameters must not rebuild the row/zone arrays, and the
+           published hover object is a reused scratch — so a second identical hover hands back the
+           SAME object, with the same numbers. (Before the fix every hover frame allocated a fresh
+           object plus fresh derived rows.) */
+        OFX.hover(mx, my);
+        check('D-05: a repeated hover reuses the scratch object (no per-frame allocation)',
+            OFX.state.hover === h, OFX.state.hover === h ? '' : 'a fresh object was allocated');
+        check('D-05: the repeated hover still reports the same numbers',
+            OFX.state.hover.index === hi && OFX.state.hover.prints === o.prints
+            && near(OFX.state.hover.sweep, o.sweep, 1e-9) && near(OFX.state.hover.depth, o.depth, 1e-9),
+            JSON.stringify([OFX.state.hover.index, OFX.state.hover.prints, OFX.state.hover.sweep]));
+        /* and a hover on a different bar still recomputes rather than reusing stale rows */
+        const hi2 = 19;
+        OFX.hover(OFX.worldX(hi2) + OFX.state.view.scaleX / 2, OFX.priceToY(1.05));
+        check('D-05: a different bar recomputes (the cache is keyed, not sticky)',
+            OFX.state.hover.index === hi2, String(OFX.state.hover.index));
     }
     /* Millisecond stamps: the selectionStats rule means they COUNT now (they used to read zero). */
     const msPrints = hPrints.map((p) => ({ time: Math.round(p.time * 1000), price: p.price, size: p.size, side: p.side }));

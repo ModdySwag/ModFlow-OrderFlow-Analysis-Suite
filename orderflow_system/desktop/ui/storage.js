@@ -320,7 +320,23 @@
             say('cfgArtifactResult', 'reading ' + file.name + '…');
             var reader = new FileReader();
             reader.onload = function () {
-                window.api('/api/control/config/import', { method: 'POST', body: { artifact: String(reader.result || '') } })
+                var rawArtifact = String(reader.result || '');
+                /* SEC-02: a studies artifact is settings-shaped but can carry whole JS modules,
+                   which the shell compiles on load — inside this origin, where /config hands back
+                   the stored credentials. So ask, naming what is at stake. */
+                var codeNames = [];
+                try {
+                    var blocks = (JSON.parse(rawArtifact).blocks) || {};
+                    var custom = (blocks.studies || {}).custom || [];
+                    for (var ci = 0; ci < custom.length; ci += 1) {
+                        if (custom[ci] && String(custom[ci].source || '').trim()) codeNames.push(String(custom[ci].name || 'unnamed'));
+                    }
+                } catch (e) { /* a broken file is the server's to describe, not ours */ }
+                var allowCode = false;
+                if (codeNames.length && window.confirm) {
+                    allowCode = window.confirm('This settings file carries ' + codeNames.length + ' custom stud' + (codeNames.length === 1 ? 'y' : 'ies') + ' with JavaScript code:\n\n' + codeNames.join(', ') + '\n\nThat code runs inside the suite when the studies panel loads. Import the code as well?' );
+                }
+                window.api('/api/control/config/import', { method: 'POST', body: { artifact: rawArtifact, allow_code: allowCode } })
                     .then(function (res) {
                         if (!res || res.ok === false) {
                             say('cfgArtifactResult', 'import refused: ' + ((res && res.error) || 'unknown'), 'err');
@@ -389,12 +405,14 @@
         startPolling();
         // load when Settings opens, and once now — the card must not read "—" until a click
         var wrap = window.showView;
-        if (typeof wrap === 'function') {
-            window.showView = function (name) {
+        if (typeof wrap === 'function' && !wrap.__ofapWrapped_storage) {
+            var wrapped = function (name) {
                 var out = wrap.apply(this, arguments);
-                if (name === 'settings') setTimeout(load, 400);
+                if (name === 'settings') setTimeout(function () { if (onScreen()) load(); }, 400);
                 return out;
             };
+            wrapped.__ofapWrapped_storage = true;
+            window.showView = wrapped;
         }
         setTimeout(function () { if (onScreen()) load(); }, 1500);
     }

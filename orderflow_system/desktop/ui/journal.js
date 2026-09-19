@@ -105,12 +105,17 @@
                 });
         };
         var wrap = window.showView;
-        if (typeof wrap === 'function') {
-            window.showView = function (name) {
+        if (typeof wrap === 'function' && !wrap.__ofapWrapped_journal) {
+            var wrapped = function (name) {
                 var out = wrap.apply(this, arguments);
-                if (name === 'journal') setTimeout(load, 400);
+                if (name === 'journal') setTimeout(function () {
+                    var section = document.querySelector('.view[data-view="journal"]');
+                    if (section && section.classList.contains('active')) load();
+                }, 400);
                 return out;
             };
+            wrapped.__ofapWrapped_journal = true;
+            window.showView = wrapped;
         }
         setTimeout(function () {
             var section = document.querySelector('.view[data-view="journal"]');

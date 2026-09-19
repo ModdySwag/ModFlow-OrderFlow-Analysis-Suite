@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration - what gets signed, and how.
+
+     The CI build job assembles ONE artifact named "dist-sign" containing two files:
+       ModFlowOrderFlowAnalysisSuite.exe               (the frozen application)
+       ModFlowOrderFlowAnalysisSuite-Setup.exe         (the Inno Setup installer)
+     Both are Authenticode-signed in a single signing request. The signing policy
+     ("release-signing") lives in the SignPath organization, not here.
+
+     Until the project is accepted by SignPath Foundation and the repository has
+     SIGNPATH_ORGANIZATION_ID (variable) + SIGNPATH_API_TOKEN (secret), the CI job that uses this
+     file is skipped and the release stays unsigned - see docs/RELEASE_CHECKLIST.md section 6. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="ModFlowOrderFlowAnalysisSuite.exe">
+      <authenticode-sign/>
+    </pe-file>
+    <pe-file path="ModFlowOrderFlowAnalysisSuite-Setup.exe">
+      <authenticode-sign/>
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

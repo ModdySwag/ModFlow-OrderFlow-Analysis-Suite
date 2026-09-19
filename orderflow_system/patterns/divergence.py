@@ -19,6 +19,7 @@ from typing import Optional
 from orderflow_system.data.models import Candle, Signal, SignalType, Side
 from orderflow_system.analytics.delta import DeltaEngine
 from orderflow_system.config.settings import DivergenceConfig
+from orderflow_system.patterns import remember_signal
 
 
 class DivergenceDetector:
@@ -107,7 +108,7 @@ class DivergenceDetector:
                 "prev_delta_peak": round(prev_delta_peak, 2),
             },
         )
-        self._signal_history.append(signal)
+        remember_signal(self._signal_history, signal)
         return signal
 
     def _check_bullish_divergence(
@@ -155,5 +156,5 @@ class DivergenceDetector:
                 "prev_delta_trough": round(prev_delta_trough, 2),
             },
         )
-        self._signal_history.append(signal)
+        remember_signal(self._signal_history, signal)
         return signal

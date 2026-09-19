@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import sys
+import time
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,34 @@ APP_DIR_NAME = "OrderFlowAnalysisPro"
 
 #: Module identifiers for studies (`name` in a the suite's definition).
 _STUDY_NAME_RE = __import__("re").compile(r"^[A-Za-z][A-Za-z0-9_-]{1,40}$")
+
+def _clean_study_list(raw: Any) -> list[dict[str, Any]]:
+    """One study list, clamped: identifier names, scalar params, a visible flag, capped at 40.
+
+    Shared by the live `active` list and every saved collection — one rule, so a collection can
+    never carry an entry the live list would have refused.
+    """
+    out: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return out
+    for entry in raw[:40]:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", "") or "").strip()
+        if not _STUDY_NAME_RE.match(name):
+            continue
+        params = entry.get("params") if isinstance(entry.get("params"), dict) else {}
+        clean_params: dict[str, Any] = {}
+        for key, value in list(params.items())[:40]:
+            key = str(key)[:40]
+            if isinstance(value, bool) or isinstance(value, (int, float)):
+                clean_params[key] = value
+            elif isinstance(value, str):
+                clean_params[key] = value[:120]
+        out.append({"name": name, "params": clean_params,
+                    "visible": bool(entry.get("visible", True))})
+    return out
+
 
 
 # ──────────────────────────────────────────────────────────────
@@ -56,6 +85,30 @@ LAYOUT_THEMES = ("dark", "light")
 LAYOUT_GRID_COLS = 12
 LAYOUT_GRID_ROWS = 8
 LAYOUT_MAX_ITEMS = 24
+
+# ── Profiles (switchable playbooks): what a profile may carry ────────────────────────────────
+# A profile is a named bundle of the blocks that define HOW you read a market. Everything in
+# PROFILE_BLOCKS is analysis state, so a profile is safe to export, share and import by
+# construction. Deliberately NOT in a profile: telegram/notify/platforms/alpaca/mt5 (credentials),
+# dashboard (host/port — per machine), storage (paths), updates, logging, data, drawings/markers
+# (working annotations), search (history), help and version. `profile_capture()` reads only from
+# this tuple and the sanitiser drops anything else, so no path into a snapshot can carry a secret.
+PROFILE_BLOCKS = ("data_source", "instruments", "atlas", "ofx", "studies", "expression",
+                  "ui", "layouts", "workspaces", "watchlist", "risk", "audio", "calendar")
+#: The subset an engine start actually consumes — the apply response carries this split so the
+#: UI can say "takes effect on the next engine start" exactly the way the settings view does.
+PROFILE_RESTART_BLOCKS = ("data_source", "instruments", "atlas", "ofx")
+#: Feed names a rules.sources entry may name (the values data_source accepts).
+PROFILE_SOURCES = ("mt5", "bybit", "binance", "hyperliquid", "okx", "alpaca", "ninjatrader")
+PROFILE_ID_RE = __import__("re").compile(r"^pf[0-9a-f]{8}$")
+PROFILE_TIME_RE = __import__("re").compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
+PROFILE_NAME_MAX = 32
+PROFILE_DESC_MAX = 200
+PROFILE_TAGS_MAX = 6
+PROFILE_TAG_MAX = 18
+PROFILE_ITEMS_MAX = 40
+PROFILE_VERSIONS_MAX = 10                                 # previous setups kept per profile
+PROFILE_SNAPSHOT_MAX_CHARS = 200_000                      # per block; a snapshot is data, not a payload
 
 #: T6/A15 — which config paths each view’s "remember my settings" snapshot covers. The UI
 #: keeps a mirror (`menubar.js` VIEW_DEFAULTS_MAP) and `test_t6_menus.py` pins the two equal, so a
@@ -102,9 +155,11 @@ SMOOTH_MODES = ("auto", "manual", "none")
 #: only these paths, so a hand-edited file can never smuggle anything else into a scope.
 SCOPED_DISPLAY_PATHS = (
     "ofx.heat_contrast", "ofx.heat_floor", "ofx.heat_floor_pct", "ofx.heat_smooth", "ofx.ramp",
+    "ofx.heat_dim", "ofx.heat_highlight",
     "atlas.ofx.degrade",
     "atlas.heatmap.upper_cutoff_pct", "atlas.heatmap.upper_cutoff_abs", "atlas.heatmap.contrast",
     "atlas.heatmap.floor", "atlas.heatmap.floor_pct", "atlas.heatmap.smooth",
+    "atlas.heatmap.dim", "atlas.heatmap.highlight",
 )
 
 
@@ -346,12 +401,20 @@ def default_config() -> dict[str, Any]:
         # Indicator modules (the suite's indicator contract). `active` is what draws on the
         # chart; `custom` holds modules pasted through the Studies view, which the app
         # hands back to the browser on load.
-        "studies": {"active": [], "custom": [], "data_box": True},
+        "studies": {"active": [], "custom": [], "data_box": True, "collections": {}},
         "workspaces": {},
         # Terminal layouts: the widget arrangement for the shell's terminal mode — named, per screen
         # and per theme, with tabs. Same atomic write + sanitiser pattern as every other block, and
         # the config file stays the single store (browser storage is never the source of truth).
         "layouts": {"mode": "classic", "active": "", "items": {}, "versions": {}},
+        # Saved setups ("playbooks"): a named bundle of the analysis blocks above — instruments +
+        # feed, analysis parameters, layout, theme, risk/audio/calendar prefs. Credentials, machine
+        # paths and network settings are never part of a profile (see PROFILE_BLOCKS): that is what
+        # keeps one safe to export, share and import. `default` is applied at launch when
+        # `auto_apply` is on; `rules` are the optional session auto-switches.
+        "profiles": {"active": "", "default": "", "auto_apply": False,
+                     "rules": {"enabled": False, "sources": {}, "windows": []},
+                     "items": {}, "versions": {}},
         # Drawings, per view+symbol, in data space (epoch seconds + price). The shape mirrors the
         # reference program's own drawingSettings so the two models stay comparable.
         "drawings": {},
@@ -364,6 +427,8 @@ def default_config() -> dict[str, Any]:
                 # B2: the heat scheme's live dials — contrast (a gamma over the ramp; 1 = as
                 # shipped), a floor in size units and a floor as a share of the book's sizes.
                 "heat_contrast": 1.0, "heat_floor": 0.0, "heat_floor_pct": 0.0,
+                "heat_dim": 0.0,             # B5: dim/mute the map (0 = off)
+                "heat_highlight": 0.0,       # B5: outline cells >= this share of the ceiling (0 = off)
                 # T10/B3: vertical smoothing of the depth heat ('auto' engages only when the
                 # rows compress below ~2.5 px; 'none' keeps the raw cells).
                 "heat_smooth": "auto"},
@@ -400,6 +465,8 @@ def default_config() -> dict[str, Any]:
                 "floor": 0.0,                # B2: no colour below this resting size (0 = off)
                 "floor_pct": 0.0,            # B2: …or below this bottom share of sizes (0 = off)
                 "smooth": "auto",            # T10/B3: vertical smoothing (auto | manual | none)
+                "dim": 0.0,                  # B5: dim the map (0 = off)
+                "highlight": 0.0,            # B5: outline cells >= this share of the ceiling (0 = off)
                 "values_min_px": 0,          # T5/A20: draw cell sizes once a cell is this wide (0 = off)
             },
             # T5/A11: display-side renderer preferences read by the canvases, not by the ingest.
@@ -541,6 +608,11 @@ def default_config() -> dict[str, Any]:
             "scale": 1.0,                # 0.75–1.5, step 0.05
             # T11/B17: link-group colours (A–D) — the group letter always rides beside the colour.
             "link_colors": {"A": "#6ec1ff", "B": "#ffb454", "C": "#7fe0a8", "D": "#d49bff"},
+            # §117: the user’s own chords — binding id → canonical chords (keys.js is the
+            # authority on what an id means; the store guards the shape only). The sanitiser
+            # REBUILDS this block on every save, so an override the sheet removed (posted as [])
+            # disappears here instead of lingering through the merge.
+            "keys": {"version": 1, "overrides": {}},
             # T12/B9: per-instrument display blocks — the dials in SCOPED_DISPLAY_PATHS, snapped
             # when the instrument changes and applied when that instrument comes back.
             "instrument_scopes": {},
@@ -598,18 +670,51 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
+#: The last config-load problem, if any — read by GET /api/control/bootstrap so the Settings page
+#: can say what happened instead of silently resetting the user's file (audit F-04).
+_config_error: dict[str, str] = {}
+
+
+def config_error() -> dict[str, str]:
+    """What went wrong the last time the config was loaded (empty when it was fine)."""
+    return dict(_config_error)
+
+
+def _note_corrupt_config(path: Path, exc: Exception) -> None:
+    """Move an unreadable config aside, record why, and let the caller fall back to defaults."""
+    backup = ""
+    try:
+        target = path.with_name(f"{path.name}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}")
+        path.replace(target)          # move, not copy: the bad bytes must stop being "the config"
+        backup = str(target)
+        logger.warning("config.json is unreadable (%s) — kept it as %s and started from defaults",
+                       exc, target.name)
+    except OSError as move_exc:       # a locked/read-only dir must not stop the app from starting
+        logger.warning("config.json is unreadable (%s) and could not be moved aside (%s)",
+                       exc, move_exc)
+    _config_error.clear()
+    _config_error.update({"reason": str(exc), "backup": backup})
+
+
 def load_config() -> dict[str, Any]:
-    """Load config.json, merged over defaults. Never raises on bad input."""
+    """Load config.json, merged over defaults. Never raises on bad input.
+
+    A corrupt file is never discarded silently: it is moved to ``config.json.corrupt-<ts>`` and
+    the reason is kept in ``config_error()`` for the UI to show (audit F-04).
+    """
     defaults = default_config()
     path = config_path()
     if not path.is_file():
         return defaults
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        _note_corrupt_config(path, exc)
         return defaults
     if not isinstance(raw, dict):
+        _note_corrupt_config(path, ValueError(f"the config root is {type(raw).__name__}, not an object"))
         return defaults
+    _config_error.clear()
     return _deep_merge(defaults, raw)
 
 
@@ -623,10 +728,89 @@ def save_config(cfg: dict[str, Any]) -> dict[str, Any]:
     """
     clean = _sanitise(_deep_merge(default_config(), cfg))
     path = config_path()
+    # MEM-B-06: an unchanged config is not written. The palette used to save on every focus and
+    # every save rewrote + version-copied the whole file for no change at all (measured write
+    # amplification); only a real change touches the disk now.
+    if path.is_file():
+        try:
+            stored = _sanitise(_deep_merge(default_config(),
+                                           json.loads(path.read_text(encoding="utf-8"))))
+            if stored == clean:
+                return clean
+        except Exception:                              # noqa: BLE001 — an unreadable file is written
+            pass
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(clean, indent=2), encoding="utf-8")
     tmp.replace(path)          # atomic on Windows + macOS
     return clean
+
+
+# ── SEC-09: credentials are write-only over the control API ─────────────────
+# GET /api/control/config and /bootstrap used to hand every stored secret back in cleartext
+# (the audit's exploit chain read them after an injection). The read routes now return this
+# exact string in place of each non-empty credential, and every write path treats the string
+# as "unchanged" — the value itself never leaves the process once it is stored. An empty
+# string still means "clear it", so a user can always remove a credential deliberately.
+SECRET_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+SECRET_PATHS = (
+    "telegram.bot_token",
+    "notify.email.password",
+    "platforms.sierra.password",
+    "alpaca.key_id",
+    "alpaca.secret",
+    "mt5.password",
+)
+
+
+def _secret_node(cfg: dict[str, Any], path: str) -> dict[str, Any] | None:
+    """The mapping that holds the leaf of `path`, or None when the chain is not there."""
+    block: Any = cfg
+    for key in path.split(".")[:-1]:
+        block = block.get(key) if isinstance(block, dict) else None
+        if not isinstance(block, dict):
+            return None
+    return block
+
+
+def mask_secrets(cfg: dict[str, Any]) -> dict[str, Any]:
+    """A copy of `cfg` with every non-empty credential replaced by SECRET_MASK (SEC-09)."""
+    out = deepcopy(cfg)
+    for path in SECRET_PATHS:
+        block = _secret_node(out, path)
+        leaf = path.rsplit(".", 1)[1]
+        if block is not None and str(block.get(leaf) or ""):
+            block[leaf] = SECRET_MASK
+    return out
+
+
+def unmask_patch(patch: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:
+    """A copy of `patch` where SECRET_MASK leaves are replaced by the STORED values.
+
+    A mask that comes back on a write means "unchanged": without this, round-tripping the
+    config through the UI would store the bullets as the credential and the next connect
+    would fail with a confusing auth error. An empty string still means "clear it".
+    """
+    out = deepcopy(patch)
+    for path in SECRET_PATHS:
+        block = _secret_node(out, path)
+        leaf = path.rsplit(".", 1)[1]
+        if block is not None and block.get(leaf) == SECRET_MASK:
+            stored_block = _secret_node(stored, path)
+            block[leaf] = (stored_block or {}).get(leaf, "") if stored_block is not None else ""
+    return out
+
+
+def secret_or_stored(cfg: dict[str, Any], path: str, value: Any) -> Any:
+    """`value`, unless it is the mask (or absent) — then the stored secret for `path` (SEC-09).
+
+    The test routes use this: pressing Test with an untouched (masked) field tests the
+    STORED credential instead of posting the bullets to the provider.
+    """
+    if value not in (None, "", SECRET_MASK):
+        return value
+    block = _secret_node(cfg, path)
+    leaf = path.rsplit(".", 1)[1]
+    return (block or {}).get(leaf, "") if block is not None else ""
 
 
 def merge_config(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -636,8 +820,12 @@ def merge_config(cfg: dict[str, Any]) -> dict[str, Any]:
     used to reset every key it did not mention — measured: `{"ui": {"banner_dismissed_alpaca": true}}`
     took `search.default_view` and `context.fear_greed` back to their factory values. Merging over what
     is on disk first fixes that while leaving block-level removal (a layout delete) to save_config.
+
+    SEC-09: a patch that carries SECRET_MASK for a credential keeps the stored value — the UI
+    round-trips masked reads (`unmask_patch`), so the bullets never become the stored secret.
     """
-    return save_config(_deep_merge(load_config(), cfg))
+    stored = load_config()
+    return save_config(_deep_merge(stored, unmask_patch(cfg, stored)))
 
 
 def _block(cfg: dict[str, Any], key: str) -> dict[str, Any]:
@@ -817,6 +1005,128 @@ def _clean_layout(raw_id: str, entry: Any) -> dict[str, Any] | None:
     }
 
 
+def profile_capture(cfg: dict[str, Any], blocks: "tuple[str, ...] | None" = None) -> dict[str, Any]:
+    """The state a profile should carry: a deep copy of PROFILE_BLOCKS, or of `blocks` ∩ it.
+
+    Only whitelisted keys can ever be captured (that is what keeps credentials out of a profile
+    by construction), and a key the config does not have is not invented into the snapshot — a
+    profile carries what the machine actually had when it was saved.
+    """
+    want = tuple(b for b in (blocks if blocks is not None else PROFILE_BLOCKS) if b in PROFILE_BLOCKS)
+    return {key: deepcopy(cfg[key]) for key in want if key in cfg}
+
+
+def _clean_profile_entry(ident: str, entry: dict[str, Any]) -> dict[str, Any]:
+    """One profile, clamped: name/desc/tags caps, whitelisted snapshot keys, size-capped blocks.
+
+    Snapshot VALUES are not clamped here — a snapshot is inert until applied, and the apply
+    path writes through `merge_config`, whose sanitiser is the authority on the live store.
+    What is enforced here is everything a hostile or corrupted file could abuse: the id shape,
+    string lengths, item count, per-block snapshot size, and the rules' shape.
+    """
+    name = str(entry.get("name") or "").strip()[:PROFILE_NAME_MAX] or "Untitled profile"
+    snapshot_in = entry.get("snapshot") if isinstance(entry.get("snapshot"), dict) else {}
+    snapshot: dict[str, Any] = {}
+    for key, value in list(snapshot_in.items())[:len(PROFILE_BLOCKS)]:
+        if key not in PROFILE_BLOCKS:
+            continue
+        try:
+            text = json.dumps(value)
+        except (TypeError, ValueError):
+            continue
+        if len(text) <= PROFILE_SNAPSHOT_MAX_CHARS:
+            snapshot[key] = value
+    tags_in = entry.get("tags") if isinstance(entry.get("tags"), list) else []
+    tags = [str(t).strip()[:PROFILE_TAG_MAX] for t in tags_in[:PROFILE_TAGS_MAX] if str(t).strip()]
+    stats_in = entry.get("stats") if isinstance(entry.get("stats"), dict) else {}
+    return {
+        "id": ident,
+        "name": name,
+        "description": str(entry.get("description") or "").strip()[:PROFILE_DESC_MAX],
+        "tags": tags,
+        "created": int(_clamp(entry.get("created", 0), 0, 9_999_999_999_999, 0)),
+        "updated": int(_clamp(entry.get("updated", 0), 0, 9_999_999_999_999, 0)),
+        "blocks": [key for key in snapshot],          # what it carries == what was captured
+        "snapshot": snapshot,
+        "stats": {
+            "applied": int(_clamp(stats_in.get("applied", 0), 0, 1_000_000, 0)),
+            "last_applied": int(_clamp(stats_in.get("last_applied", 0), 0, 9_999_999_999_999, 0)),
+            "active_ms": int(_clamp(stats_in.get("active_ms", 0), 0, 9_999_999_999_999, 0)),
+            "active_since": int(_clamp(stats_in.get("active_since", 0), 0, 9_999_999_999_999, 0)),
+        },
+    }
+
+
+def _sanitise_profiles(cfg: dict[str, Any]) -> None:
+    """Clamp the profiles block: identified ids, whitelisted snapshots, capped rules.
+
+    Invariants the rest of the app may rely on afterwards: `active`/`default` name an id that
+    exists (or are ""), every rule target names an id that exists, and `blocks` is exactly the
+    snapshot's key set. `stats.active_since` is bookkeeping for the apply route's clock, not a
+    user setting.
+    """
+    block = _block(cfg, "profiles")
+    items: dict[str, Any] = {}
+    raw_items = block.get("items")
+    if isinstance(raw_items, dict):
+        for raw_id, entry in list(raw_items.items())[:PROFILE_ITEMS_MAX]:
+            ident = str(raw_id).strip().lower()
+            if PROFILE_ID_RE.match(ident) and isinstance(entry, dict):
+                items[ident] = _clean_profile_entry(ident, entry)
+    block["items"] = items
+    active = str(block.get("active") or "").strip().lower()
+    block["active"] = active if active in items else ""
+    default = str(block.get("default") or "").strip().lower()
+    block["default"] = default if default in items else ""
+    block["auto_apply"] = bool(block.get("auto_apply"))
+
+    rules_in = block.get("rules") if isinstance(block.get("rules"), dict) else {}
+    sources_in = rules_in.get("sources") if isinstance(rules_in.get("sources"), dict) else {}
+    sources: dict[str, str] = {}
+    for key, value in list(sources_in.items())[:len(PROFILE_SOURCES)]:
+        feed = str(key).strip().lower()
+        target = str(value or "").strip().lower()
+        if feed in PROFILE_SOURCES and target in items:
+            sources[feed] = target
+    windows: list[dict[str, Any]] = []
+    rows = rules_in.get("windows") if isinstance(rules_in.get("windows"), list) else []
+    for row in rows[:16]:
+        if not isinstance(row, dict):
+            continue
+        frm, to = str(row.get("from") or "").strip(), str(row.get("to") or "").strip()
+        target = str(row.get("profile") or "").strip().lower()
+        if not (PROFILE_TIME_RE.match(frm) and PROFILE_TIME_RE.match(to)):
+            continue
+        if target not in items or frm == to:
+            continue
+        days_in = row.get("days") if isinstance(row.get("days"), list) else []
+        days = sorted({int(d) for d in days_in if isinstance(d, (int, float)) and 0 <= int(d) <= 6})
+        windows.append({"from": frm, "to": to, "days": days, "profile": target})
+    block["rules"] = {"enabled": bool(rules_in.get("enabled")), "sources": sources, "windows": windows}
+
+    # Previous setups (the same T2 undo idea as layouts): kept per id, newest first, capped, and
+    # a version of a deleted profile stays — that is exactly what makes a delete recoverable.
+    raw_versions = block.get("versions")
+    versions: dict[str, list[dict[str, Any]]] = {}
+    if isinstance(raw_versions, dict):
+        for key, ring in list(raw_versions.items())[:PROFILE_ITEMS_MAX]:
+            ident = str(key).strip().lower()
+            if not PROFILE_ID_RE.match(ident) or not isinstance(ring, list):
+                continue
+            kept: list[dict[str, Any]] = []
+            for row in ring:
+                if len(kept) >= PROFILE_VERSIONS_MAX:
+                    break
+                if not isinstance(row, dict) or not isinstance(row.get("entry"), dict):
+                    continue
+                kept.append({"at": int(_clamp(row.get("at", 0), 0, 9_999_999_999_999, 0)),
+                             "name": str(row.get("name") or "")[:PROFILE_NAME_MAX],
+                             "entry": _clean_profile_entry(ident, row["entry"])})
+            if kept:
+                versions[ident] = kept
+    block["versions"] = versions
+
+
 def _sanitise_layouts(cfg: dict[str, Any]) -> None:
     """Clamp the layout block: identified ids only, capped, and the active id must exist."""
     block = _block(cfg, "layouts")
@@ -915,27 +1225,7 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     # module is source text the browser validates before running. Nothing here executes
     # on the server.
     studies = _block(cfg, "studies")
-    active = studies.get("active")
-    if not isinstance(active, list):
-        active = []
-    clean_active = []
-    for entry in active[:40]:
-        if not isinstance(entry, dict):
-            continue
-        name = str(entry.get("name", "") or "").strip()
-        if not _STUDY_NAME_RE.match(name):
-            continue
-        params = entry.get("params") if isinstance(entry.get("params"), dict) else {}
-        clean_params = {}
-        for key, value in list(params.items())[:40]:
-            key = str(key)[:40]
-            if isinstance(value, bool) or isinstance(value, (int, float)):
-                clean_params[key] = value
-            elif isinstance(value, str):
-                clean_params[key] = value[:120]
-        clean_active.append({"name": name, "params": clean_params,
-                             "visible": bool(entry.get("visible", True))})
-    studies["active"] = clean_active
+    studies["active"] = _clean_study_list(studies.get("active"))
 
     custom = studies.get("custom")
     if not isinstance(custom, list):
@@ -951,6 +1241,20 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
         clean_custom.append({"name": name, "source": source, "enabled": bool(entry.get("enabled", True))})
     studies["custom"] = clean_custom
     studies["data_box"] = bool(studies.get("data_box", True))
+    # §117: named saved sets of the active list (study collections). Each one is clamped by
+    # the same helper the live list uses; the name is a display string, never a path.
+    _coll_in = studies.get("collections")
+    _coll_out: dict[str, Any] = {}
+    if isinstance(_coll_in, dict):
+        for _coll_name, _coll in list(_coll_in.items())[:24]:
+            _coll_name = str(_coll_name).strip()[:32]
+            if not _coll_name or not isinstance(_coll, dict):
+                continue
+            _coll_out[_coll_name] = {
+                "saved": int(_clamp(_coll.get("saved", 0), 0, 9_999_999_999_999, 0)),
+                "active": _clean_study_list(_coll.get("active")),
+            }
+    studies["collections"] = _coll_out
 
     ofx = _block(cfg, "ofx")
 
@@ -987,6 +1291,9 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
 
     # ── terminal layouts: identified ids, capped tabs/widgets, coordinates inside the grid ────────
     _sanitise_layouts(cfg)
+
+    # ── profiles: switchable playbooks over the analysis blocks (never credentials) ────────
+    _sanitise_profiles(cfg)
 
     # ── drawings: validated, capped, pixel-free (they live in data space) ──────────────────
     DRAW_KINDS = {"line", "ray", "hline", "vline", "rect", "ellipse", "channel", "fib", "text", "measure"}
@@ -1104,6 +1411,8 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     ofx["ramp"] = ofx.get("ramp") if ofx.get("ramp") in RAMP_KEYS else "classic"
     # B2: the heat scheme's live dials, clamped to the registry's own bounds (junk restores the look).
     ofx["heat_contrast"] = round(_clamp(ofx.get("heat_contrast", 1.0), 0.5, 2.5, 1.0), 3)
+    ofx["heat_dim"] = round(_clamp(ofx.get("heat_dim", 0.0), 0.0, 0.8, 0.0), 3)
+    ofx["heat_highlight"] = round(_clamp(ofx.get("heat_highlight", 0.0), 0.0, 1.0, 0.0), 3)
     ofx["heat_floor"] = round(_clamp(ofx.get("heat_floor", 0.0), 0.0, 1_000_000.0, 0.0), 3)
     ofx["heat_floor_pct"] = round(_clamp(ofx.get("heat_floor_pct", 0.0), 0.0, 50.0, 0.0), 2)
     ofx["heat_smooth"] = ofx.get("heat_smooth") if ofx.get("heat_smooth") in SMOOTH_MODES else "auto"
@@ -1153,10 +1462,9 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     for inst in cfg["instruments"]:
         inst["symbol"] = str(inst.get("symbol", "")).upper()
         inst["enabled"] = bool(inst.get("enabled", False))
-        try:
-            inst["tick_size"] = float(inst.get("tick_size", 0.1))
-        except (TypeError, ValueError):
-            inst["tick_size"] = 0.1
+        # SEC-05: 0 or NaN here divided the tick path by zero (candle builder, volume profile).
+        # Bounded like every other number the store keeps.
+        inst["tick_size"] = _clamp(inst.get("tick_size", 0.1), 1e-9, 1e6, 0.1)
         if inst.get("ninjatrader_symbol"):
             # Case is the terminal's: "NQ 12-26" is a name, not a ticker — never fold it.
             inst["ninjatrader_symbol"] = str(inst["ninjatrader_symbol"]).strip()[:48]
@@ -1209,6 +1517,8 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     _disp["upper_cutoff_abs"] = round(_clamp(_disp.get("upper_cutoff_abs", 0.0), 0.0,
                                              100_000_000.0, 0.0), 3)
     _disp["contrast"] = round(_clamp(_disp.get("contrast", 1.0), 0.5, 2.5, 1.0), 3)
+    _disp["dim"] = round(_clamp(_disp.get("dim", 0.0), 0.0, 0.8, 0.0), 3)
+    _disp["highlight"] = round(_clamp(_disp.get("highlight", 0.0), 0.0, 1.0, 0.0), 3)
     _disp["floor"] = round(_clamp(_disp.get("floor", 0.0), 0.0, 1_000_000.0, 0.0), 3)
     _disp["floor_pct"] = round(_clamp(_disp.get("floor_pct", 0.0), 0.0, 50.0, 0.0), 2)
     _disp["smooth"] = _disp.get("smooth") if _disp.get("smooth") in SMOOTH_MODES else "auto"
@@ -1304,6 +1614,26 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
                                      and _lc_value.startswith("#")
                                      and all(_c in "0123456789abcdefABCDEF" for _c in _lc_value[1:])) else _lc_default
     ui["link_colors"] = _lc_out
+    # §117: shortcut overrides — the id is a binding id from keys.js, the value a list of
+    # canonical chords (lowercase; mods in the canonical order ctrl · alt · meta · shift).
+    # The block is rebuilt from the merged input, so an emptied id drops out of the store.
+    _ky_chord_re = re.compile(
+        r"^(?:(?:ctrl\+)?(?:alt\+)?(?:meta\+)?)(?:(?:shift\+)?(?:[a-z0-9]|f(?:[1-9]|1[0-2])|escape|space|enter|tab|backspace|delete|pageup|pagedown|home|end|arrow(?:up|down|left|right))|[=+\-/?.,;:\'\[\]{}])$")
+    _ky_in = ui.get("keys") if isinstance(ui.get("keys"), dict) else {}
+    _ky_ov = _ky_in.get("overrides") if isinstance(_ky_in.get("overrides"), dict) else {}
+    _ky_out = {}
+    for _ky_id, _ky_chords in list(_ky_ov.items())[:64]:
+        _ky_id = str(_ky_id).strip().lower()
+        if not re.match(r"^[a-z0-9-]{1,40}$", _ky_id) or not isinstance(_ky_chords, list):
+            continue
+        _ky_keep = []
+        for _ky_ch in _ky_chords[:4]:
+            _ky_ch = str(_ky_ch).strip().lower()
+            if len(_ky_ch) <= 24 and _ky_chord_re.match(_ky_ch):
+                _ky_keep.append(_ky_ch)
+        if _ky_keep:
+            _ky_out[_ky_id] = _ky_keep
+    ui["keys"] = {"version": 1, "overrides": _ky_out}
     # T12/B9: per-instrument display blocks — known paths only, values the params gate would
     # take, at most 40 instruments, symbols in the same shape the instruments block uses.
     _isx_in = ui.get("instrument_scopes") if isinstance(ui.get("instrument_scopes"), dict) else {}

@@ -9,7 +9,9 @@
     'use strict';
 
     function $(id) { return document.getElementById(id); }
-    var esc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    /* SEC-18: quotes too — this helper lands in attribute contexts (title="…") where an
+       unescaped quote is an injection. Same set as fundamentals.js/heatmap-pro.js. */
+    var esc = (t) => String(t == null ? '' : t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
     function when(ms) {
         if (!ms) return '—';
@@ -99,12 +101,17 @@
             if ($('calCurrencies')) $('calCurrencies').value = block.currencies || '';
         }).catch(function () { /* defaults are fine */ });
         var wrap = window.showView;
-        if (typeof wrap === 'function') {
-            window.showView = function (name) {
+        if (typeof wrap === 'function' && !wrap.__ofapWrapped_calendar) {
+            var wrapped = function (name) {
                 var out = wrap.apply(this, arguments);
-                if (name === 'calendar') setTimeout(load, 300);
+                if (name === 'calendar') setTimeout(function () {
+                    var section = document.querySelector('.view[data-view="calendar"]');
+                    if (section && section.classList.contains('active')) load();   // C-09: left again = no fetch
+                }, 300);
                 return out;
             };
+            wrapped.__ofapWrapped_calendar = true;
+            window.showView = wrapped;
         }
         setTimeout(function () {
             var section = document.querySelector('.view[data-view="calendar"]');

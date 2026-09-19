@@ -26,6 +26,7 @@ from orderflow_system.data.models import Candle, Signal, SignalType, Side
 from orderflow_system.analytics.delta import DeltaResult
 from orderflow_system.analytics.footprint import FootprintBar
 from orderflow_system.config.settings import InitiativeConfig
+from orderflow_system.patterns import remember_signal
 
 
 class InitiativeDetector:
@@ -128,7 +129,7 @@ class InitiativeDetector:
                 "candle_close": "green" if candle.is_green else "red",
             },
         )
-        self._signal_history.append(signal)
+        remember_signal(self._signal_history, signal)
         return signal
 
     @property

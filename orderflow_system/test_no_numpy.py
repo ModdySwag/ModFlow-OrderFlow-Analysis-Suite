@@ -54,8 +54,9 @@ def test_no_module_in_the_runtime_tree_imports_numpy():
         if IMPORT_RE.search(path.read_text(encoding="utf-8", errors="ignore")):
             offenders.append(str(path.relative_to(ROOT)))
     assert not offenders, (
-        "numpy is excluded from the frozen build (scripts/build_exe.py) — these modules would "
-        "break inside it:\n  " + "\n  ".join(offenders))
+        "the analytics engines are stdlib-only: numpy ships in the frozen build for the MT5 "
+        "bridge alone, so a runtime import of it here would drag 27 MB of BLAS into the "
+        "analytics path and break the numpy-blocked pipeline test:\n  " + "\n  ".join(offenders))
 
 
 def test_the_pipeline_imports_and_computes_with_numpy_blocked():

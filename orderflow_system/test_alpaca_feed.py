@@ -210,28 +210,26 @@ def test_capability_block_without_a_probe_is_honest():
     assert block["depth"] is False
 
 
-def test_feed_awaits_an_async_on_tick():
+def test_feed_delivers_an_async_on_tick_through_the_one_consumer():
     """`OrderflowSystem._on_tick` is a coroutine. A synchronous call returns a coroutine
-    object that never runs — every tick is lost while the log says "seeded"."""
+    object that never runs — every tick is lost while the log says "seeded". Deliveries go
+    through the feed's one ordered consumer now (audit D-01)."""
     import asyncio
     got: list[tuple[str, object]] = []
 
     async def on_tick(symbol, tick):
         got.append((symbol, tick))
 
-    transport = StubTransport({"v1beta3/crypto/us/bars": (200, {"bars": {"BTC/USD": [
-        {"t": "2026-09-15T13:30:00Z", "o": 60000, "h": 60100, "l": 59900, "c": 60050, "v": 3}]}})})
-    feed = AlpacaFeed({"BTCUSDT": "BTC/USD"}, on_tick=on_tick,
-                      data=AlpacaData("k", "s", transport=transport))
+    feed = AlpacaFeed({"BTCUSDT": "BTC/USD"}, on_tick=on_tick, data=AlpacaData("k", "s"))
 
     async def run():
-        await feed.start()                     # captures the loop
-        await feed.seed_history()
-        await asyncio.sleep(0.05)              # let the scheduled deliveries run
+        await feed.start()
+        feed._deliver("BTCUSDT", {"price": 1.0})     # one tick in
+        await asyncio.sleep(0.05)                    # the consumer runs it
         await feed.stop()
-        return len(got)
 
-    assert asyncio.run(run()) > 0, "seeded ticks must actually reach the async callback"
+    asyncio.run(run())
+    assert got, "a delivered tick must actually reach the async callback"
 
 
 def test_keyless_feed_does_not_poll_rest():
@@ -274,7 +272,9 @@ def test_feed_status_declares_no_depth():
     assert status["symbols"] == {"AAPL": "AAPL"}
 
 
-def test_feed_history_seeding_emits_ticks_mapped_to_the_app_symbol():
+def test_feed_history_seeding_delivers_candles_to_the_chart_sink():
+    """Seeded REST bars go to the chart as candles — never to the tick store as invented
+    prints with invented size and side (audit D-07)."""
     import asyncio
     bars = {"bars": [{"t": "2026-09-15T13:30:00Z", "o": 10, "h": 11, "l": 9.5, "c": 10.5, "v": 300},
                      {"t": "2026-09-15T13:31:00Z", "o": 10.5, "h": 12, "l": 10.2, "c": 11.8, "v": 400}]}
@@ -283,13 +283,48 @@ def test_feed_history_seeding_emits_ticks_mapped_to_the_app_symbol():
                                    {"t": "2026-09-15T13:30:00Z", "o": 60000, "h": 60100, "l": 59900,
                                     "c": 60050, "v": 3}]}})})
     data = AlpacaData("k", "s", transport=transport)
-    got: list[tuple[str, object]] = []
-    feed = AlpacaFeed({"AAPL": "AAPL", "BTCUSDT": "BTC/USD"}, on_tick=lambda s, t: got.append((s, t)), data=data)
+    ticks: list = []
+    candles: list = []
+    feed = AlpacaFeed({"AAPL": "AAPL", "BTCUSDT": "BTC/USD"},
+                      on_tick=lambda s, t: ticks.append((s, t)),
+                      on_bar=lambda s, c: candles.append((s, c)), data=data)
     total = asyncio.run(feed.seed_history())
     assert total > 0
-    assert {s for s, _t in got} == {"AAPL", "BTCUSDT"}, "history lands on the app's own symbols"
-    stamp = got[0][1].timestamp_ms
-    assert stamp == 1789479000000 and all(t.timestamp_ms >= stamp for _s, t in got)
+    assert {s for s, _c in candles} == {"AAPL", "BTCUSDT"}, "history lands on the app's own symbols"
+    assert ticks == [], "a seeded bar must not fabricate prints into the tick store"
+    first = next(c for s, c in candles if s == "AAPL")
+    assert first.timestamp_ms == 1789479000000 and first.open == 10.0 and first.volume == 300.0
+
+
+def test_a_print_the_stream_delivered_is_not_re_counted_by_the_snapshot_poll():
+    """The 5 s snapshot repeats its `latestTrade`; the stream already delivered it (audit D-04)."""
+    import asyncio
+    from orderflow_system.data.alpaca_normalize import normalize_snapshot_trade
+
+    transport = StubTransport({"clock": (200, CLOCK_OPEN), "snapshots": (200, {"AAPL": SNAPSHOT_AAPL})})
+    data = AlpacaData("k", "s", transport=transport)
+    ticks: list = []
+    feed = AlpacaFeed({"AAPL": "AAPL"}, on_tick=lambda s, t: ticks.append((s, t)), data=data)
+
+    async def run():
+        tick = normalize_snapshot_trade(SNAPSHOT_AAPL, symbol="AAPL")
+        assert tick is not None
+        feed._on_stream_tick("AAPL", tick)     # the stream delivers it first
+        return await feed.poll_once()          # the poll sees the same print
+
+    report = asyncio.run(run())
+    assert len(ticks) == 1, f"the print must be counted once (got {len(ticks)})"
+    assert report["unchanged"] == 1, report
+
+
+def test_an_unusable_timestamp_drops_the_print_instead_of_stamping_1970():
+    """A present-but-unparsable `t` (audit D-06): no Tick at all — not one stamped 0."""
+    from orderflow_system.data.alpaca_normalize import normalize_stock_trade
+
+    assert normalize_stock_trade({"T": "t", "p": 100.0, "s": 1, "t": "not-a-date"}) is None
+    assert normalize_stock_trade({"T": "t", "p": 100.0, "s": 1, "t": ""}) is None
+    good = normalize_stock_trade({"T": "t", "p": 100.0, "s": 1, "t": "2026-09-15T13:30:00Z"})
+    assert good is not None and good.timestamp_ms > 0
 def test_a_repeated_snapshot_print_is_delivered_once():
     """A REST snapshot repeats its `latestTrade` until a new print exists; re-delivering it as a
     fresh tick counted the same fill over and over into volume and delta."""
@@ -306,3 +341,28 @@ def test_a_repeated_snapshot_print_is_delivered_once():
     assert first["equities"] == 1 and len(ticks) == 1
     assert second["equities"] == 0 and second["unchanged"] == 1, second
     assert len(ticks) == 1, "the same print must not be delivered twice"
+
+
+# ── MEM-A2-06: stop() releases the streams and drains the tick queue ─────────────────────────
+def test_stop_releases_the_streams_and_the_tick_queue():
+    feed = AlpacaFeed({"AAPL": "AAPL"}, on_tick=lambda *a: None, data=AlpacaData("k", "s"))
+
+    class _Stream:
+        def __init__(self):
+            self.stopped = False
+
+        async def stop(self):
+            self.stopped = True
+
+    first, second = _Stream(), _Stream()
+    feed.streams.extend([first, second])
+    for _ in range(5):
+        feed._tick_queue.put_nowait(lambda: None)
+
+    import asyncio as _asyncio
+    _asyncio.run(feed.stop())
+
+    assert feed.streams == [], "a stopped feed must not retain its sessions"
+    assert first.stopped and second.stopped
+    assert feed._tick_queue.qsize() == 0, "the stopped session's undrained thunks are released"
+    assert feed.ticks_dropped == 5, "and counted, not silently forgotten"

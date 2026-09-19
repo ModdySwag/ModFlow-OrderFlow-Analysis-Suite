@@ -128,18 +128,6 @@ def test_the_update_policy_is_written_down_and_linked():
     assert "no sound files to ship" not in hd, "the stale audio claim is back"
 
 
-# ── A7: freeze-on-hover ─────────────────────────────────────────
-
-def test_freeze_guards_live_in_every_painter():
-    for name in ("atlas.js", "heatmap-pro.js", "ofx.js"):
-        assert "OFAPFREEZE" in _text(UI / name), name + " lost its freeze guard"
-    freeze = _text(UI / "freeze.js")
-    assert "ofap-freeze-chip" in freeze and "OFAPFREEZE" in freeze
-    html = _text(INDEX)
-    assert '/desktop/freeze.js' in html, "the page does not load freeze.js"
-    assert ".ofap-frozen" in _text(UI / "modules.css")
-
-
 # ── A9: dynamic tokens + watermarks ─────────────────────────────────
 
 def test_the_watermark_reads_live_state_and_never_invents_one():

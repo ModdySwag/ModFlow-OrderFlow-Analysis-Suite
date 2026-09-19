@@ -173,6 +173,76 @@ def test_replay_streams_recorded_ticks_in_order(tmp_path):
     assert loaded["status"]["progress_pct"] == 100.0
 
 
+def test_a_failed_replay_load_keeps_no_stale_rows_or_counts(tmp_path):
+    """MEM-A1-11: reset at the head of a load — a failed load must not leave the previous
+    symbol's tape playing under the new label, and the rows must be released."""
+    db = str(tmp_path / "replay_stale.db")
+    _make_db(db, [("X", T0 + i * 10, 50.0 + i, 1.0, "buy") for i in range(40)])
+    replay = MarketReplay(db, speed=1000.0, max_gap_ms=0)
+
+    async def scenario():
+        await replay.load("X")
+        assert replay.status()["total"] == 40
+
+        # the second load fails (a DB that is not there)...
+        broken = MarketReplay(str(tmp_path / "missing.db"), speed=1000.0)
+        broken._rows = list(replay._rows)               # pretend it held a tape before
+        out = await broken.load("Y")
+        # ...and leaves nothing behind: not the old rows, not the old counts
+        assert out["state"] in ("idle", "error") and out["total"] == 0 and broken._rows == []
+        assert out["symbol"] == "Y"
+
+        # and `reset()` really releases a loaded tape (the route's path — MEM-A1-11)
+        replay.reset()
+        assert replay._rows == [] and replay.status()["total"] == 0
+
+    asyncio.run(scenario())
+
+
+def test_hub_emissions_are_tracked_and_cancelled_on_shutdown():
+    """MEM-A1-06: the three fire-and-forget paths are owned by the hub now."""
+
+    async def scenario():
+        hub = FeatureHub({})
+        started = asyncio.Event()
+
+        async def stalled_sink(channel, symbol, data):
+            started.set()
+            await asyncio.Event().wait()                 # a wedged sink
+
+        hub.set_sink(stalled_sink)
+        for i in range(5):
+            hub._emit("alert", "BTCUSDT", {"i": i})
+        await asyncio.wait_for(started.wait(), 1.0)
+        assert len(hub._tasks) == 5, "every spawned task is held by the hub"
+
+        await hub.shutdown()
+        assert hub._tasks == set(), "shutdown cancels and releases them"
+
+        # finished work is discarded, not accumulated
+        async def quick_sink(channel, symbol, data):
+            return None
+
+        hub.set_sink(quick_sink)
+        for _ in range(20):
+            hub._emit("alert", "BTCUSDT", {})
+        await asyncio.sleep(0.05)
+        assert hub._tasks == set(), "completed emissions do not pile up"
+
+    asyncio.run(scenario())
+
+
+def test_the_hub_symbol_map_is_capped_with_streamed_symbols_protected():
+    """MEM-A1-08: REST can ask about any symbol; the map is capped and streamed symbols stay."""
+    hub = FeatureHub({})
+    hub.register("BTCUSDT")
+    for i in range(200):
+        hub.ensure(f"FOO{i}")
+    assert len(hub.symbols) <= hub.MAX_REST_SYMBOLS
+    assert "BTCUSDT" in hub.symbols, "a registered (streamed) symbol is never evicted"
+    assert "FOO199" in hub.symbols, "the newest REST symbol is the one that stays"
+
+
 async def _replay_roundtrip(replay: MarketReplay, symbol: str) -> dict:
     await replay.load(symbol)
     seen: list[Tick] = []
@@ -539,3 +609,23 @@ def test_rule_partial_update_merges_instead_of_resetting():
     # a brand-new rule still creates cleanly
     engine.upsert({"id": "new", "name": "n", "kind": "sweep", "channels": ["ui"]})
     assert {r.id for r in engine.rules} == {"bt", "new"}
+
+
+def test_the_depth_store_reports_and_bounds_its_columns():
+    """R-01: the store reports its retained level count and its columns deque caps."""
+    from orderflow_system.atlas.depthmap import DepthHeatmap
+    from orderflow_system.data.models import OrderbookLevel, OrderbookSnapshot
+
+    heat = DepthHeatmap("BTCUSDT", max_columns=30)
+    base = 1_700_000_000_000
+    for n in range(60):
+        snap = OrderbookSnapshot(
+            timestamp_ms=base + n * 60_000,
+            bids=[OrderbookLevel(price=100.0 - i * 0.1, quantity=1.0 + i) for i in range(20)],
+            asks=[OrderbookLevel(price=100.1 + i * 0.1, quantity=1.0 + i) for i in range(20)])
+        heat.on_orderbook(snap, ts_ms=base + n * 60_000)
+
+    st = heat.stats()
+    assert st["columns"] <= 30, "the column deque stays at max_columns"
+    assert st["retained_levels"] == sum(len(c.levels) for c in heat._columns)
+    assert st["retained_levels"] > 0

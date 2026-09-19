@@ -2,7 +2,7 @@
 
 **Directive applied:** `Desktop/secure2.txt` — *Pre-Release Software Audit and Security Sweep
 Directive* (Phases 1–6, required finding format, P0–P3 roadmap).
-**Tree:** `C:\Users\Moddy\OrderFlow-Analysis-Pro` · HEAD `fa202d6`, tree dirty (P1-7…§70 on disk,
+**Tree:** `C:\Users\<you>\OrderFlow-Analysis-Pro` · HEAD `fa202d6`, tree dirty (P1-7…§70 on disk,
 uncommitted — nothing is ever committed in this repo without an explicit instruction).
 **Date:** 2026-09-16.
 **Rule observed throughout:** every fix is isolated, lands with a test proven to bite against the
@@ -41,7 +41,7 @@ Suspected 0 · Not verified 1 (SS-8 item scope, listed in L).
 
 **Stack.** Python 3.11+ (CI: 3.11 + 3.12), no build step for the UI. FastAPI/Starlette + uvicorn;
 pywebview (WebView2) shell; vanilla-JS modules in `desktop/ui/` (~35.8k lines); stdlib-only
-analytics engines (numpy deliberately excluded from the frozen build); SQLite (aiosqlite);
+analytics engines (stdlib-only; numpy ships in the frozen build for the MT5 bridge alone); SQLite (aiosqlite);
 outbound clients: `urllib`, `websockets`, `aiohttp` (webhooks only), `python-telegram-bot`.
 
 **Components and entry points.**
@@ -265,7 +265,7 @@ not required to ship v0.1b safely.
 ### SS-9 — Windows username published in a screenshot
 **Classification:** Privacy / release · **Confidence:** Confirmed · **Severity:** Low · **Release blocker:** No
 **Evidence:** `docs/phase4/logs-batch-counters.png` displayed the full log path
-`C:\Users\Moddy\AppData\Roaming\OrderFlowAnalysisPro\orderflow.log` (verified by reading the image).
+`C:\Users\<you>\AppData\Roaming\OrderFlowAnalysisPro\orderflow.log` (verified by reading the image).
 **Impact:** minor PII (home directory/username) in a public repo; a reviewer-visible hygiene miss.
 **Remediation (implemented):** the path was re-rendered in-place as
 `C:\Users\<you>\AppData\Roaming\OrderFlowAnalysisPro\orderflow.log` (same font/size/colour; verified

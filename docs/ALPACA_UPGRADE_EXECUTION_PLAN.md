@@ -1,7 +1,7 @@
 # ModFlow OrderFlow Analysis Suite — Alpaca Upgrade & Live-Bridge Execution Plan
 
 **Plan date:** 2026-09-15
-**Target:** `C:\Users\Moddy\OrderFlow-Analysis-Pro` (branch `master`, HEAD `b2ff4ee`)
+**Target:** `C:\Users\<you>\OrderFlow-Analysis-Pro` (branch `master`, HEAD `b2ff4ee`)
 **Deliverable of this document:** an executable, phase-by-phase plan for implementing the upgraded/new
 suggestions in `Desktop\code.txt`, grounded in the current working tree (every file/line below was
 verified against the tree on 2026-09-15, not recalled).
@@ -10,8 +10,8 @@ verified against the tree on 2026-09-15, not recalled).
 
 | # | Document | Role |
 |---|----------|------|
-| S1 | `C:\Users\Moddy\Desktop\code.txt` | The Alpaca enhancement report: setup flow, search redesign, feed rules, error codes, perf |
-| S2 | `C:\Users\Moddy\Desktop\report.txt` | First line-level codebase audit (P1–P8) |
+| S1 | `C:\Users\<you>\Desktop\code.txt` | The Alpaca enhancement report: setup flow, search redesign, feed rules, error codes, perf |
+| S2 | `C:\Users\<you>\Desktop\report.txt` | First line-level codebase audit (P1–P8) |
 | S3 | `docs/AUDIT_REPORT_2026-09-15.md` | Merged audit = S1 + S2 + a fresh pass; contains the implementation order |
 | S4 | `docs/ALPACA_INTEGRATION_PLAN.md` | Alpaca product plan: what Alpaca adds/cannot add, phases 0–5, safety §5, risk register §6 |
 
@@ -52,7 +52,7 @@ left a choice open (Scanner view, MsgPack), the decision is recorded in §0 and 
 ## 1. Baseline (measured today — re-measure before starting)
 
 ```
-cd C:\Users\Moddy\OrderFlow-Analysis-Pro
+cd C:\Users\<you>\OrderFlow-Analysis-Pro
 .venv/Scripts/python.exe -m pytest orderflow_system -q          → 124 passed in 2.76s
 .venv/Scripts/python.exe scripts/audit_ui_refs.py               → AUDIT CLEAN (76 routes, 0 missing ids)
 .venv/Scripts/python.exe -m pytest orderflow_system/test_alpaca.py -q  → 13 passed
@@ -98,7 +98,7 @@ Key anchors this plan builds on:
 ## 2. Executor & environment
 
 - Executor: Hermes agent (this machine) or any coding agent; Windows, git-bash shell, repo venv Python.
-- Working dir: `C:\Users\Moddy\OrderFlow-Analysis-Pro`. Pass forward-slash native paths to tools.
+- Working dir: `C:\Users\<you>\OrderFlow-Analysis-Pro`. Pass forward-slash native paths to tools.
 - Every phase ends in a **checkpoint** (commands + expected output). Paste the evidence line into the
   build log; do not proceed past a red checkpoint.
 - TDD rule for behaviour tasks: write the failing test first (RED), implement (GREEN), keep the suite

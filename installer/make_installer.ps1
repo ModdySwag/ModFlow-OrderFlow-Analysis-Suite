@@ -1,146 +1,99 @@
 # make_installer.ps1 - build the ModFlow OrderFlow Analysis Suite installer from the frozen dist.
 #
-# Run under 32-BIT PowerShell (the ISWiAuto32 automation server is 32-bit only):
-#   C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File make_installer.ps1
+#   powershell -NoProfile -ExecutionPolicy Bypass -File installer\make_installer.ps1
+#
+# Engine: Inno Setup 6 (ISCC.exe). This replaced the InstallShield pipeline that closed three
+# audit findings at once - F-05 (the MSI was built in InstallShield evaluation mode), F-06 (the
+# WebView2 .prq was never chained into the setup) and E-05 (the binary .ism carried the
+# maintainer's absolute path). The whole installer is now reviewable text: installer\modflow.iss.
 #
 # What it produces:
-#   installer\ModFlowOrderFlowAnalysisSuite.ism        (regenerated from the blank Basic MSI template each run)
-#   installer\build\...\DiskImages\DISK1\setup.exe     (IsCmdBld output, compressed network image)
-#   ..\dist\ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe  (the release artifact, + its sha256)
+#   dist\ModFlowOrderFlowAnalysisSuite-Setup-<version>.exe       (the release artifact)
+#   dist\ModFlowOrderFlowAnalysisSuite-Setup-<version>.exe.sha256 (its hash, for the release page)
 #
-# Design notes (all verified by probe against InstallShield 2026 on this machine):
-#   * per-user install, no UAC: [LocalAppDataFolder]Programs\ModFlowOrderFlowAnalysisSuite, ALLUSERS=2 + MSIINSTALLPERUSER=1
-#   * user data untouched: the app's config/DB live in %APPDATA%\OrderFlowAnalysisPro - the installer never writes or removes them
-#   * the payload = the frozen dist folder: one dynamic folder link, minus the main exe (which ships as a static
-#     file entry so the shortcut can target it)
-#   * shortcut: Desktop only. Start Menu shortcut destinations are NOT creatable through this automation API
-#     (the component's shortcut-folder set is fixed to [TaskBarFolder]/[SendToFolder]/[DesktopFolder]);
-#     see installer\README.md for the one-click IDE route to add a Start Menu shortcut later.
-#   * WebView2 prerequisite: NOT chained (the automation cannot source the bootstrapper payload; see README).
-#   * UpgradeCode is FIXED below - never change it, or upgrades stop recognising previous installs.
-#   * builds run in InstallShield evaluation mode on this machine, which is limited to the compressed
-#     network image setup.exe - exactly the artifact this project wants anyway.
+# Conventions kept from the old pipeline: per-user install, no UAC; the app's data
+# (%APPDATA%\OrderFlowAnalysisPro) is never written or removed; the AppId GUID is the old MSI
+# UpgradeCode, so an existing install is replaced in place.
 
 param(
-    [string]$RepoRoot = 'C:\Users\Moddy\OrderFlow-Analysis-Pro',
+    # Defaults to this script's own checkout, so a fresh clone builds without editing paths.
+    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
     [string]$DistDir = '',
     [string]$InstallerDir = '',
-    [switch]$SkipBuild
+    [switch]$SkipWebView2Fetch
 )
 
 $ErrorActionPreference = 'Stop'
 if (-not $DistDir)      { $DistDir      = Join-Path $RepoRoot 'dist\ModFlowOrderFlowAnalysisSuite' }
-if (-not $InstallerDir) { $InstallerDir = Join-Path $RepoRoot 'installer' }
+if (-not $InstallerDir) { $InstallerDir = $PSScriptRoot }
 
-$isRoot   = 'C:\Program Files (x86)\InstallShield\2026'
-$tpl      = Join-Path $isRoot 'Support\0409\IsProjBlankTpl.ism'
-$isCmdBld = Join-Path $isRoot 'System\IsCmdBld.exe'
-$ism      = Join-Path $InstallerDir 'ModFlowOrderFlowAnalysisSuite.ism'
-$outRoot  = Join-Path $InstallerDir 'build'
-$setupSrc = Join-Path $outRoot 'Product Configuration 1\Release 1\DiskImages\DISK1\setup.exe'
-$setupOut = Join-Path $RepoRoot 'dist\ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe'
-
-$appName = 'ModFlow OrderFlow Analysis Suite'
-$exeName = 'ModFlowOrderFlowAnalysisSuite.exe'
-$appExe  = Join-Path $DistDir $exeName
-
-# product identity - FIXED forever (upgrades recognise this product by it)
-$UpgradeCode = '{C2042089-3E19-410D-ABA6-C32BC9C13D80}'
-
-foreach ($need in @($tpl, $isCmdBld)) { if (-not (Test-Path $need)) { throw "missing: $need" } }
-if (-not (Test-Path $appExe)) { throw "dist exe missing: $appExe - rebuild the frozen dist first (scripts\build_exe.py)" }
-
-New-Item -ItemType Directory -Force -Path $InstallerDir | Out-Null
-Copy-Item $tpl $ism -Force
-
-$proj = New-Object -ComObject ISWiAuto32.ISWiProject
-$proj.OpenProject($ism)
-
-# -- identity --
-$proj.ProductName    = $appName
-$proj.ProductVersion = '0.1.0'
-$proj.CompanyName    = 'ModdySwag'
-$proj.INSTALLDIR     = '[LocalAppDataFolder]Programs\ModFlowOrderFlowAnalysisSuite'
-$g = $proj.GenerateGUID(); $proj.ProductCode = '{' + $g.Trim('{}') + '}'
-$g = $proj.GenerateGUID(); $proj.PackageCode = '{' + $g.Trim('{}') + '}'
-$proj.UpgradeCode    = $UpgradeCode
-
-# -- per-user install context --
-# ALLUSERS=2 + MSIINSTALLPERUSER=1 = per-user, no UAC; ApplicationUsers is the template's own
-# "install for" switch (blank template ships AllUsers) and must agree or ARP lands machine-wide.
-foreach ($pr in @($proj.ISWIProperties)) {
-    if ($pr.Name -eq 'ALLUSERS') { $pr.Value = '2' }
-    if ($pr.Name -eq 'ApplicationUsers') { $pr.Value = 'OnlyCurrentUser' }
+# -- the Inno Setup compiler (per-user install first, then the machine-wide ones) ---------------
+$iscc = @(
+    (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
+    'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+    'C:\Program Files\Inno Setup 6\ISCC.exe'
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $iscc) {
+    throw "Inno Setup 6 compiler (ISCC.exe) not found. Install it from https://jrsoftware.org/isdl.php (per-user install is fine)."
 }
-$mp = $proj.AddProperty('MSIINSTALLPERUSER'); $mp.Value = '1'
+Write-Host "compiler: $iscc"
 
-# -- feature + component (AttachComponent takes the component OBJECT, not its name) --
-# note: component destination is already [INSTALLDIR] by default; do NOT reassign the
-# Destination property here - setting it makes the follow-up AddFile fail with a type
-# mismatch (measured). --
-$null = $proj.AddFeature('Application')
-$comp = $proj.AddComponent('AppFiles')
-$feat = $proj.ISWiFeatures.Item(1)
-$null = $feat.GetType().InvokeMember('AttachComponent', [System.Reflection.BindingFlags]::InvokeMethod, $null, $feat, [object[]]@($comp))
+$appExe = Join-Path $DistDir 'ModFlowOrderFlowAnalysisSuite.exe'
+if (-not (Test-Path $appExe)) {
+    throw "dist exe missing: $appExe - build the frozen dist first (scripts\build_exe.py)"
+}
 
-# -- payload: static exe entry (shortcut target) + dynamic link for everything else --
-# AddFile must be called natively - the reflection InvokeMember path fails intermittently
-# with DISP_E_TYPEMISMATCH for this method (measured).
-$file = $comp.AddFile($appExe)
-$file.Name = $exeName
-# DisplayName is the DESTINATION FILENAME in InstallShield's File table - it must be the actual
-# file name, not the product name (the product name here once installed the exe extension-less
-# as 'ModFlow OrderFlow Analysis Suite', which in turn orphaned the shortcut's target).
-$file.DisplayName = $exeName
+# -- version from ONE source: pyproject.toml ----------------------------------------------------
+$version = '0.1.0'
+$pyproject = Join-Path $RepoRoot 'pyproject.toml'
+if (Test-Path $pyproject) {
+    $m = Select-String -Path $pyproject -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
+    if ($m) { $version = $m.Matches[0].Groups[1].Value }
+}
+Write-Host "version: $version (pyproject.toml)"
 
-$link = $comp.AddDynamicFileLinking('AppFilesLink')
-$link.SourceFolder = $DistDir
-$link.DynamicSubfolders = $true
-$link.ExcludeFiles = $exeName
-
-# -- desktop shortcut --
-$desktop = $null
-foreach ($fo in @($comp.ISWiFolders)) { if ($fo.Name -eq '[DesktopFolder]') { $desktop = $fo } }
-if ($null -eq $desktop) { throw 'DesktopFolder missing on component' }
-$sc = $desktop.GetType().InvokeMember('AddShortcut', [System.Reflection.BindingFlags]::InvokeMethod, $null, $desktop, [object[]]@($exeName))
-$sc.DisplayName = $appName
-$sc.Description = 'Launch the ModFlow OrderFlow Analysis Suite'
-# AddShortcut leaves Target pointing at the FEATURE (= an advertised shortcut), and a plain
-# file name is silently skipped by CreateShortcuts too. The documented MSI form is a formatted
-# file reference [#FileKey] - with the static file named after the exe its key IS the file name
-# (measured against working vendor MSIs: [#wsl.exe], [#Putty_File], [#AllRemixes.exe]).
-$sc.Target = '[#' + $exeName + ']'
-
-# The automation leaves the Shortcut.Name cell pointing at string ID_STRING1 whose value is the
-# file identifier - but IS's build validator rejects any non-8.3 value there ("does not contain a
-# legitimate value for table Shortcut column Name"). Set it to a short|long pair, the convention
-# InstallShield's own sample projects use ('TUTORIAL|Tutorial App'). This is the one string-table
-# write the shortcut workflow needs; everything else about the shortcut is already correct.
-$lang = $proj.ISWiLanguages.Item(1)
-$fixed = $false
-foreach ($e in @($lang.ISWiStringEntries)) {
-    if ($e.Id -eq 'ID_STRING1') {
-        $e.Value = 'MODFLO~1|' + $appName
-        $fixed = $true
+# -- WebView2 bootstrapper: fetch when missing so the setup chains the prerequisite (F-06) ------
+# Microsoft's Evergreen bootstrapper (~1.8 MB) downloads and installs the runtime at setup time
+# when it is absent. It is fetched, not committed: the URL is Microsoft's own fwlink, and the
+# hash of whatever was fetched is printed below. A build without it still works - the setup then
+# tells the user where to get the runtime.
+$prereq = Join-Path $InstallerDir 'prereq\MicrosoftEdgeWebview2Setup.exe'
+$haveBootstrapper = Test-Path $prereq
+if (-not $haveBootstrapper -and -not $SkipWebView2Fetch) {
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path $prereq) | Out-Null
+        Write-Host 'fetching the WebView2 bootstrapper (Microsoft fwlink 2124703)...'
+        Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $prereq `
+            -UseBasicParsing -TimeoutSec 180
+        $haveBootstrapper = Test-Path $prereq
+    } catch {
+        Write-Warning "WebView2 bootstrapper fetch failed: $($_.Exception.Message)"
+        Write-Warning 'building without it - the setup will direct the user to Microsoft if the runtime is missing'
     }
 }
-if (-not $fixed) { throw 'ID_STRING1 not found in the string table - InstallShield version drift?' }
+if ($haveBootstrapper) {
+    $boot = Get-Item $prereq
+    $bootHash = (Get-FileHash $prereq -Algorithm SHA256).Hash
+    Write-Host ("WebView2 bootstrapper: " + [math]::Round($boot.Length / 1MB, 2) + " MB, sha256 " + $bootHash)
+}
 
-$proj.SaveProject()
-$proj.CloseProject()
-Write-Host "project written: $ism"
+# -- build --------------------------------------------------------------------------------------
+$iss = Join-Path $InstallerDir 'modflow.iss'
+$args = @('/Qp', "/DAppVersion=$version")
+if ($haveBootstrapper) { $args += "/DWebView2Bootstrapper=$prereq" }
+$args += $iss
 
-if ($SkipBuild) { exit 0 }
+& $iscc @args
+if ($LASTEXITCODE -ne 0) { throw "ISCC failed: exit $LASTEXITCODE" }
 
-# -- build --
-if (Test-Path $outRoot) { Remove-Item $outRoot -Recurse -Force }
-$proc = Start-Process -FilePath $isCmdBld -ArgumentList @('-p', $ism, '-b', $outRoot) -Wait -PassThru -NoNewWindow
-if ($proc.ExitCode -ne 0) { throw "IsCmdBld failed: exit $($proc.ExitCode)" }
-if (-not (Test-Path $setupSrc)) { throw "setup.exe not found: $setupSrc" }
+$setupOut = Join-Path $RepoRoot "dist\ModFlowOrderFlowAnalysisSuite-Setup-$version.exe"
+if (-not (Test-Path $setupOut)) { throw "setup.exe not found after a successful compile: $setupOut" }
 
-Copy-Item $setupSrc $setupOut -Force
 $hash = (Get-FileHash $setupOut -Algorithm SHA256).Hash
 $size = (Get-Item $setupOut).Length
+Set-Content -Path "$setupOut.sha256" -Value ($hash + '  ' + (Split-Path $setupOut -Leaf)) -Encoding ascii
+
 Write-Host ("setup.exe -> " + $setupOut)
 Write-Host ("size: " + $size + " bytes (" + [math]::Round($size / 1MB, 2) + " MB)")
 Write-Host ("sha256: " + $hash)
+Write-Host "verify on a clean machine with the checklist in docs\RELEASE_CHECKLIST.md (section 3)."

@@ -218,6 +218,42 @@
             related: ['work.keys', 'start.first_run', 'support.syscheck'],
         },
         {
+            id: 'start.identity', group: 'start', mode: 'both',
+            title: 'What this program is — and is not',
+            tags: ['analytics layer', 'identity', 'what it is', 'broker', 'read-only', 'no orders',
+                'data feeds', 'market data', 'beside your terminal'],
+            aliases: ['what is modflow', 'is this a broker', 'can i trade here'],
+            summary: 'ModFlow is an **analytics layer**: it reads the market in depth and sits beside '
+                + 'whatever you execute in. It places no orders and holds no funds — deliberately, '
+                + 'because that removes both the licences an execution venue needs and the risk of a '
+                + 'half-built order path. Your terminal stays your terminal; this is the desk around it.',
+            blocks: [
+                { h: 'What it is', list: [
+                    'Order-flow analytics in real time — footprint, cumulative delta, volume profile, '
+                    + 'heatmap, depth, tape, trackers, alerts and replay — over the same live feed.',
+                    'A second screen of context your terminal does not carry: news, calendar, '
+                    + 'fundamentals, options and a trade journal in the same window as the order flow.',
+                    'A free, local-first, keyless window on the market: pick a venue under **Data ▸ '
+                    + 'Source**, or ride the terminal you already run (MT5, NinjaTrader 8), and '
+                    + 'everything stays on this machine.',
+                ] },
+                { h: 'What it is not', list: [
+                    'Not a broker and not an execution terminal — no order tickets, no positions, no '
+                    + 'account to create. Feed logins you choose to store are read-only and stay in '
+                    + 'your own config file.',
+                    'Not a data vendor: the built-in venues (Bybit, Binance, Hyperliquid, OKX, Alpaca '
+                    + 'crypto) are free public feeds. What a broker or exchange charges for its own '
+                    + 'data is between you and them — exactly as with any terminal.',
+                    'Not a black box: hover anything for its explanation (right-click pins the card), '
+                    + 'and the whole program is open source and inspectable.',
+                ] },
+                { note: 'Said plainly, because every platform in this niche should say it: trade in your '
+                    + 'terminal, analyse here. That division of labour is the one this program is '
+                    + 'built around.' },
+            ],
+            related: ['start.sources', 'connect.venues', 'work.terminal'],
+        },
+        {
             id: 'start.sources', group: 'start', mode: 'both',
             title: 'Where the data comes from',
             tags: ['data source', 'bybit', 'binance', 'okx', 'hyperliquid', 'feed', 'free', 'api key'],
@@ -715,7 +751,8 @@
             tags: ['studies', 'indicator', 'study', 'module', 'parameters', 'data box'],
             aliases: ['indicators', 'study library'],
             summary: 'The indicator layer: add, parameterise and remove studies; they draw on the Chart '
-                + 'and report their values in its data box.',
+                + 'and report their values in its data box. Save a whole set as a **collection** '
+                + '(“Saved setups” in the view) and swap indicator setups in one click.',
             blocks: [
                 { h: 'How it works', list: [
                     'Pick a study from the library, set its parameters, and it is drawn on the chart '
@@ -1039,6 +1076,43 @@
             related: ['connect.bridges', 'start.sources'],
         },
         {
+            id: 'view.profiles', group: 'panels', mode: 'both',
+            title: 'Profiles (switchable playbooks)',
+            tags: ['profiles', 'playbook', 'setup', 'switch', 'save', 'export', 'session', 'rules'],
+            aliases: ['playbook', 'saved setup', 'workspace profile'],
+            summary: 'Your setup as a named object: feed, instruments, analysis parameters, layout and '
+                + 'theme switch together — save what you are running, tweak a copy, share one as a file.',
+            blocks: [
+                { p: 'A profile carries the blocks that define **how you read a market** — the feed, the '
+                    + 'instrument set, the analysis parameters (heatmap, tape, CVD, market profile, the '
+                    + 'engine), the studies, the layout and workspaces, the theme, plus watchlist, risk, '
+                    + 'audio and calendar settings. It never carries credentials, machine paths or network '
+                    + 'settings: those stay yours alone, which is also why a profile file is safe to share.' },
+                { p: '**Switch** previews exactly what changes before anything is written. Feed, instruments '
+                    + 'and analysis parameters are read by the engine at start, so the preview tells you '
+                    + 'what lands now and what waits for the next engine start.' },
+                { list: [
+                    '**Save current as…** — the setup you are running becomes a profile, and becomes the '
+                    + 'active playbook; change anything it carries and it shows as **drifted**, one click '
+                    + 'from “Update from current”.',
+                    '**Update from current** — re-capture a profile after you fiddled with things; the '
+                    + 'previous version stays recoverable on the server.',
+                    '**Export / Import** — a profile is a small JSON file; send it to someone, or keep it '
+                    + 'as a backup.',
+                    '**Startup profile** — pick one and switch on “apply at launch” to boot into it.',
+                    '**Auto-switch rules** — optional: bind a profile to a feed, or to a clock window '
+                    + '(with a day mask), so sessions change playbooks for you.',
+                ] },
+                { note: 'This program is half tuning. Profiles are how a good tuning survives: keep one for '
+                    + 'each market or session you trade, instead of one setup stretched across all of them.' },
+            ],
+            actions: [
+                { label: 'Open Profiles', kind: 'view', value: 'profiles' },
+                { label: 'Settings', kind: 'topic', value: 'view.settings' },
+            ],
+            related: ['view.settings', 'view.instruments'],
+        },
+        {
             id: 'view.settings', group: 'panels', mode: 'both',
             title: 'Settings',
             tags: ['settings', 'config', 'thresholds', 'appearance', 'log level', 'reset', 'save'],
@@ -1345,7 +1419,10 @@
             summary: 'The list below is generated from the program\'s own shortcut map, so every key '
                 + 'it honours is here and no key is listed that does nothing. **?** opens it as an '
                 + 'overlay at any time, and the top bar\'s **Keys** menu is the same list grouped by '
-                + 'scope — a row with a shortcut key on the right runs its action when clicked.',
+                + 'scope — a row with a shortcut key on the right runs its action when clicked.'
+                + ' In the sheet, **Change** on a row captures your own combination — a conflict'
+                + ' is refused with the owner named, and Reset (or Reset all) puts the shipped'
+                + ' keys back.',
             blocks: [
                 { h: 'Where to find them', list: [
                     '**The Keys menu** (top menu bar) — the whole map, grouped by scope; click a '
@@ -2704,6 +2781,7 @@
         instruments: 'view.instruments',
         alpaca: 'view.alpaca',
         platforms: 'view.platforms',
+        profiles: 'view.profiles',
         settings: 'view.settings',
         logs: 'view.logs',
         watchlist: 'view.watchlist',

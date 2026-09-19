@@ -197,7 +197,10 @@
                 }
             }
         }
+        let live = true;
         return function unsubscribe() {
+            if (!live) return;               // idempotent: a second teardown must not free another owner's channel
+            live = false;
             channel.refs -= 1;
             if (typeof listener === 'function') {
                 const at = channel.listeners.indexOf(listener);

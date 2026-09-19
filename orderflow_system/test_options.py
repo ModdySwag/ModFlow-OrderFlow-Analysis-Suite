@@ -573,3 +573,19 @@ def test_the_ladder_window_is_centred_on_the_forward_not_on_spot():
     assert [int(entry["strike"]) for entry in near] == [83000, 84000, 85000, 86000]
     assert deribit.build_ladder([], {}, 100.0, 5) == ([], 100.0)
     assert deribit.stats()["ttl_ms"] == {"chain": deribit.CHAIN_TTL_MS, "ticker": deribit.TICKER_TTL_MS}
+
+
+# ── MEM-B-04: the deribit TTL cache is bounded, and a put past the cap reclaims ──────────────
+def test_the_ticker_cache_is_bounded_and_sweeps_expired_keys():
+    from orderflow_system.desktop.deribit import TtlCache
+
+    now = {"t": 1000.0}
+    cache = TtlCache(ttl_ms=1000, clock=lambda: now["t"])
+    for i in range(cache.MAX_ENTRIES + 25):
+        cache.put(f"k{i}", i)
+    assert len(cache._items) <= cache.MAX_ENTRIES, "reads expire by access; puts must bound it"
+
+    now["t"] += 10.0                                    # every held key is now expired
+    cache.put("fresh", 1)
+    assert len(cache._items) == 1, "the expired keys go first"
+    assert cache.get("fresh") == 1

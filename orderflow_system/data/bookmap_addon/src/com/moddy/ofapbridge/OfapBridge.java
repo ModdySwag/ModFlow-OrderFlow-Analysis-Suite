@@ -121,6 +121,7 @@ public class OfapBridge implements CustomModuleAdapter, TradeDataListener, Depth
         try {
             if (server != null) {
                 server.close();
+                server = null;              // E-07: the closed listener is released, not retained
             }
         } catch (IOException ignored) {
             // closing a listener that is already gone is not an error worth reporting
@@ -136,6 +137,11 @@ public class OfapBridge implements CustomModuleAdapter, TradeDataListener, Depth
     // ── the wire ─────────────────────────────────────────────────────────────────────────────
 
     private void startServer() {
+        /* E-07: initialize() runs once per attached instrument — start the accept loop once, and
+           only when the previous one is gone (the old shape leaked a thread per attach). */
+        if (acceptThread != null && acceptThread.isAlive()) {
+            return;
+        }
         acceptThread = new Thread(new Runnable() {
             @Override
             public void run() {
@@ -174,6 +180,9 @@ public class OfapBridge implements CustomModuleAdapter, TradeDataListener, Depth
     }
 
     private void startHeartbeat() {
+        if (beatThread != null && beatThread.isAlive()) {
+            return;                         // E-07: one heartbeat per add-on, not one per attach
+        }
         beatThread = new Thread(new Runnable() {
             @Override
             public void run() {

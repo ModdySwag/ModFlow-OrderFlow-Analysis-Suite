@@ -102,8 +102,11 @@ function mpDraw(series) {
        single fit at 150%, and it grew again on the next draw. */
     if (el.style) { el.style.width = '100%'; el.style.height = cssH + 'px'; }
     const cssW = Math.max(320, el.clientWidth || el.parentElement.clientWidth || 640);
-    el.width = Math.floor(cssW * dpr);
-    el.height = Math.floor(cssH * dpr);
+    /* D-09: assigning width/height reallocates + blanks the canvas even when the size is
+       unchanged (which is every poll). Only a real layout change touches the backing store. */
+    const w = Math.floor(cssW * dpr);
+    const h = Math.floor(cssH * dpr);
+    if (el.width !== w || el.height !== h) { el.width = w; el.height = h; }
     PRESSURE.lastSeries = series;                                  // the relayout redraw's input (§72)
     const ctx = el.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -344,8 +347,13 @@ function mpGovernor() {
     GOVERNOR.note = () => {
         const el = document.getElementById('heatmapCanvas');
         if (!el) return;
-        el.title = `Heatmap repaints: ${GOVERNOR.painted} painted · ${GOVERNOR.skips} skipped (unchanged data) · `
-            + `${GOVERNOR.throttled} coalesced (inside the ${GOVERNOR.minGapMs} ms frame budget). `
+        /* Hover-info audit: this used to REPLACE the canvas's tooltip with repaint counters, so a
+           user hovering the depth map got diagnostics instead of what they were looking at. The
+           counters are appended to the description now (and the static title lives in index.html). */
+        const baseTitle = el.getAttribute('data-base-title') || el.title || '';
+        if (!el.getAttribute('data-base-title')) el.setAttribute('data-base-title', baseTitle);
+        el.title = baseTitle + ` Repaints: ${GOVERNOR.painted} painted · ${GOVERNOR.skips} skipped · `
+            + `${GOVERNOR.throttled} coalesced (${GOVERNOR.minGapMs} ms frame budget). `
             + 'This is the reference layout performance guidance: redraw sparingly, upload only on change.';
     };
     return true;

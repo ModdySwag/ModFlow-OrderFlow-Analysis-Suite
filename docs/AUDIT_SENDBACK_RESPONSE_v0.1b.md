@@ -1,6 +1,6 @@
 # Audit send-back — value judgement + implementation plan
 
-**Source audit:** `C:\Users\Moddy\Desktop\sendback.txt` — a release-readiness audit of this tree,
+**Source audit:** `C:\Users\<you>\Desktop\sendback.txt` — a release-readiness audit of this tree,
 written 2026-09-16 23:59 against `aa43f40` + the 40 uncommitted paths ("SHIP ONLY AFTER REQUIRED
 FIXES"). Not to be confused with `docs/AUDIT_RETURN_v0.1b.md` (§66's earlier, different return).
 **Re-verified:** 2026-09-17, against the working tree on disk — every claim below was re-tested

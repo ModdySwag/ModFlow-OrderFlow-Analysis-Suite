@@ -232,3 +232,54 @@ def test_cache_round_trip(tmp_path):
 def test_resolved_download_dir_defaults_to_the_app(value):
     settings = up.clamp_update_settings({"updates": {"download_dir": value}})
     assert up.resolved_download_dir(settings, "C:/cfg") == Path("C:/cfg") / "updates"
+
+
+# ── F-03: one installer per release in the updates folder ────────────────────────────────────
+def test_a_second_download_of_another_version_leaves_one_artefact(tmp_path):
+    from orderflow_system.desktop.updater import prune_update_folder
+
+    folder = tmp_path / "updates"
+    folder.mkdir()
+    old = folder / "ModFlowOrderFlowAnalysisSuite-Setup-0.1.0-beta.exe"
+    keep = folder / "ModFlowOrderFlowAnalysisSuite-Setup-0.1.1-beta.exe"
+    other = folder / "notes.txt"
+    stale_part = folder / "ModFlowOrderFlowAnalysisSuite-Setup-0.1.2-beta.exe.part"
+    for path in (old, keep, other, stale_part):
+        path.write_bytes(b"x")
+    import os
+    import time as _time
+
+    old_stamp = _time.time() - 3 * 86_400
+    os.utime(stale_part, (old_stamp, old_stamp))
+
+    removed = prune_update_folder(folder, keep=keep)
+
+    assert removed == 2, removed
+    assert keep.exists() and other.exists()
+    assert not old.exists(), "a superseded installer is pruned"
+    assert not stale_part.exists(), "a dead partial is pruned"
+    assert sorted(p.name for p in folder.iterdir()) == sorted(["notes.txt", keep.name])
+
+
+# ── F-04: dist/ keeps exactly one setup/zip/SBOM ─────────────────────────────────────────────
+def test_superseded_dist_artifacts_are_cleaned(tmp_path):
+    import importlib.util
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("build_exe_f04", root / "scripts" / "build_exe.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    app = module.APP_NAME
+    for name in (f"{app}-Setup-0.1.0-beta.exe", f"{app}-Setup-0.1.0-beta.exe.sha256",
+                 f"{app}-win64.zip", f"{app}-win64.sbom.cdx.json"):
+        (tmp_path / name).write_bytes(b"old")
+    keep = tmp_path / "ModFlowOrderFlowAnalysisSuite"
+    keep.mkdir()
+
+    removed = module.clean_superseded_artifacts(tmp_path)
+
+    assert len(removed) == 4, [p.name for p in removed]
+    assert keep.is_dir(), "the payload directory itself is untouched"
+    assert not any(p.is_file() for p in tmp_path.iterdir())
+

@@ -64,6 +64,29 @@ TRADE_COLUMNS: tuple[str, ...] = (
     "notes",
 )
 
+#: The table's DDL, for writers that open the database themselves: a fresh install has no
+#: ``trade_journal`` until the data layer first runs, and "End & save" must work anyway. Kept
+#: beside ``TRADE_COLUMNS`` so the two cannot describe different tables; ``test_paper_ledger``
+#: parses both and fails if they drift.
+TRADE_JOURNAL_DDL = (
+    "CREATE TABLE IF NOT EXISTS trade_journal (\n"
+    "    id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
+    "    instrument TEXT NOT NULL,\n"
+    "    direction TEXT NOT NULL,\n"
+    "    entry_time_ms INTEGER,\n"
+    "    exit_time_ms INTEGER,\n"
+    "    entry_price REAL,\n"
+    "    exit_price REAL,\n"
+    "    stop_loss REAL,\n"
+    "    take_profit REAL,\n"
+    "    pnl_ticks REAL,\n"
+    "    rr_ratio REAL,\n"
+    "    signals_json TEXT,\n"
+    "    notes TEXT,\n"
+    "    profile_id TEXT NOT NULL DEFAULT ''\n"
+    ")"
+)
+
 _TIME_COLUMNS = ("entry_time_ms", "exit_time_ms")
 _NUMERIC_COLUMNS = ("entry_price", "exit_price", "stop_loss", "take_profit", "pnl_ticks", "rr_ratio")
 #: Free-text columns copied as stripped text. ``instrument``/``direction`` are handled separately:

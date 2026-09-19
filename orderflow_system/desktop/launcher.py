@@ -27,6 +27,7 @@ import webbrowser
 from pathlib import Path
 
 from orderflow_system.desktop import config_store, logs, single_instance, windows as windows_mod
+from orderflow_system.desktop import profiles as profiles_mod
 
 logger = logging.getLogger(__name__)
 
@@ -127,13 +128,18 @@ def serve(app, host: str, port: int, started: threading.Event) -> None:
     # the root logger (file + buffer). Uvicorn's default config attaches a
     # StreamHandler to sys.stderr, which is None under pythonw.exe — that is the
     # difference between a working shortcut and a window that never appears.
-    config = uvicorn.Config(app, host=host, port=port, log_level="info", loop="asyncio", log_config=None)
+    # access_log=False: the UI polls its own endpoints every 1-60 s, so every request at INFO
+    # turned the 3 x 2 MB log budget over in hours (audit F-12). The app logs what it does.
+    config = uvicorn.Config(app, host=host, port=port, log_level="info", loop="asyncio",
+                            log_config=None, access_log=False)
     server = uvicorn.Server(config)
 
     def _mark_started() -> None:
-        while not getattr(server, "started", False):
+        for _ in range(400):                 # ~20 s at 0.05 s: bounded, never spins forever
+            if getattr(server, "started", False):
+                started.set()
+                return
             time.sleep(0.05)
-        started.set()
 
     threading.Thread(target=_mark_started, daemon=True).start()
     try:
@@ -175,6 +181,23 @@ WINDOW_MIN_W, WINDOW_MIN_H = 720, 480
 WINDOW_HARD_MIN = (320, 240)
 #: The pre-§72 minimum — kept for the no-screens (headless) path, where nothing can be measured.
 WINDOW_LEGACY_MIN = (1080, 680)
+
+
+def _shutdown_engine(port: int, timeout: float = 15.0) -> None:
+    """Stop the engine (and with it the database) before the process exits.
+
+    The GUI owns no reference to the engine's event loop — it lives in the server thread — so the
+    shutdown rides the control API's own stop route over loopback, which already bounds itself
+    (audit A-02). Best effort: a slow or missing stop must never keep the window from closing.
+    """
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/control/engine/stop", method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:   # noqa: S310 - loopback
+            response.read(200)
+        logger.info("Engine stop requested at exit")
+    except Exception as exc:                 # noqa: BLE001
+        logger.debug("engine shutdown request failed: %s", exc)
 
 
 def _screen_rect(screen) -> dict | None:
@@ -409,11 +432,39 @@ class NativeWindowHost(windows_mod.WindowHost):
             closed += forget
 
     def close(self, wid: str) -> bool:
-        window = self._windows.pop(wid, None)
+        """Close one window; drop the reference only once the platform agrees (MEM-E-09).
+
+        The old shape popped first and swallowed a failure, so a destroy that raised left this
+        registry and pywebview's own disagreeing — the UI believed the window was gone while it
+        still existed (and the quit gate waited on it). Now the entry is kept until the close is
+        confirmed by pywebview's own `closed` event, with one retry; a window that still will not
+        confirm stays listed so the UI can retry instead of silently forgetting it.
+        """
+        window = self._windows.get(wid)
         if window is None:
             return False
-        window.destroy()
-        return True
+        if self._destroy_and_confirm(wid, window):
+            self._windows.pop(wid, None)
+            return True
+        if self._destroy_and_confirm(wid, window):       # one retry
+            self._windows.pop(wid, None)
+            return True
+        logger.warning("aux window %s did not confirm its close — keeping it listed", wid)
+        return False
+
+    @staticmethod
+    def _destroy_and_confirm(wid: str, window) -> bool:
+        try:
+            window.destroy()
+        except Exception:                    # a destroy on an already-dead window must not raise
+            logger.debug("aux window destroy failed", exc_info=True)
+        closed = getattr(getattr(window, "events", None), "closed", None)
+        try:
+            if closed is not None and hasattr(closed, "is_set") and closed.is_set():
+                return True
+        except Exception:                    # pragma: no cover — a stub event that raises
+            pass
+        return False
 
     def close_all(self) -> int:
         """Close every auxiliary window, called when the MAIN window closes (§94).
@@ -480,6 +531,54 @@ def restore_windows(port: int, title: str = "", restore: bool = True) -> NativeW
 
 
 # ──────────────────────────────────────────────────────────────
+# The WebView2 profile (MEM-F-01 / MEM-E-04)
+# ──────────────────────────────────────────────────────────────
+
+#: pywebview's default is a fresh *private* profile under %TEMP% per launch
+#: (`tmpXXXXXXXX\\EBWebView`, ~24 MB), deleted only by its own close hook — a killed process
+#: orphaned it for good (a 24.0 MB orphan from an earlier session was found on this host). The
+#: GUI now uses one app-owned profile directory and sweeps what older builds left behind.
+WEBVIEW_PROFILE_SWEEP_AGE_S = 86400.0
+
+
+def stale_webview_profiles(temp_dir: Path, now: float,
+                           min_age_s: float = WEBVIEW_PROFILE_SWEEP_AGE_S) -> list[Path]:
+    """Temp WebView2 profiles old enough to reap: pure selection, so the rule is testable."""
+    out: list[Path] = []
+    try:
+        parents = sorted(temp_dir.glob("tmp*"))
+    except OSError:                                  # pragma: no cover - unreadable temp root
+        return []
+    for parent in parents:
+        profile = parent / "EBWebView"
+        if not profile.is_dir():
+            continue
+        try:
+            age = now - profile.stat().st_mtime
+        except OSError:                              # pragma: no cover - raced away
+            continue
+        if age >= min_age_s:
+            out.append(profile)
+    return out
+
+
+def sweep_webview_profiles(temp_dir: Path | None = None, *, now: float | None = None,
+                           min_age_s: float = WEBVIEW_PROFILE_SWEEP_AGE_S) -> int:
+    """Best-effort removal of stale temp profiles; returns how many are really gone."""
+    import shutil
+    import tempfile
+
+    root = Path(temp_dir) if temp_dir is not None else Path(tempfile.gettempdir())
+    stamp = time.time() if now is None else now
+    removed = 0
+    for profile in stale_webview_profiles(root, stamp, min_age_s):
+        shutil.rmtree(profile, ignore_errors=True)   # locked files (a live WebView2) are left
+        if not profile.exists():
+            removed += 1
+    return removed
+
+
+# ──────────────────────────────────────────────────────────────
 # Entry point
 # ──────────────────────────────────────────────────────────────
 
@@ -499,6 +598,12 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = config_store.load_config()
     logs.install(cfg.get("logging", {}).get("level", "INFO"))
+
+    # Profiles: honour the startup playbook BEFORE anything is served — the first /bootstrap a UI
+    # sees already reflects the profile, and the engine (which reads its config at start) starts
+    # under it. A refusal is logged by boot_apply and the app carries on with the stored config.
+    if profiles_mod.boot_apply():
+        cfg = config_store.load_config()
 
     # N-1: one windowed instance per profile. A second launch finds the named mutex held, brings
     # the existing window forward and exits — it does NOT start a second server/engine over the
@@ -534,6 +639,7 @@ def main(argv: list[str] | None = None) -> int:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
+            _shutdown_engine(port)
             return 0
 
     if args.browser:
@@ -542,6 +648,7 @@ def main(argv: list[str] | None = None) -> int:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
+            _shutdown_engine(port)
             return 0
 
     try:
@@ -553,6 +660,7 @@ def main(argv: list[str] | None = None) -> int:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
+            _shutdown_engine(port)
             return 0
 
     # P60: the window/taskbar icon is the ModFlow badge (bundled with the UI dir, so the frozen
@@ -572,6 +680,23 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Window %dx%d at %s,%s (min %dx%d) on %d screen(s)",
                 geo["width"], geo["height"], geo["x"], geo["y"],
                 geo["min_width"], geo["min_height"], len(screen_rects(screens)))
+    # MEM-F-01: one app-owned WebView2 profile, reused every launch, under the per-user
+    # directory the installer/uninstaller already owns — not a fresh %TEMP% private profile
+    # per run. Boot also reaps any legacy temp profile an older build left orphaned.
+    profile_dir = config_store.config_dir() / "webview2"
+    try:
+        profile_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.warning("could not create the WebView2 profile directory — falling back to the "
+                       "default private profile", exc_info=True)
+        profile_dir = None
+    try:
+        swept = sweep_webview_profiles()
+        if swept:
+            logger.info("swept %d stale WebView2 temp profile(s) left by an earlier run", swept)
+    except Exception:                                  # never block the launch on housekeeping
+        logger.debug("WebView2 profile sweep failed", exc_info=True)
+
     window = webview.create_window(
         "ModFlow OrderFlow Analysis Suite",
         url,
@@ -592,7 +717,13 @@ def main(argv: list[str] | None = None) -> int:
     if _closed is not None:
         _closed += lambda: host.close_all()
     try:
-        webview.start(icon=str(_icon) if _icon.is_file() else None)   # blocks on the main thread (required on macOS)
+        # blocks on the main thread (required on macOS). private_mode=False + storage_path:
+        # the profile persists (cookies/local storage for a loopback UI are a feature, not a
+        # risk) and — the point of MEM-F-01 — its folder is one known path, not one %TEMP%
+        # directory per launch that only a clean close removes.
+        webview.start(icon=str(_icon) if _icon.is_file() else None,
+                      private_mode=False,
+                      storage_path=str(profile_dir) if profile_dir is not None else None)
     except Exception as exc:                # missing WebView2 / no display → browser fallback
         print(f"Native window unavailable ({exc}); opening the browser instead.", file=sys.stderr)
         webbrowser.open(url)
@@ -602,6 +733,7 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             pass
     host.close_all()                             # idempotent — the closed-event sweep may have run
+    _shutdown_engine(port)                       # stop the engine + DB before the process exits
     return 0
 
 

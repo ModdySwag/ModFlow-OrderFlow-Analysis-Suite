@@ -472,6 +472,11 @@ class NinjaTraderFeed:
 
     async def stop(self) -> None:
         self._running = False
+        # MEM-E-01: tell the bridge to drop every subscription before the socket closes. The
+        # add-on also cleans up on disconnect now, but an explicit unsubscribe is the contract
+        # and covers the case where the writer is already half-dead (best effort, like _send).
+        for nt_name in self.symbols.values():
+            self._send({"Type": "unsubscribe", "Instrument": nt_name})
         writer, self._writer = self._writer, None
         if writer is not None:
             try:
@@ -591,6 +596,14 @@ class NinjaTraderFeed:
             ladder.pop(price, None)
         else:
             ladder[price] = size
+        # E-06: the ladder is price-keyed and only shrank on an explicit remove — a session that
+        # streams updates for prices outside the visible depth grew it all day. Keep the inside
+        # `depth_levels` prices per side (with headroom), like the other adapters' books.
+        keep = max(4 * int(self.depth_levels), 64)
+        if len(ladder) > keep:
+            ranked = sorted(ladder, reverse=(side == "bid"))[: int(self.depth_levels)]
+            for stale_price in [p for p in ladder if p not in set(ranked)]:
+                ladder.pop(stale_price, None)
         await self._emit_book(app_symbol)
 
     async def _on_depth_snapshot(self, message: dict[str, Any]) -> None:

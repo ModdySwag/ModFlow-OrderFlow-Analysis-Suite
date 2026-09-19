@@ -46,7 +46,11 @@ class TelegramAlertBot:
             logger.warning("python-telegram-bot not installed. Alerts logged only.")
             self._enabled = False
         except Exception as e:
-            logger.error(f"Failed to initialize Telegram bot: {e}")
+            # SEC-01: PTB's InvalidToken text embeds the token (`The token \`<token>\` was
+            # rejected…`); redact before it reaches any sink.
+            from orderflow_system.desktop.logs import redact
+
+            logger.error("Failed to initialize Telegram bot: %s", redact(e))
             self._enabled = False
 
     async def send_signal_alert(

@@ -51,23 +51,28 @@
             };
         },
 
-        /* Diagonal processing matrix. Buying imbalance: Bid[Y] over Ask[Y+1]. Selling is the
-           reciprocal comparison, so one pass over the levels yields both directions.
-           Returns per-level {buy, sell, ratio, against} plus counts. */
+        /* Diagonal processing matrix — the analytics/footprint.py convention, one rule in two
+           runtimes: a BUY is Ask[Y] against Bid[Y−1] (a lift through an offer with no bid of its
+           own underneath); a SELL is Bid[Y] against Ask[Y+1]. A row with no neighbour falls back
+           to its own volume on the compared side — the same-price comparison the Python engine
+           uses at the ladder's edge. Returns per-level {buy, sell, ratio} plus counts. */
         diagonalImbalance(levels, R = 4.0) {
             const r = Number(R) > 0 ? Number(R) : 4.0;
-            const rows = (levels || []).map((l, i) => {
+            const list = levels || [];
+            const rows = list.map((l, i) => {
                 const bid = Number(l.bid) || 0;
                 const ask = Number(l.ask) || 0;
-                const next = (levels || [])[i + 1] || {};
-                const askUp = Number(next.ask) || 0;
-                const bidUp = Number(next.bid) || 0;
-                const buyRatio = askUp > 0 ? bid / askUp : (bid > 0 ? Infinity : 0);
-                const sellRatio = bidUp > 0 ? ask / bidUp : (ask > 0 ? Infinity : 0);
-                /* Both sides must exist: a level with nothing beside it is missing data,
-                   not a 40x imbalance, and flagging it would paint phantom zones. */
-                const buy = bid > 0 && askUp > 0 && buyRatio >= r;
-                const sell = ask > 0 && bidUp > 0 && sellRatio >= r;
+                const below = list[i - 1] || null;
+                const above = list[i + 1] || null;
+                const bidCmp = below ? (Number(below.bid) || 0) : bid;
+                const askCmp = above ? (Number(above.ask) || 0) : ask;
+                const buyRatio = bidCmp > 0 ? ask / bidCmp : Infinity;
+                const sellRatio = askCmp > 0 ? bid / askCmp : Infinity;
+                /* A zero comparison means nothing rested on the other side of the diagonal —
+                   that is the imbalance footprint.py flags; a row with no prints on the judged
+                   side never is. */
+                const buy = ask > 0 && (bidCmp <= 0 || buyRatio >= r);
+                const sell = bid > 0 && (askCmp <= 0 || sellRatio >= r);
                 return {
                     price: Number(l.price) || 0, bid, ask, buy, sell,
                     ratio: buy ? buyRatio : (sell ? sellRatio : 0),
@@ -198,6 +203,12 @@
                 total: (Number(l.bid) || 0) + (Number(l.ask) || 0),
             }));
             const candleTotal = rows.reduce((sum, r) => sum + r.total, 0);
+            if (!candleTotal) {
+                /* No volume anywhere: no ranking is meaningful, so nothing is claimed as the value
+                   area (audit C-15 — an empty snapshot used to label every row VA). */
+                return { rows: rows.map((r) => ({ ...r, share: 0, inVA: false })),
+                         candleTotal: 0, vaLow: 0, vaHigh: 0, hvn: 0, vaCount: 0 };
+            }
             const ranked = rows.slice().sort((a, b) => b.total - a.total);
             const target = candleTotal * Math.max(0.1, Math.min(0.95, Number(vaPct) || 0.7));
             let acc = 0;
@@ -234,7 +245,12 @@
                 for (const l of chunk) { bid += Number(l.bid) || 0; ask += Number(l.ask) || 0; }
                 const last = chunk[chunk.length - 1] || {};
                 out.push({
-                    price: Number(last.price) || 0, bid, ask, ticks: chunk.length,
+                    /* C-04: the row is centred on the chunk's band — a grouped row stands for
+                       [first...last], and pricing it at the top tick shifted every grouped row by
+                       (k-1)/2 ticks. `label` keeps the top tick for labels/text. */
+                    price: ((Number(chunk[0] && chunk[0].price) || 0) + (Number(last.price) || 0)) / 2,
+                    label: Number(last.price) || 0,
+                    bid, ask, ticks: chunk.length,
                     low: Number(chunk[0] && chunk[0].price) || 0,
                 });
             }
@@ -629,16 +645,19 @@
            string, rebuilt only when the scale or the ramp changes. The old path called
            heatColor + template-string per cell per pass — 8.3 ms per repaint at 30k cells, all
            of it allocation. Cells now index this table. */
-        heatPalette(scale, ramp, buckets = 64, alphaSteps = 16, gamma = 1) {
+        heatPalette(scale, ramp, buckets = 64, alphaSteps = 16, gamma = 1, dim = 0) {
             const sc = Number(scale) > 0 ? Number(scale) : 1;
             const logMax = Math.log1p(Math.max(sc, 1));
+            const dimmer = Math.min(0.8, Math.max(0, Number(dim) || 0));
             const out = [];
             for (let b = 0; b < buckets; b += 1) {
                 /* B2: the contrast dial rides the colour table itself — the size-to-bucket mapping
                    stays linear in luminance; only where each bucket sits on the ramp moves. */
                 const rgb = math.heatColor01(math.rampT(b / (buckets - 1), gamma), ramp);
                 for (let a = 0; a < alphaSteps; a += 1) {
-                    const alpha = (a + 1) / alphaSteps;
+                    /* B5: dimming is the same trick on the alpha axis — every cell fades, so the
+                       levels and drawings over the map carry the eye. */
+                    const alpha = ((a + 1) / alphaSteps) * (1 - dimmer);
                     out.push('rgba(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ',' + alpha.toFixed(3) + ')');
                 }
             }
@@ -974,6 +993,8 @@
        and the axis drag both measure it. One constant, three consumers. */
     const RAIL_W = 62;
 
+    /* The time ruler's height — the framing band and the ruler share one number (audit C-16). */
+    const RULER_H = 14;
     const state = {
         symbol: 'BTCUSDT',
         params: { R: 4.0, stack: 3, lambda: 500, textPx: 45, sweepC: 1.15, levelCap: 260,
@@ -981,6 +1002,7 @@
             /* B2: the heat scheme's live dials — contrast (a gamma over the ramp; 1 = as shipped),
                a floor in size units and a floor as a share of the book's sizes (both off). */
             heatContrast: 1.0, heatFloor: 0, heatFloorPct: 0,
+            heatDim: 0, heatHighlight: 0,
             /* T10/B3: the vertical-smoothing mode; T10/B13: the candle-degrade switch. */
             heatSmooth: 'auto', degrade: true,
             /* P1-8: how a bar is expressed. Resolved by `expression.js` at paint time; junk falls
@@ -1268,6 +1290,10 @@
                 markHeatFull();
             }
         }
+        /* A crosshair or tooltip measured against the previous dataset must not label the new one
+           (audit C-07): the hover state is dropped whenever a payload replaces the data. */
+        state.hover = null;
+        state.pendingHover = null;
         /* P2-1: one index pass per payload. Bar boundaries define the print buckets, so a bars
            change rebuilds them too; the CVD prefix follows the bars; the flow index follows heat. */
         if (bars || prints) buildPrintIndex();
@@ -1572,7 +1598,7 @@
         const v = state.view;
         const bars = state.data.bars;
         const railW = RAIL_W;
-        const rulerH = 14;
+        const rulerH = RULER_H;
         const gridCol = math.rgba('grid', '.10');
         const labelCol = math.rgba('axisLabel', '.85');
         const warnCol = 'rgba(210,153,34,.9)';
@@ -1778,6 +1804,19 @@
         return Number.isFinite(g) ? Math.min(2.5, Math.max(0.5, g)) : 1;
     }
 
+    /* B5: the live dimming dial (0 = off, up to 0.8), clamped at the registry's own bounds. */
+    function heatDim() {
+        const d = Number(state.params.heatDim);
+        return Number.isFinite(d) ? Math.min(0.8, Math.max(0, d)) : 0;
+    }
+
+    /* B5: the large-size highlight — a share of the resolved ceiling at which a LIVE cell is
+       outlined, so the map's own walls read as walls. 0 = off (the shipped look). */
+    function heatHighlight() {
+        const h = Number(state.params.heatHighlight);
+        return Number.isFinite(h) ? Math.min(1, Math.max(0, h)) : 0;
+    }
+
     /* B2: the size floor resolved once per (version, dials) — the exact size or the bottom share,
        whichever is higher. Below it a cell draws nothing, so the map shows where size is NOT. */
     function heatFloorFor() {
@@ -1801,9 +1840,9 @@
 
     /* One rgba table per (scale, ramp, contrast): rebuilt only when one of them actually changes. */
     function heatPaletteFor() {
-        const key = `${state.data.heatScale}|${state.params.ramp}|${heatGamma()}`;
+        const key = `${state.data.heatScale}|${state.params.ramp}|${heatGamma()}|${heatDim()}`;
         if (!state.data.palette || state.data.palette.key !== key) {
-            state.data.palette = { key, pal: math.heatPalette(state.data.heatScale, state.params.ramp, 64, 32, heatGamma()) };
+            state.data.palette = { key, pal: math.heatPalette(state.data.heatScale, state.params.ramp, 64, 32, heatGamma(), heatDim()) };
         }
         return state.data.palette.pal;
     }
@@ -1819,6 +1858,9 @@
         const strings = pal.strings;
         let decayed = 0;
         const floorVal = heatFloorFor();
+        /* B5: the highlight threshold in the map's own size units — a share of the ceiling. */
+        const hlShare = heatHighlight();
+        const hlNow = hlShare > 0 ? hlShare * (Number(state.data.heatScale) || 1) : 0;
         /* P2-2: what is still fading is remembered WITH its rect, so the decay pass repaints
            exactly these cells and nothing else. */
         const ghosts = [];
@@ -1895,6 +1937,13 @@
                 const smoothSize = (smoothedSizes && cell.size > 0) ? smoothedSizes[k] : (cell.lastSize || 1);
                 ctx.fillStyle = strings[pal.index(Math.max(0, smoothSize), alpha)] || strings[0];
                 ctx.fillRect(x, yTop, colW, hh);
+                /* B5: the large-size highlight. Only a LIVE cell at/above the threshold is
+                   outlined — a fading ghost is a memory of size, not a wall standing now. */
+                if (hlNow > 0 && cell.size > 0 && cell.size >= hlNow) {
+                    ctx.strokeStyle = 'rgba(232,238,248,0.55)';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x + 0.5, yTop + 0.5, Math.max(1, colW) - 1, Math.max(1, hh) - 1);
+                }
                 if (cell.size <= 0) ghosts.push({ cell: cell, x: x, yTop: yTop, h: hh });
             }
         }
@@ -1955,7 +2004,10 @@
         const v = state.view;
         const lod = state.lod;
         const start = Math.max(0, Math.floor(v.offX) - 1);
-        const end = Math.min(bars.length, Math.ceil(xToIndex(v.width)) + 2);
+        /* C-03: the plot stops at the price rail. snapToLive parks the newest bar's right edge at
+           the stage edge, so the last columns were painted over the rail's price labels. */
+        const plotRight = v.width - RAIL_W;
+        const end = Math.min(bars.length, Math.ceil(xToIndex(plotRight)) + 2);
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         /* One label per distinct projected zone per pass: the bands are drawn per bar and stretch
@@ -2065,7 +2117,7 @@
                own sub-bars / range is the separator. */
             if (chrome.framing) {
                 ctx.fillStyle = i % 2 ? 'rgba(255,255,255,.016)' : 'rgba(0,0,0,.10)';
-                ctx.fillRect(x, 0, colW, v.height);
+                ctx.fillRect(x, 0, colW, v.height - RULER_H);      // audit C-16: never under the ruler
                 ctx.fillStyle = 'rgba(150,175,215,.18)';
                 ctx.fillRect(x + colW - 1, 0, 1, v.height);
             }
@@ -2079,6 +2131,7 @@
                 const im = imRows[k];
                 const y = priceToY(level.price) - cellH / 2;
                 if (y < -cellH || y > v.height + cellH) continue;
+                if (x + colW > plotRight) continue;      // C-03: never paint a cell over the rail
                 const info = shares.rows[k] || { share: 0, inVA: false };
                 const buyHot = im.side === 'buy' || im.side === 'both';
                 const sellHot = im.side === 'sell' || im.side === 'both';
@@ -2412,10 +2465,21 @@
             cvd = new Float64Array(bars.length + 1);
             for (let i = 0; i < bars.length; i += 1) cvd[i + 1] = cvd[i] + (Number(bars[i].delta) || 0);
         }
-        const maxVol = Math.max(1, ...bars.map((b) => Number(b.volume) || 0));
-        const maxDelta = Math.max(1, ...bars.map((b) => Math.abs(Number(b.delta) || 0)));
-        const cvdLo = Math.min(...cvd, 0);
-        const cvdHi = Math.max(...cvd, 1);
+        /* C-11: loops, not spreads — `Math.min(...cvd)` built one argument per bar and throws
+           RangeError past the engine's argument limit (measured at 125,476 bars). */
+        let maxVol = 1;
+        let maxDelta = 1;
+        let cvdLo = 0;
+        let cvdHi = 1;
+        for (const b of bars) {
+            maxVol = Math.max(maxVol, Number(b.volume) || 0);
+            maxDelta = Math.max(maxDelta, Math.abs(Number(b.delta) || 0));
+        }
+        for (const v of cvd) {
+            const n = Number(v) || 0;
+            cvdLo = Math.min(cvdLo, n);
+            cvdHi = Math.max(cvdHi, n);
+        }
         const colW = Math.max(1, state.view.scaleX);
         const start = Math.max(0, Math.floor(state.view.offX) - 1);
         const end = Math.min(bars.length, Math.ceil(xToIndex(state.view.width)) + 2);
@@ -2597,7 +2661,9 @@
     let areaCache = { key: '', prof: null };
     function areaProfile() {
         if (!selection || selection.i1 < selection.i0 || !state.data.bars.length) return null;
-        const key = selSeq + '|' + state.params.vaPct;
+        /* C-08: the data identity is part of the key — a poll or a symbol switch must not serve
+           the previous dataset's POC/VAH/VAL out of the cache. */
+        const key = `${selSeq}|${state.params.vaPct}|${state.data.key}|${state.data.bars.length}`;
         if (areaCache.key === key) return areaCache.prof;
         const prof = math.areaVolumeProfile({
             bars: state.data.bars, levels: state.data.levels,
@@ -2761,10 +2827,7 @@
             hover(p.x, p.y);
         }
         if (state.invalidateBase) { state.dirty.base = true; state.invalidateBase = false; }
-        /* T4/A7: frozen under the pointer — keep the loop, skip the paint; the dirty flags hold,
-           so the newest state paints on the tick after the pointer leaves. */
-        if (!(window.OFAPFREEZE && OFAPFREEZE.held('ofx'))
-            && (state.dirty.heat || state.dirty.base || state.dirty.live || state.dirty.ribbon)) renderLayers(false);
+        if (state.dirty.heat || state.dirty.base || state.dirty.live || state.dirty.ribbon) renderLayers(false);
     }
 
     function start() {
@@ -2895,6 +2958,15 @@
             openScaleMenu(ev.clientX, ev.clientY);
         });
 
+        /* Leaving the surface clears the hover state: without this the crosshair, tooltip and
+           every pointer-following readout stayed frozen on screen (audit C-07 / B-JS-04). */
+        canvas.addEventListener('mouseleave', () => {
+            state.pendingHover = null;
+            state.hover = null;
+            state.dirty.live = true;
+            if (typeof state.onHover === 'function') state.onHover(null);
+        });
+
         let drag = null;
         canvas.addEventListener('mousedown', (ev) => {
             if (ev.shiftKey) {
@@ -2999,6 +3071,9 @@
         };
     }
 
+    let hoverCache = { key: '', imRows: null, buyCount: 0, sellCount: 0, zones: [] };   // D-05
+    let hoverScratch = null;
+
     function hover(mx, my) {
         const n = state.data.bars.length;
         if (!n) { state.hover = null; if (typeof state.onHover === 'function') state.onHover(null); return; }
@@ -3007,7 +3082,20 @@
         if (!bar) return;
         const price = yToPrice(my);
         const rows = state.data.levels.get(bar.time) || [];
-        const { rows: imRows, buyCount, sellCount } = math.diagonalImbalance(rows, state.params.R);
+        /* D-05: the derived rows (imbalance rows, stacked zones) depend only on the bar and the
+           params — rebuilding them per pointer frame allocated a fresh set every time. Cached
+           here, keyed by bar index + R + stack + row count; the scratch object below carries the
+           answer so a hover sweep allocates nothing per frame. */
+        const paramsKey = i + ':' + state.params.R + ':' + state.params.stack + ':' + rows.length;
+        if (hoverCache.key !== paramsKey) {
+            const derived = math.diagonalImbalance(rows, state.params.R);
+            hoverCache = { key: paramsKey, imRows: derived.rows, buyCount: derived.buyCount,
+                           sellCount: derived.sellCount,
+                           zones: math.stackedZones(derived.rows, state.params.stack) };
+        }
+        const imRows = hoverCache.imRows;
+        const buyCount = hoverCache.buyCount;
+        const sellCount = hoverCache.sellCount;
         /* P2-1: everything below reads the index built once per payload in `setData()` — the
            numbers are identical to the loops these replaced (pinned by ofx.selftest.js) and the
            per-mousemove cost no longer scales with the tape size or the matrix size. */
@@ -3018,7 +3106,7 @@
         const near = nearestLevel(rows, price);
         const nearIdx = near ? rows.indexOf(near.level) : -1;
         const im = nearIdx >= 0 ? imRows[nearIdx] : null;
-        const zones = math.stackedZones(imRows, state.params.stack);
+        const zones = hoverCache.zones;
         const zone = near ? zones.find((z) => z.low <= near.level.price && near.level.price <= z.high) : null;
         /* Depth at the hovered row, from the renderer's own column groups — the layer that paints
            the cells and the layer that reports them can never disagree about which column it is. */
@@ -3030,8 +3118,9 @@
         }
         const bucket = (state.idx && state.idx.printsByBar && state.idx.printsByBar[i]) || null;
         const events = (state.idx && state.idx.flowByCol && state.idx.flowByCol.get(i)) || [];
-        state.hover = {
-            x: mx, y: my, price, index: i, bar,
+        const out = hoverScratch || (hoverScratch = {});
+        out.x = mx; out.y = my; out.price = price; out.index = i; out.bar = bar;
+        state.hover = Object.assign(out, {
             barTime: bar.time, cvd, total, buyCount, sellCount, zones: zones.length,
             zone: zone ? { side: zone.side, count: zone.count, low: zone.low, high: zone.high } : null,
             level: near ? { price: near.level.price, bid: near.level.bid, ask: near.level.ask, dist: near.dist } : null,
@@ -3040,7 +3129,7 @@
             events: events.map((e) => ({ kind: e.kind, direction: e.direction, price: e.price, size: e.size })),
             calc: bar.calc || null,
             visibleBars: barsOnScreen(),
-        };
+        });
         state.dirty.live = true;
         if (typeof state.onHover === 'function') state.onHover(state.hover);
     }
@@ -3160,6 +3249,14 @@
             if (n.heatSmooth !== undefined) {
                 state.params.heatSmooth = (['auto', 'manual', 'none'].indexOf(String(n.heatSmooth)) >= 0)
                     ? String(n.heatSmooth) : 'auto';
+            }
+            if (n.heatDim !== undefined) {
+                const d = Number(n.heatDim);
+                state.params.heatDim = Number.isFinite(d) ? Math.min(0.8, Math.max(0, d)) : 0;
+            }
+            if (n.heatHighlight !== undefined) {
+                const hl = Number(n.heatHighlight);
+                state.params.heatHighlight = Number.isFinite(hl) ? Math.min(1, Math.max(0, hl)) : 0;
             }
             if (n.degrade !== undefined) state.params.degrade = !!n.degrade;
             applyLod();

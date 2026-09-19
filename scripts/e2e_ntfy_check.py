@@ -58,7 +58,8 @@ def main() -> int:
     time.sleep(4)
     for attempt in range(4):
         try:
-            raw = urllib.request.urlopen(f"https://ntfy.sh/{TOPIC}/json?poll=1", timeout=20).read().decode()
+            with urllib.request.urlopen(f"https://ntfy.sh/{TOPIC}/json?poll=1", timeout=20) as resp:
+                raw = resp.read().decode()      # F-07: the response is closed with the block
             msgs = [json.loads(l) for l in raw.splitlines() if l.strip() and json.loads(l).get("event") == "message"]
             if msgs:
                 print(f"NTFY DELIVERED ({len(msgs)} message(s) on {TOPIC}):")

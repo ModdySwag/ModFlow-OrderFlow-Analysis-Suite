@@ -196,6 +196,8 @@
     }
 
     function closeMenu() {
+        /* C-07: the away listener is part of the menu — removing the menu removes it too. */
+        if (S.away) { document.removeEventListener('click', S.away, true); S.away = null; }
         if (S.menu && S.menu.parentNode) S.menu.parentNode.removeChild(S.menu);
         S.menu = null;
     }
@@ -223,11 +225,9 @@
         document.body.appendChild(menu);
         S.menu = menu;
         const away = function (ev) {
-            if (S.menu && !S.menu.contains(ev.target) && ev.target !== S.anchor) {
-                closeMenu();
-                document.removeEventListener('click', away, true);
-            }
+            if (S.menu && !S.menu.contains(ev.target) && ev.target !== S.anchor) closeMenu();
         };
+        S.away = away;
         document.addEventListener('click', away, true);
         return menu;
     }
@@ -310,7 +310,7 @@
            enough — a fetch per page click would be a per-click round trip for nothing. The shell
            announces every mode switch, which is when the control moves between the two bars. */
         document.addEventListener('ofap:relayout', function () { if (S.menu) closeMenu(); });
-        document.addEventListener('ofap:shell', function () { paint(); });
+        document.addEventListener('ofap:shell', function () { if (S.menu) closeMenu(); paint(); });
         attachTop();
         void refresh();
     }

@@ -23,6 +23,7 @@ from orderflow_system.data.models import Candle, Signal, SignalType, Side
 from orderflow_system.analytics.orderbook import OrderbookTracker
 from orderflow_system.analytics.footprint import FootprintBar
 from orderflow_system.config.settings import SweepConfig
+from orderflow_system.patterns import remember_signal
 
 
 class SweepDetector:
@@ -138,5 +139,5 @@ class SweepDetector:
                 "candle_range": round(candle.range_size, 4),
             },
         )
-        self._signal_history.append(signal)
+        remember_signal(self._signal_history, signal)
         return signal

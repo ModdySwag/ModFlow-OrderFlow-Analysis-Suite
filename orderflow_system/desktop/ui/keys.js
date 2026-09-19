@@ -39,6 +39,16 @@
        the worst failure this app can have: a stray key that places an order. */
     var armed = false;
 
+    /* §117: the user’s own chords, binding id -> chords. An override replaces the chords
+       without touching the binding — the sheet, the dispatcher and the menu keep reading
+       one registry. Loading and saving are the app’s (ui.config); resolving is this module’s. */
+    var overrides = Object.create(null);
+
+    function keysFor(row) {
+        var ov = row ? overrides[row.id] : null;
+        return (ov && ov.length) ? ov : (row ? row.keys : []);
+    }
+
     /* ── the pure half ─────────────────────────────────────────────────────── */
 
     function canonical(ev) {
@@ -85,7 +95,7 @@
         if (keys.length > 2 && keys.every(function (k) { return /^[1-9]$/.test(k); })) {
             return keys[0] + ' \u2026 ' + keys[keys.length - 1];
         }
-        return keys.map(pretty).join(' / ');
+        return keys.map(pretty).join(' or ');
     }
 
     function isTypingTarget(node) {
@@ -107,7 +117,7 @@
         for (var i = 0; i < map.length; i += 1) {
             var b = map[i];
             if (!b.run) continue;                                 // documented locals never dispatch
-            if (b.keys.indexOf(chord) < 0) continue;
+            if (keysFor(b).indexOf(chord) < 0) continue;
             if (b.danger && !armed) continue;              // the armed gate (T3)
             if (inField && !b.inField) continue;
             if (b.when && !b.when(ev)) continue;
@@ -168,10 +178,14 @@
 
     function list() {
         return map.map(function (b) {
+            var ks = keysFor(b);
+            var custom = Boolean(overrides[b.id] && overrides[b.id].length);
             return {
-                id: b.id, keys: b.text || keysText(b), label: b.label, scope: b.scope,
+                id: b.id, keys: b.text || keysText({ keys: ks }), label: b.label, scope: b.scope,
                 owner: b.owner, dispatched: Boolean(b.run), danger: Boolean(b.danger),
                 why: String(b.why || ''),
+                custom: custom,
+                defaults: custom ? keysText(b) : '',
             };
         }).sort(function (a, b) {
             var ia = SCOPE_ORDER.indexOf(a.scope);
@@ -199,7 +213,7 @@
         if (armed) return;
         for (var i = 0; i < map.length; i += 1) {
             var b = map[i];
-            if (b.run && b.danger && b.keys.indexOf(chord) >= 0) {
+            if (b.run && b.danger && keysFor(b).indexOf(chord) >= 0) {
                 var now = Date.now();
                 if (now - dangerHintAt > 4000) {
                     dangerHintAt = now;
@@ -274,6 +288,10 @@
         label: 'jump to the broker-account view',
         run: function () { if (typeof showView === 'function') showView('alpaca'); } });
 
+    bind({ id: 'profiles', keys: ['alt+p'], scope: 'Global',
+        label: 'saved setups (profiles): switch playbooks',
+        run: function () { if (typeof showView === 'function') showView('profiles'); } });
+
     /* §92 — the common-scenario gaps the audit found. (Zen already lives in menubar.js as
        Alt+Z — a lesson from the receipt: check the registry before binding, ids replace.) The File menu always displayed
        Ctrl+Alt+R for the engine restart and there was NO such binding (a lie); start/stop had
@@ -313,32 +331,52 @@
     /* ── the shortcut prompts (§92) ────────────────────────────────────────── */
 
     /* Where a control has a shortcut, the control says so — on its tooltip (title), for screen
-       readers (aria-keyshortcuts) and inside its hover card (data-hint-title, which hint.js reads
-       at show-time). One table, one pass, re-runnable: the menubar re-renders itself, controls
-       arrive with views, and a second call is harmless. */
+       readers (aria-keyshortcuts) and inside its hover card (hint.js renders its own line, reading
+       the phrase this module publishes). One table, one pass, re-runnable: the menubar re-renders
+       itself, controls arrive with views, and a second call is harmless.
+
+       Idempotent by construction: the pristine text is captured once per element
+       (data-base-title / data-hint-base-title) and every pass RE-DERIVES from it. The old shape
+       appended only when the new text was absent, so a control whose shortcut changed — every rail
+       digit after a view was added or removed — ended up reading "Shortcut 8 · Shortcut 9". */
     function accelOf(id, index) {
         for (var i = 0; i < map.length; i += 1) {
             var b = map[i];
             if (b.id !== id) continue;
-            if (typeof index === 'number') return b.keys && b.keys.length > index ? pretty(b.keys[index]) : '';
-            return keysText(b);
+            var ks = keysFor(b);
+            if (typeof index === 'number') return ks.length > index ? pretty(ks[index]) : '';
+            return keysText({ keys: ks });
         }
         return '';
+    }
+
+    /* How a shortcut is spoken to the user: a chord is a "Shortcut Ctrl+Alt+T"; a bare digit is an
+       instruction ("Press 8 to switch to this panel"), because "Shortcut 8" on its own reads like
+       a key called 8. Pure, so the selftest pins it. */
+    function shortcutPhrase(text) {
+        var t = String(text == null ? '' : text).trim();
+        if (!t) return '';
+        if (/^[1-9]$/.test(t)) return 'Press ' + t + ' to switch to this panel';
+        return 'Shortcut ' + t;
     }
 
     function annotate() {
         if (typeof document === 'undefined' || !document.querySelectorAll) return;
         function put(el, text) {
-            if (!el || !text) return;
-            el.setAttribute('aria-keyshortcuts', text);
-            var t = el.getAttribute('title') || '';
-            if (t.indexOf('Shortcut ' + text) < 0) {
-                el.setAttribute('title', (t ? t + ' · ' : '') + 'Shortcut ' + text);
+            if (!el) return;
+            var base = el.getAttribute('data-base-title');
+            if (base === null) { base = el.getAttribute('title') || ''; el.setAttribute('data-base-title', base); }
+            var phrase = shortcutPhrase(text);
+            el.setAttribute('title', phrase ? (base ? base + ' \u00b7 ' + phrase : phrase) : base);
+            if (phrase) {
+                el.setAttribute('aria-keyshortcuts', String(text));
+                el.setAttribute('data-shortcut-phrase', phrase);       // hint.js reads this for its card line
+            } else {
+                el.removeAttribute('aria-keyshortcuts');
+                el.removeAttribute('data-shortcut-phrase');
             }
-            var ht = el.getAttribute('data-hint-title');
-            if (ht && ht.indexOf('Shortcut') < 0) {
-                el.setAttribute('data-hint-title', ht + ' · Shortcut ' + text);
-            }
+            /* The hover CARD says the shortcut in its own line (hint.js), so nothing is appended to
+               data-hint-title here — that was the same key arriving twice for card-bearing controls. */
         }
         [['#ofapPause', 'freeze'], ['#menuBtn', 'palette'], ['#btnStart', 'engine-start'],
          ['#btnStop', 'engine-stop'], ['#railTerminal', 'terminal-toggle'],
@@ -348,9 +386,11 @@
             document.querySelectorAll(r[0]).forEach(function (el) { put(el, accelOf(r[1])); });
         });
         /* T4/A-corr: the digits number VIEW items — the Setup button (no data-view) would
-           otherwise take "1" and shift every view's displayed digit by one. */
+           otherwise take "1" and shift every view's displayed digit by one. Every rail item is
+           visited (out of range ⇒ no phrase), so an item that loses its digit gets its base title
+           back instead of keeping a stale "Press 9". */
         document.querySelectorAll('.rail .nav-item[data-view]').forEach(function (el, i) {
-            if (i < 9) put(el, String(i + 1));                        // the view-switch row, in order
+            put(el, i < 9 ? String(i + 1) : '');
         });
     }
 
@@ -389,13 +429,78 @@
         return false;
     }
 
+    /* §117 — the rebinding half, DOM-free so the selftest can pin it. The shapes here are
+       deliberately conservative: the capture UI only ever hands in canonical() output, and the
+       config sanitiser remains the authority on what a chord may look like on disk. An override
+       set to an EMPTY list is not "no override": it is the request to forget a stored one, which
+       overridesMap() then carries to the config (a merge cannot drop a key without it). */
+    function applyOverrides(src) {
+        overrides = Object.create(null);
+        if (src && typeof src === 'object') {
+            Object.keys(src).forEach(function (id) {
+                var chords = src[id];
+                if (!Array.isArray(chords)) return;
+                var clean = chords.map(function (c) { return String(c || '').trim().toLowerCase(); })
+                    .filter(function (c) { return c && c.length <= 24 && !/\s/.test(c); });
+                if (clean.length) overrides[String(id).toLowerCase()] = clean;
+            });
+        }
+        return Object.keys(overrides).length;
+    }
+
+    function rebind(id, chords) {
+        var list = (Array.isArray(chords) ? chords : [chords]).map(function (c) {
+            return String(c || '').trim().toLowerCase();
+        }).filter(function (c) { return c && c.length <= 24 && !/\s/.test(c); });
+        if (!list.length) return false;
+        for (var i = 0; i < map.length; i += 1) {
+            if (map[i].id === id) { overrides[id] = list; return true; }
+        }
+        return false;
+    }
+
+    function clearOverride(id) {
+        /* Emptying (not deleting) is the marker the save path carries to the config:
+           a merge cannot drop a key, but the store rebuilds the block and drops []. */
+        overrides[id] = [];
+        return true;
+    }
+
+    function clearAllOverrides() {
+        Object.keys(overrides).forEach(function (id) { overrides[id] = []; });
+        return true;
+    }
+
+    function overridesMap() {
+        var out = {};
+        Object.keys(overrides).forEach(function (id) { out[id] = overrides[id].slice(); });
+        return out;
+    }
+
+    /* Who else holds this chord. The dispatcher resolves ties by priority silently; the rebind
+       flow refuses instead, naming every owner, so a user never steals a key they cannot see. */
+    function conflicts(chord, excludeId) {
+        var out = [];
+        for (var i = 0; i < map.length; i += 1) {
+            var b = map[i];
+            if (!b.run || b.id === excludeId) continue;
+            if (keysFor(b).indexOf(chord) >= 0) {
+                out.push({ id: b.id, label: b.label, scope: b.scope, priority: b.priority || 0 });
+            }
+        }
+        return out;
+    }
+
     window.OFAPKEYS = {
         bind: bind, document: documentRows, list: list, run: run, dispatch: dispatch,
         armed: function () { return armed; }, setArmed: setArmed,
         canDispatch: canDispatch,
-        annotate: annotate, accelOf: accelOf,
+        annotate: annotate, accelOf: accelOf, shortcutPhrase: shortcutPhrase,
         resolve: resolve, canonical: canonical, pretty: pretty, keysText: keysText,
         isTypingTarget: isTypingTarget, inView: inView, recent: recent,
         map: function () { return map; },
+        keysFor: keysFor, applyOverrides: applyOverrides, rebind: rebind,
+        clearOverride: clearOverride, clearAllOverrides: clearAllOverrides,
+        overrides: overridesMap, conflicts: conflicts,
     };
 })();

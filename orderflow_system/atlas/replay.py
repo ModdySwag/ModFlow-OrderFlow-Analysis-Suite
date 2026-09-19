@@ -74,6 +74,14 @@ class MarketReplay:
     # ── loading ───────────────────────────────────────────────
     async def load(self, symbol: str, start_ms: Optional[int] = None, end_ms: Optional[int] = None) -> dict[str, Any]:
         st = self.status_obj
+        # MEM-A1-11: a load starts from nothing. Holding the previous symbol's rows (and counts)
+        # behind the new label meant a failed load left stale rows playing under a name that no
+        # longer matched them; the rows were also never released (no reset() caller anywhere).
+        self._rows = []
+        st.total = 0
+        st.index = 0
+        st.mode = ""
+        st.current_ms = 0
         st.symbol = symbol
         st.error = ""
         start = int(start_ms or 0)
@@ -122,6 +130,10 @@ class MarketReplay:
         """Seed a replay from the exchange tape when the local DB is empty."""
         from orderflow_system.atlas import feed_extras
         st = self.status_obj
+        self._rows = []                              # MEM-A1-11: same reset as load()
+        st.total = 0
+        st.index = 0
+        st.current_ms = 0
         st.symbol = symbol
         try:
             trades = await asyncio.to_thread(feed_extras.fetch_recent_trades, symbol, limit)

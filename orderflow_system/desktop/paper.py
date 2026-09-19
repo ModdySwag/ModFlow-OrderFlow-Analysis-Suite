@@ -273,6 +273,40 @@ class PaperAccount:
             return []
         return [self._exit("flatten", px, ts_ms)]
 
+    # ── the bracket, edited as a pair ────────────────────────────────────────────────────
+
+    def set_exits(self, *, stop_loss: Any = None, take_profit: Any = None,
+                  ts_ms: int = 0) -> dict[str, Any]:
+        """Replace the open position's exits — a bracket is one intent pair, edited in one call.
+
+        Both fields mean "what the position carries afterwards": a positive price sets it,
+        ``None`` clears it, and anything else is refused with the sentence (junk must never
+        silently clear a stop). Refused while flat: an exit without a position is a resting
+        order, and this account models those separately. Whether either level ever fills stays
+        the tape's call, exactly as at submission.
+        """
+        if self._net == 0:
+            return {"ok": False, "reason": "no open position — exits belong to a position, not to the book"}
+        clean: dict[str, Any] = {}
+        for field, value in (("stop_loss", stop_loss), ("take_profit", take_profit)):
+            if value is None or value == "":
+                clean[field] = None
+                continue
+            out = _number(value)
+            if out is None or out <= 0:
+                return {"ok": False,
+                        "reason": f"{field} must be a positive price, or empty to clear it"}
+            clean[field] = out
+        changed = (clean["stop_loss"] != self._stop_loss) or (clean["take_profit"] != self._take_profit)
+        self._stop_loss = clean["stop_loss"]
+        self._take_profit = clean["take_profit"]
+        return {"ok": True, "changed": changed, "stop_loss": self._stop_loss,
+                "take_profit": self._take_profit, "ts_ms": _ms(ts_ms)}
+
+    def exits(self) -> dict[str, Any]:
+        """The open position's exits as the UI edits them: a price, or ``None`` when unset."""
+        return {"stop_loss": self._stop_loss, "take_profit": self._take_profit}
+
     def _fill(self, order: dict[str, Any], price: float, ts_ms: int, reason: str) -> dict[str, Any]:
         """Fill one order at ``price`` — the level it named, or the print for a market order."""
         order["status"] = "filled"

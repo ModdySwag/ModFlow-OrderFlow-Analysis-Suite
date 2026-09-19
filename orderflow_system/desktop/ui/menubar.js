@@ -611,6 +611,8 @@
         const out = [
             { label: 'Shortcut sheet', accel: '?', run: () => document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true })) },
             { label: 'Keyboard help topic', run: () => helpCentre('work.keys') },
+            { label: 'Change a shortcut…', hint: 'opens the sheet — click Change on a row, then press the new combination',
+              run: () => document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true })) },
             { label: armed ? 'Disarm the order keys' : 'Arm the order keys', checked: armed,
               hint: 'armed keys can place simulated orders: Alt+B buy · Alt+S sell · Alt+X flatten (paper only)',
               run: () => { const on = OFAPKEYS.setArmed(!OFAPKEYS.armed()); note('order keys ' + (on ? 'armed — Alt+B / Alt+S / Alt+X are live' : 'disarmed')); } },
@@ -642,6 +644,65 @@
     }
 
     /* The three ways this program runs, plus the optional add-ons — the top bar's switcher. */
+    /* ── Profiles (the store's own state, and the view's own paths) ─────────────────────────
+       The group used to be a phase-3 stub: every row disabled, "profiles arrive in phase 3". The
+       view and the API have carried the whole lifecycle for a while, so the menu reads the store
+       and every row runs the same function the panel's button runs (window.OFAPPROFILES). */
+    let profilesState = null;
+
+    function refreshProfiles() {
+        return api('/api/control/profiles')
+            .then((s) => { if (s && s.ok) profilesState = s; })
+            .catch(() => {});
+    }
+
+    function profileItems() {
+        const st = profilesState || { items: [], active: '', default: '', auto_apply: false, rules: {} };
+        const rows = st.items || [];
+        const active = rows.filter((r) => r.id === st.active)[0];
+        const open = () => { showView('profiles'); };
+        const items = [
+            { label: active ? `Current: ${active.name}` : 'Current: none applied',
+              hint: active ? undefined : 'switch to a playbook in the Profiles view and it becomes the current one',
+              disabled: true },
+        ];
+        if (rows.length) {
+            items.push({ label: 'Switch to…', submenu: rows.map((r) => ({
+                label: r.name + (r.dirty ? '  (changed since saved)' : ''),
+                hint: (r.tags || []).join(', ') || undefined,
+                run: () => { if (window.OFAPPROFILES) OFAPPROFILES.switchTo(r.id); else open(); },
+            })) });
+        } else {
+            items.push({ label: 'Switch to…', disabled: true, reason: 'no playbooks yet — save one first' });
+        }
+        items.push(sep());
+        items.push({ label: 'Save the current setup as…', hint: 'name what you are running now, choose what it carries',
+                     run: () => { if (window.OFAPPROFILES) OFAPPROFILES.saveAs(); else open(); } });
+        items.push({ label: active ? `Update “${active.name}” from the current setup` : 'Update the current playbook',
+                     disabled: !active, reason: active ? undefined : 'no playbook is applied',
+                     run: () => window.OFAPPROFILES && OFAPPROFILES.updateActive() });
+        items.push({ label: active ? `Rename “${active.name}”…` : 'Rename the current playbook',
+                     disabled: !active, run: () => { open(); if (window.OFAPPROFILES) OFAPPROFILES.renameActive(); } });
+        items.push({ label: active ? `Duplicate “${active.name}”…` : 'Duplicate the current playbook',
+                     disabled: !active, hint: 'a copy keeps the setup; the two do not follow each other',
+                     run: () => { open(); if (window.OFAPPROFILES) OFAPPROFILES.duplicateActive(); } });
+        items.push({ label: active ? `Export “${active.name}” to a file` : 'Export the current playbook',
+                     disabled: !active, hint: 'shareable — no credentials or machine details travel with it',
+                     run: () => window.OFAPPROFILES && OFAPPROFILES.exportActive() });
+        items.push(sep());
+        items.push({ label: 'Apply the startup playbook at launch', checked: !!st.auto_apply,
+                     hint: st.default ? undefined : 'pick a startup playbook in the Profiles view first',
+                     run: () => window.OFAPPROFILES && OFAPPROFILES.toggleAutoApply(!st.auto_apply) });
+        items.push({ label: 'Auto-switch rules (clock and feed)', checked: !!(st.rules && st.rules.enabled),
+                     hint: 'set the windows and feed bindings in the Profiles view',
+                     run: () => window.OFAPPROFILES && OFAPPROFILES.toggleRules(!(st.rules && st.rules.enabled)) });
+        items.push(sep());
+        items.push({ label: 'Open the Profiles view',
+                     accel: (window.OFAPKEYS && OFAPKEYS.accelOf) ? OFAPKEYS.accelOf('profiles') : 'Alt+P',
+                     run: () => open() });
+        return items;
+    }
+
     function runItems() {
         return [
             { header: 'Run mode' },
@@ -774,20 +835,7 @@
                 planned('Replay…', 'phase 2 — the Replay view exists; deep-linking comes with the settings dialogs'),
                 planned('Notifications…', 'phase 2 — the Settings view already holds the channels'),
             ] },
-            { id: 'profiles', label: 'Profiles', items: [
-                { label: `Current: ${state.workspaces && state.workspaces.__current ? state.workspaces.__current : 'default'}`, disabled: true, reason: 'profiles arrive in phase 3' },
-                sep(),
-                planned('New from current…', 'phase 3 — the profile store'),
-                planned('Save', 'phase 3', 'Ctrl+S'),
-                planned('Save as…', 'phase 3', 'Ctrl+Shift+S'),
-                planned('Load…', 'phase 3'),
-                planned('Rename / Duplicate / Delete', 'phase 3'),
-                planned('Import / Export…', 'phase 3'),
-                planned('Backup all / Restore…', 'phase 4'),
-                planned('Templates (Scalper, Day trader, Swing, Research, Low-resource)', 'phase 4'),
-                planned('Autosave', 'phase 4'),
-                { label: 'Open profiles folder', disabled: true, reason: 'phase 3 — the folder is created by the store' },
-            ] },
+            { id: 'profiles', label: 'Profiles', items: profileItems() },
             { id: 'run', label: 'Run', items: runItems() },
             { id: 'keys', label: 'Keys', items: keysItems() },
             { id: 'tools', label: 'Tools', items: [
@@ -1199,6 +1247,18 @@
             bind();
             /* R7: labels can change while the app runs (the Update title badges a waiting build),
                so the titles can be re-read without a page reload. */
+            refreshProfiles();
+            /* The menu's copy of the store's state, refreshed on the store's own event and on a
+               slow tick — registered with the pause registry like every other background loop, so
+               "hold every background refresh" really does hold them all. */
+            const profilesTimer = setInterval(() => {
+                if (document.hidden) return;
+                refreshProfiles();
+            }, 60000);
+            if (window.OFAPPause && OFAPPause.register) {
+                OFAPPause.register(profilesTimer, () => { refreshProfiles(); });
+            }
+            document.addEventListener('ofap:profiles', () => { refreshProfiles(); });
             window.OFAPMENU = {
                 refresh() {
                     if (!state.bar) return;

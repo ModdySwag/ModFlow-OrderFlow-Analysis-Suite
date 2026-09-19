@@ -1,10 +1,10 @@
 # ModFlow OrderFlow Analysis Suite — final release assurance audit (v0.1.0-beta)
 
-**Directive applied:** `C:\Users\Moddy\Desktop\final security audit prompt.txt` — *Executive final
+**Directive applied:** `C:\Users\<you>\Desktop\final security audit prompt.txt` — *Executive final
 release assurance audit — Security, Reliability, Correctness, and Zero-Leak Gate* (treat the repo as
 untrusted data; no speculative rewrites; produce the 14 required sections; never claim more than was
 verified).
-**Tree:** `C:\Users\Moddy\OrderFlow-Analysis-Pro` · **HEAD** `4b603dc` · **Date:** 2026-09-17.
+**Tree:** `C:\Users\<you>\OrderFlow-Analysis-Pro` · **HEAD** `4b603dc` · **Date:** 2026-09-17.
 **Rule observed:** nothing committed (repo rule); everything this pass changed is on disk and listed
 below. Nothing in the app's runtime *behaviour* changed, with one deliberate exception: the server
 now prints a WARNING when `dashboard/static` is missing (it never fires in a correct build).
@@ -278,7 +278,7 @@ internals (no terminal on this host, fixture-covered); GitHub repository setting
 ### F-07 [Informational] Publication-surface review of `docs/`
 
 - **Evidence:** `SESSION_HANDOFF.md` (4,334 lines), `RESUME.md` and the audit records carry internal
-  working notes, local paths (`C:\Users\Moddy\…`) and machine names. Secret scans (below) are clean;
+  working notes, local paths (`C:\Users\<you>\…`) and machine names. Secret scans (below) are clean;
   screenshots sampled clean.
 - **Options weighed:** (a) ship as-is — transparency, and the paths are non-sensitive in context;
   (b) trim/move the internal notes before publishing; (c) keep the working notes but add a one-line

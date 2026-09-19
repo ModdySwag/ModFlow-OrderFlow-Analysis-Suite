@@ -83,6 +83,10 @@ class VolumeProfileEngine:
 
         volume_at_price: dict[float, float] = defaultdict(float)
         tick_size = self.config.tick_size
+        # SEC-14: candles without a footprint get their volume spread evenly across their range —
+        # fabricated distribution. Counted so the profile can be labelled "derived" wherever it
+        # is shown instead of passing the smear off as a measured read.
+        derived = 0
 
         for candle in candles:
             if candle.footprint:
@@ -91,17 +95,28 @@ class VolumeProfileEngine:
                     rounded = round(round(price / tick_size) * tick_size, 10)
                     volume_at_price[rounded] += fp.total_volume
             else:
-                # Fallback: distribute candle volume evenly across OHLC range
+                # Fallback: distribute candle volume evenly across OHLC range (SEC-14: counted)
+                if candle.volume > 0:
+                    derived += 1
                 low = round(round(candle.low / tick_size) * tick_size, 10)
                 high = round(round(candle.high / tick_size) * tick_size, 10)
-                n_levels = max(1, int((high - low) / tick_size) + 1)
+                # C-10: cap the level count the way the API route does (500) AND step by the
+                # resulting spacing, not by tick_size — the loop itself was the cost (~1M
+                # iterations, ~1.2 s of main thread, per candle at a tick finer than range/500).
+                n_levels = max(1, min(500, int((high - low) / tick_size) + 1))
                 vol_per_level = candle.volume / n_levels
-                price = low
-                while price <= high + tick_size / 2:
-                    volume_at_price[round(price, 10)] += vol_per_level
-                    price += tick_size
+                step = (high - low) / (n_levels - 1) if n_levels > 1 else 0.0
+                if step <= 0:
+                    volume_at_price[round(low, 10)] += candle.volume
+                else:
+                    price = low
+                    while price <= high + step / 2:
+                        volume_at_price[round(price, 10)] += vol_per_level
+                        price += step
 
-        return self._compute_profile(dict(volume_at_price), session_date)
+        result = self._compute_profile(dict(volume_at_price), session_date)
+        result.derived_candles = derived
+        return result
 
     def merge_profiles(
         self, profiles: list[VolumeProfileResult]
@@ -127,6 +142,9 @@ class VolumeProfileEngine:
             dict(merged_vap),
             session_date=f"{dates[0]}_to_{dates[-1]}",
         )
+        # SEC-14: a composite is only as measured as its inputs — carry the sum of the
+        # footprint-less counts so the "derived" label survives the merge.
+        result.derived_candles = sum(int(p.derived_candles or 0) for p in profiles)
         return result
 
     def _compute_profile(

@@ -225,3 +225,40 @@ def test_the_assets_route_answers_unlinked_without_keys_and_serves_the_list_with
     monkeypatch.setattr(api, "_alpaca_asset_symbols", lambda: ["SPY", "QQQ"])
     out2 = asyncio.run(api.alpaca_assets())
     assert out2["linked"] is True and out2["symbols"] == ["SPY", "QQQ"] and out2["total"] == 2
+
+
+# ── MEM-B-09: the normalised Alpaca index is built once per refresh ──────────────────────────
+def test_the_alpaca_index_is_built_once_per_refresh(monkeypatch):
+    from orderflow_system.desktop import api, instrument_lookup
+
+    class _Assets:
+        def assets(self, force: bool = False):
+            return [{"symbol": s} for s in ("SPY", "QQQ", "AAPL")]
+
+    calls = {"n": 0}
+    real = instrument_lookup.normalise
+
+    def counting(value):
+        calls["n"] += 1
+        return real(value)
+
+    monkeypatch.setattr(instrument_lookup, "normalise", counting)
+    api._ALPACA_SYMBOLS_CACHE.update({"at": 0.0, "symbols": [], "by_norm": {}})
+    monkeypatch.setattr(api, "_search_data", lambda: _Assets())
+
+    symbols = api._alpaca_asset_symbols()
+    warm = calls["n"]
+    index = api._alpaca_asset_index()
+    assert api._alpaca_asset_symbols() == symbols
+    assert calls["n"] == warm, "a warm cache rebuilds no maps"
+    assert index == {"SPY": "SPY", "QQQ": "QQQ", "AAPL": "AAPL"}
+
+    cfg = {"instruments": [], "data_source": "alpaca"}
+    calls["n"] = 0
+    api._resolve_instrument("SPY", cfg, alpaca_names=symbols, alpaca_by_norm=index)
+    with_index = calls["n"]
+    calls["n"] = 0
+    api._resolve_instrument("SPY", cfg, alpaca_names=symbols)
+    without_index = calls["n"]
+    assert with_index < without_index, \
+        f"the prebuilt index skips the per-call map build ({with_index} vs {without_index})"

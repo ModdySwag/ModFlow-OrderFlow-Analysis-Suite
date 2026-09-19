@@ -50,6 +50,10 @@ class Tick:
     size: float                # Contracts / quantity
     side: Side                 # Aggressor side (taker)
     trade_id: str = ""
+    #: True when this print came out of the replay loader rather than a venue (audit SEC-04).
+    #: The hub stamps nothing and the tape never invents — this only lets every consumer tell
+    #: history from news, which is what the alert channels needed.
+    replay: bool = False
 
     @property
     def timestamp(self) -> float:
@@ -228,6 +232,13 @@ class VolumeProfileResult:
     lvn_levels: list[float] = field(default_factory=list)
     shape: str = "unknown"                         # p_shape, b_shape, d_shape, double_dist
     poc_position_pct: float = 0.5                  # POC position within range (0=bottom, 1=top)
+    #: SEC-14: how many candles had NO footprint — their volume was spread evenly across the
+    #: candle's range, so POC/VA/shape read partly fabricated. >0 must be labelled "derived".
+    derived_candles: int = 0
+
+    @property
+    def derived(self) -> bool:
+        return self.derived_candles > 0
 
     @property
     def value_area_range(self) -> float:

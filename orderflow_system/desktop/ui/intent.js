@@ -44,13 +44,16 @@
         if (!surface) return;
         let l = leases[surface];
         if (!l) { l = leases[surface] = { until: 0, last: 0, timer: 0, count: 0 }; }
+        const wasHeld = !S.frozen && nowMs() < l.until;   // C-08: an already-held surface is not re-announced
         const span = Math.max(400, Math.min(LEASE_MAX_MS, ms || 1500));
         l.until = nowMs() + span;
         l.last = nowMs();
         l.count += 1;
         S.holds = Object.keys(leases).length;
         paint();
-        document.dispatchEvent(new CustomEvent('ofap:hold', { detail: { surface: surface, until: l.until } }));
+        if (!wasHeld) {
+            document.dispatchEvent(new CustomEvent('ofap:hold', { detail: { surface: surface, until: l.until } }));
+        }
         if (l.timer) clearTimeout(l.timer);
         l.timer = setTimeout(function () { release(surface); }, span + GRACE_MS);
     }
@@ -206,7 +209,9 @@
     }
 
     function setStrips(n) {
-        S.strips = Number(n) || 0;
+        const value = Number(n) || 0;
+        if (S.strips === value) return;          // C-01: an unchanged count is not a repaint
+        S.strips = value;
         paint();
     }
 
@@ -246,7 +251,20 @@
         return el;
     }
 
+    /* C-08: every input event leases, and every lease used to repaint immediately — a wheel
+       scroll repainted the chip and the [data-surf] registry dozens of times a second. One
+       repaint per animation frame. */
+    let paintPending = false;
+
     function paint() {
+        if (paintPending) return;
+        paintPending = true;
+        const run = function () { paintPending = false; paintNow(); };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+        else setTimeout(run, 16);
+    }
+
+    function paintNow() {
         const st = status();
         /* A strip holding a reader's place is also "the view is held": show the same chip. */
         if (!st.frozen && !st.holds && st.strips) st.holds = 1;

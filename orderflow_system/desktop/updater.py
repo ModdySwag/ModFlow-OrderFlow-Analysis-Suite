@@ -34,14 +34,19 @@ from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
-#: The public repository the artefacts ship from. Owner-configurable in code only: this is the
-#: product's own address, not a user preference.
-REPO = "ModdySwag/ModFlow-OrderFlow-Analysis-Suite"
+#: The repository the ARTEFACTS live in — releases are published here (audit SEC-25: this used
+#: to name the source repository, which carries no releases, so every installed build silently
+#: read "up to date" forever and no security fix could ever reach a user). Owner-configurable in
+#: code only: this is the product's own address, not a user preference.
+REPO = "ModdySwag/ModFlow-beta-builds"
 RELEASES_URL = f"https://api.github.com/repos/{REPO}/releases?per_page=20"
 RELEASE_PAGE = f"https://github.com/{REPO}/releases"
 
 #: Channel order for the same version number — a stable build outranks its own release candidates.
 _CHANNEL_RANK = {"dev": 0, "alpha": 1, "beta": 2, "rc": 3, "": 4, "stable": 4, "final": 4}
+
+#: SEC-11: no update artefact is legitimately larger than this (the installer is ~36 MB).
+MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "mode": "check",              # check = tell me; download = fetch the artefact too
@@ -177,7 +182,14 @@ def _default_opener(url: str, timeout: float):            # pragma: no cover - t
 
 def _read(opener: Callable[..., Any], url: str, timeout: float) -> bytes:
     response = opener(url, timeout)
-    data = response.read() if hasattr(response, "read") else response
+    try:
+        data = response.read() if hasattr(response, "read") else response
+    finally:
+        # An urllib response is a socket wrapper: leaving it to the GC held the connection
+        # (audit A-07). A fake opener returning bytes has no close and is skipped.
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
     return bytes(data)
 
 
@@ -290,6 +302,37 @@ def resolved_download_dir(settings: dict[str, Any], config_dir: Path | str) -> P
     return Path(raw) if raw else default_download_dir(config_dir)
 
 
+def prune_update_folder(folder: Path, keep: Path, *, now: Optional[float] = None,
+                        max_part_age_s: float = 86_400.0) -> int:
+    """Remove superseded installers and stale partials from the updates folder (F-03).
+
+    Pure-ish and testable: keeps `keep`, removes other files matching the product's naming
+    pattern, and removes `*.part` files older than a day (a download that was killed).
+    """
+    import time as _time
+
+    stamp = _time.time() if now is None else float(now)
+    removed = 0
+    try:
+        entries = sorted(folder.iterdir())
+    except OSError:
+        return 0
+    for entry in entries:
+        try:
+            if entry == keep or not entry.is_file():
+                continue
+            name = entry.name
+            if name.startswith("ModFlowOrderFlowAnalysisSuite-") and name != keep.name:
+                entry.unlink()
+                removed += 1
+            elif name.endswith(".part") and stamp - entry.stat().st_mtime >= max_part_age_s:
+                entry.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def download_asset(url: str, dest_dir: Path | str, *, name: str = "", opener: Optional[Callable[..., Any]] = None,
                    expected_sha256: str = "", timeout: float = 60.0,
                    progress: Optional[Callable[[int, int], None]] = None) -> dict[str, Any]:
@@ -300,6 +343,11 @@ def download_asset(url: str, dest_dir: Path | str, *, name: str = "", opener: Op
     expected to show that). A mismatch deletes the partial file and reports both digests.
     """
     opener = opener or _default_opener
+    scheme = str(url or "").split(":", 1)[0].strip().lower()
+    if scheme not in ("http", "https"):
+        # SEC-10: the old code accepted any URL the caller supplied — `file:///C:/Windows/win.ini`
+        # was copied into the updates folder in the audit's probe. Downloads are http(s) only.
+        return {"ok": False, "error": f"refused update URL scheme {scheme or '(none)'!r} — http(s) only"}
     folder = Path(dest_dir)
     try:
         folder.mkdir(parents=True, exist_ok=True)
@@ -313,14 +361,21 @@ def download_asset(url: str, dest_dir: Path | str, *, name: str = "", opener: Op
     try:
         response = opener(url, timeout)
         total = int(getattr(response, "headers", {}) and response.headers.get("Content-Length") or 0)
+        if total > MAX_DOWNLOAD_BYTES:
+            # SEC-11: the stream was unbounded — a hostile or broken endpoint could fill the disk,
+            # and the progress callback was the only thing that ever looked at Content-Length.
+            return {"ok": False, "error": f"refused: {total} bytes is over the {MAX_DOWNLOAD_BYTES} cap"}
         with part.open("wb") as handle:
             while True:
                 block = response.read(262144)
                 if not block:
                     break
+                written += len(block)
+                if written > MAX_DOWNLOAD_BYTES:
+                    part.unlink(missing_ok=True)
+                    return {"ok": False, "error": f"refused: download passed the {MAX_DOWNLOAD_BYTES} cap"}
                 handle.write(block)
                 digest.update(block)
-                written += len(block)
                 if progress is not None:
                     try:
                         progress(written, total)
@@ -337,5 +392,10 @@ def download_asset(url: str, dest_dir: Path | str, *, name: str = "", opener: Op
         return {"ok": False, "error": f"checksum mismatch — expected {expected_sha256[:16]}…, "
                                       f"downloaded {got[:16]}…", "sha256": got}
     part.replace(target)
+    # F-03: the updates folder kept one full installer per release forever. After a successful
+    # download, prune the product's other installers (and stale partials) it supersedes.
+    pruned = prune_update_folder(folder, keep=target)
+    if pruned:
+        logger.info("update download: pruned %d superseded file(s) from %s", pruned, folder)
     logger.info("[update] downloaded %s (%d bytes, verified=%s)", target, written, verified)
     return {"ok": True, "path": str(target), "bytes": written, "sha256": got, "verified": verified}

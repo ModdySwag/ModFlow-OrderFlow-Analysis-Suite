@@ -96,8 +96,12 @@ def test_junk_trades_are_dropped_not_guessed():
     assert normalize_stock_trade({"T": "t", "p": 0, "s": 10}) is None
     assert normalize_stock_trade({"T": "t", "p": None}) is None
     assert normalize_stock_trade("not a dict") is None
-    tick = normalize_stock_trade({"T": "t", "S": "AAPL", "p": "182.5", "s": "7"})
-    assert tick.price == 182.5 and tick.size == 7.0 and tick.timestamp_ms == 0
+    # A trade with no usable timestamp is dropped, not stamped 1970: a print inside the live
+    # bar carried forward a phantom print (audit D-06). normalize_bar already rejected ts == 0.
+    assert normalize_stock_trade({"T": "t", "S": "AAPL", "p": "182.5", "s": "7"}) is None
+    stamped = normalize_stock_trade({"T": "t", "S": "AAPL", "p": "182.5", "s": "7",
+                                     "t": "2026-09-15T13:30:00Z"})
+    assert stamped is not None and stamped.price == 182.5 and stamped.size == 7.0
 
 
 # ── quotes ──────────────────────────────────────────────────────────────

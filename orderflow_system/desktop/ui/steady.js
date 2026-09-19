@@ -178,7 +178,13 @@ function steadyStyles() {
     document.head.appendChild(st);
 }
 
+let steadyBadgeAt = 0;
 function steadyBadge() {
+    /* D-13: this runs on every input/pointer/wheel event and reads layout (offsetParent) three
+       times per call. At most one real evaluation per 250 ms; the badge is a hint, not a meter. */
+    const nowAt = Date.now();
+    if (nowAt - steadyBadgeAt < 250) return;
+    steadyBadgeAt = nowAt;
     steadyStyles();
     let el = document.getElementById('steadyBadge');
     if (!el) {
@@ -277,5 +283,8 @@ function steadyWrapRenderers() {
         if (tries < 60) setTimeout(tick, 500);      // late-defined functions get wrapped too
     };
     tick();
-    setInterval(steadyWrapRenderers, 10000);        // and any that appear later
+    setInterval(() => {                             // and any that appear later
+        if (document.hidden || window.OFAP_PAUSED) return;   // D-13: a held board sweeps nothing
+        steadyWrapRenderers();
+    }, 10000);
 })();

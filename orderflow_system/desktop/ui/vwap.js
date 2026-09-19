@@ -179,7 +179,7 @@ function detectorRender(list, refills, sub) {
                 <span class="dd-side ${e.side === 'buy' ? 'buy' : 'sell'}">${e.side}</span>
                 <span class="dd-main">${vwapFmt(e.size)} @ ${vwapFmt(e.price)}
                     <span class="dd-dim">— took ${(e.share * 100).toFixed(0)}% of ${vwapFmt(e.resting)} resting</span></span>
-                ${refill ? '<span class="dd-tag" title="the level refilled after being eaten — refreshed liquidity (inferred)">refilled</span>' : ''}
+                ${refill ? '<span class="dd-tag" title="The level refilled after being eaten — refreshed liquidity (inferred)">refilled</span>' : ''}
                 <span class="dd-dim">${t}</span></div>`;
         }).join('');
     }

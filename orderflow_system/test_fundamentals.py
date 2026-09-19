@@ -427,9 +427,11 @@ def test_the_declared_user_agent_names_the_app_and_a_contact():
     from this machine with both a good and a sloppy UA, so the constant is not decoration."""
     from orderflow_system.desktop import edgar
     agent = edgar.USER_AGENT
-    assert re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]+/[0-9]+\.[0-9]+ \([^)]*@[^)]*\)$", agent), agent
+    assert re.match(
+        r"^[A-Za-z0-9][A-Za-z0-9._-]+/[0-9]+\.[0-9]+ \((?:[^)]*@[^)]*|[^)]*https?://[^)]*)\)$",
+        agent), agent
     assert _read(MODULE).count("USER_AGENT = ") == 1, "one constant, one place to change it"
-    assert "@" in agent and len(agent) < 120
+    assert ("@" in agent or "https://" in agent) and len(agent) < 120
 
 
 def test_every_request_carries_that_user_agent():
@@ -479,6 +481,36 @@ def test_answers_are_cached_and_the_spacing_is_polite():
     spaced._get_json("https://example.invalid/a")
     spaced._get_json("https://example.invalid/b")
     assert waited and 0 < waited[0] <= _edgar.MIN_INTERVAL_S + 0.01, waited
+
+
+def test_the_cache_is_bounded_and_sweeps_expired_keys_first():
+    """MEM-B-03: parsed companyfacts documents are megabytes each — the map is capped, and an
+    insert past the TTL reclaims the expired ones instead of keeping the whole session."""
+    from orderflow_system.desktop import edgar
+
+    class _Clock:
+        def __init__(self) -> None:
+            self.now = 1000.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = _Clock()
+    stub = _Stub()
+    service = _service(stub, clock=clock, ttl_facts_s=60.0, max_cache_entries=4)
+
+    for n in range(10):
+        service.company_facts(f"{n:010d}")
+    assert len(service._cache) <= 4, "the facts cache must be bounded by construction"
+    assert len(stub.calls) == 10, "every distinct filer really was fetched"
+
+    service.company_facts(f"{9:010d}")                    # a fresh hit costs nothing
+    assert len(stub.calls) == 10
+
+    clock.now += 61.0                                     # every held entry is now expired
+    service.company_facts("9999999999")
+    assert len(service._cache) == 1, "the sweep reclaims expired keys before the cap is needed"
+    assert edgar.MAX_CACHE_ENTRIES >= 8, "the shipped cap covers a browsing session"
 
 
 # ──────────────────────────────────────────────────────────────
@@ -655,3 +687,25 @@ def test_the_wiring_is_all_or_nothing_in_index_html():
         assert html.index('src="/desktop/ui.js"') < html.index(script), "and after the controller"
     else:
         assert 'data-view="fundamentals"' not in html, "the section arrived without its script tag"
+
+
+# ── MEM-B-08: the filer's reduction is cached, not recomputed per request ────────────────────
+def test_the_filer_reduction_is_cached_not_recomputed(monkeypatch):
+    from orderflow_system.desktop import edgar
+
+    stub = _Stub()
+    service = _service(stub)
+    calls = {"n": 0}
+    real = edgar.reduce_company_facts
+
+    def counting(doc):
+        calls["n"] += 1
+        return real(doc)
+
+    monkeypatch.setattr(edgar, "reduce_company_facts", counting)
+    service.payload("AAPL")
+    service.payload("AAPL")
+    service.payload("AAPL")
+
+    assert calls["n"] == 1, f"the document was reduced {calls['n']} times for three requests"
+    assert len(stub.calls) == 2, "the ticker map and the facts: one fetch each"

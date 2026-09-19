@@ -87,7 +87,17 @@ function boot(opts) {
         && K.pretty('space') === 'Space');
     const digits = { keys: ['1', '2', '3', '4', '5', '6', '7', '8', '9'] };
     check('keysText: a run of digits collapses to 1 \u2026 9', K.keysText(digits) === '1 \u2026 9');
-    check('keysText: aliases render in full', K.keysText({ keys: ['=', '+'] }) === '= / +');
+    /* Hover-info audit: alternatives now read " or " — "= / +" was ambiguous, and a binding whose
+       key IS the slash rendered as "Ctrl+K / /". */
+    check('keysText: aliases render in full', K.keysText({ keys: ['=', '+'] }) === '= or +');
+    check('keysText: a slash key is unambiguous', K.keysText({ keys: ['ctrl+k', '/'] }) === 'Ctrl+K or /');
+    /* The rail digits are spoken as an instruction, not as a key called 8, and the same helper
+       feeds the tooltip suffix and the hover card's line (one source of truth). */
+    check('shortcutPhrase: a digit reads as a press instruction',
+        K.shortcutPhrase('8') === 'Press 8 to switch to this panel', K.shortcutPhrase('8'));
+    check('shortcutPhrase: a chord reads as a shortcut',
+        K.shortcutPhrase('Ctrl+Alt+T') === 'Shortcut Ctrl+Alt+T', K.shortcutPhrase('Ctrl+Alt+T'));
+    check('shortcutPhrase: nothing in, nothing out', K.shortcutPhrase('') === '');
 }
 
 /* ── resolution rules ────────────────────────────────────────────────────── */
@@ -250,6 +260,47 @@ function boot(opts) {
     K.setArmed(false);
     press();
     check('armed gate: disarming takes it inert again', fired === 1);
+}
+
+/* ── the user’s own chords: rebinding, conflicts, reset (§117) ── */
+
+{
+    const { K } = boot();
+    K.bind({ id: 'rb', keys: ['t'], label: 'rebind me', scope: 'Global', run() {} });
+    check('rebind: the override replaces the chord and resolution follows it',
+        K.rebind('rb', ['ctrl+alt+9']) === true
+        && K.resolve('ctrl+alt+9', keyEv('9', { ctrl: true, alt: true }), {}).id === 'rb'
+        && K.resolve('t', keyEv('t'), {}) === null);
+
+    const row = K.list().filter((r) => r.id === 'rb')[0];
+    check('rebind: the sheet marks the row custom and keeps the shipped default readable',
+        row.custom === true && row.keys === 'Ctrl+Alt+9' && row.defaults === 'T');
+
+    check('conflicts: a taken chord names its owner, and never the edited row itself',
+        K.conflicts('ctrl+alt+9', 'someone-else').length === 1
+        && K.conflicts('ctrl+alt+9', 'rb').length === 0);
+
+    check('rebind: junk chords are refused (nothing is cleared behind the user’s back)',
+        K.rebind('rb', ['']) === false && K.rebind('rb', ['a b']) === false
+        && K.overrides().rb[0] === 'ctrl+alt+9');
+
+    K.clearOverride('rb');
+    check('reset: the shipped chord is back and the row is no longer custom',
+        K.resolve('t', keyEv('t'), {}).id === 'rb'
+        && K.list().filter((r) => r.id === 'rb')[0].custom === false);
+
+    check('reset: the emptied override still travels (the config drops it on save)',
+        Array.isArray(K.overrides().rb) && K.overrides().rb.length === 0);
+
+    const { K: K2 } = boot();
+    K2.bind({ id: 'rb2', keys: ['y'], label: 'apply me', scope: 'Global', run() {} });
+    check('applyOverrides: config chords take effect on the registry',
+        K2.applyOverrides({ rb2: ['ctrl+y'] }) === 1
+        && K2.resolve('ctrl+y', keyEv('y', { ctrl: true }), {}).id === 'rb2');
+    K2.applyOverrides({});
+    check('applyOverrides: an empty map restores the registry',
+        K2.resolve('ctrl+y', keyEv('y', { ctrl: true }), {}) === null
+        && K2.resolve('y', keyEv('y'), {}).id === 'rb2');
 }
 
 console.log('keys selftest: ' + ok + ' ok, ' + failures.length + ' failed');

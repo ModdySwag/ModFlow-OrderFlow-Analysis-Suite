@@ -109,13 +109,24 @@ document.addEventListener('click', (e) => {
    ══════════════════════════════════════════════════════════════ */
 
 async function boot() {
+    if (S.booted) return;                      // C-11: no re-boot path exists today; be ready for one
+    S.booted = true;
     try {
         const data = await api('/api/control/bootstrap');
         S.config = data.config;
+        /* §117: the user’s own shortcut chords ride the config into the registry — one
+           hand-off at boot; the sheet re-paints itself from the map, which now resolves
+           the overrides. */
+        if (window.OFAPKEYS && window.OFAPKEYS.applyOverrides) {
+            const keysCfg = ((data.config || {}).ui || {}).keys || {};
+            window.OFAPKEYS.applyOverrides(keysCfg.overrides || {});
+            window.OFAPKEYS.annotate();
+        }
         S.caps = data.capabilities;
         S.system = data.system;
         S.status = data.status;
     } catch (e) {
+        S.booted = false;                      // a failed boot may be retried
         $("#railPlatform").textContent = 'control API unavailable';
         console.error(e);
         return;
@@ -228,6 +239,25 @@ function renderStatus() {
         ? `${st.source} · ${(st.symbols || []).join(', ')} · up ${Math.round(st.uptime_s)}s`
         : 'engine stopped — press Start';
 
+    /* Discreet, and only while it is true: the engine reads its feed, instruments and engine
+       parameters when it starts, so a switch (or an edit) after that leaves those waiting. The
+       Profiles panel says it where the switch was made; this says it from anywhere else the
+       switch came from — the menu, the palette. It clears itself when the engine restarts. */
+    const hold = $("#statusProfileHold");
+    if (hold) {
+        const pend = st.profile_restart_pending;
+        hold.hidden = !pend;
+        if (pend) {
+            const labelFor = (b) => (window.OFAPPROFILES && OFAPPROFILES.blockLabel ? OFAPPROFILES.blockLabel(b) : b);
+            const names = (pend.blocks || []).map(labelFor).join(', ');
+            hold.textContent = 'restart to apply: ' + names;
+            hold.title = 'The engine reads its feed, instruments and parameters when it starts — '
+                + names + ' are still waiting for the next start. Everything else is already live. '
+                + 'Restart the engine (Engine view, or Ctrl+Alt+R) to land them.';
+            hold.onclick = () => { if (typeof window.showView === 'function') window.showView('engine'); };
+        }
+    }
+
     const banner = $("#ovBanner");
     if (st.state === 'error' && st.error) toast(banner, st.error, 'err');
     else if (!st.running) toast(banner, 'Engine is idle. Press “Start engine” to connect the data feed — the panels below will fill as ticks arrive.', 'info');
@@ -278,6 +308,12 @@ function liveState(key) {
    panel watches — so both ride ONE shared channel instead of a request stream each (see boot). */
 const STATUS_POLL_MS = 2000;
 let statusUnsubscribe = null;
+/* Sequencing tokens: only the newest request may paint. Two overlapping loads (a symbol switch
+   while a poll is in flight) used to resolve in either order, so a stale payload could repaint a
+   panel for the previous instrument (audit B-JS-01). */
+let chartSeq = 0;
+let bookSeq = 0;
+let tapeSeq = 0;
 
 
 /* ── §86: the Systems board — "are the systems 100%?" ────────────────────────────
@@ -615,6 +651,10 @@ $("#symbolSelect").onchange = (e) => {
     S.signals = [];
     $("#navSignalCount").textContent = '0';
     refreshAllPanels(true);
+    /* One instrument selection drives every live panel: the Engine view keeps its own symbol
+       (persisted through /api/control/ofx), so the top bar's choice is announced as an event
+       rather than by reaching into the view (audit B-JS-03). */
+    document.dispatchEvent(new CustomEvent('ofap:symbol', { detail: { symbol: S.symbol, source: 'topbar' } }));
 };
 
 /* ══════════════════════════════════════════════════════════════
@@ -786,6 +826,7 @@ async function loadChart() {
     $("#chartStatus").textContent = 'loading…';
     const sym = encodeURIComponent(S.symbol);
     const notes = [];
+    const seq = ++chartSeq;
     try {
         const [candles, delta, vp, bias] = await Promise.all([
             api(`/api/candles/${sym}?tf=${S.tf}&range=${S.range}`),
@@ -793,6 +834,7 @@ async function loadChart() {
             fetchVolumeProfile(sym),
             api(`/api/bias/${sym}`).catch(() => null),
         ]);
+        if (seq !== chartSeq) return;            // superseded: a newer load owns the panes
         const bars = Array.isArray(candles) ? candles : [];
         S.lastBars = bars;                       // the studies layer runs on the same bars
         /* P1-10: the chart's sample clock is its newest bar's CLOSE (open + the series' own
@@ -1105,8 +1147,10 @@ async function loadOrderbook() {
     if (window.OFAPINTENT && OFAPINTENT.held('depth')) { OFAPINTENT.deferKeyed('depth', 'snap', loadOrderbook); return; }
 
     if (!S.inst.book || !S.symbol) return;
+    const seq = ++bookSeq;
     try {
         const data = await api(`/api/orderbook/${encodeURIComponent(S.symbol)}?levels=15`);
+        if (seq !== bookSeq) return;             // superseded: a newer load owns the ladder
         S.inst.book.setData(data);
         updateDepthKpis(data);
     } catch (e) { console.error(e); }
@@ -1121,8 +1165,10 @@ async function loadTape() {
             'Initial tape fill is demo data until the engine has streamed prints for this symbol — new prints over the WebSocket are always real. See the “data:” chip in the status bar.',
             'warn');
     } else clearToast($("#tapeBanner"));
+    const seq = ++tapeSeq;
     try {
         const data = await api(`/api/tape/${encodeURIComponent(S.symbol)}?count=120`);
+        if (seq !== tapeSeq) return;             // superseded: a newer load owns the tape
         S.inst.tape.addTrades(Array.isArray(data) ? data : []);
     } catch (e) { console.error(e); }
 }

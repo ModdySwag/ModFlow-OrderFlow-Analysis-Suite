@@ -79,10 +79,15 @@
         paintStripState();
     }
 
+    let lastStripState = -1;
     function paintStripState() {
         /* The status chip must be able to say "3 strips are holding your place" - the user should
            never have to guess why a list is not moving. */
         const held = [...guards.values()].filter((s) => s.pending > 0 || s.held).length;
+        /* C-01: a scroll event repaints the strip chip, and that used to fan out into the intent
+           registry (a document-wide [data-surf] query) on every frame. Publish on CHANGE only. */
+        if (held === lastStripState) return;
+        lastStripState = held;
         if (window.OFAPINTENT && OFAPINTENT.setStrips) OFAPINTENT.setStrips(held);
     }
 
@@ -350,13 +355,38 @@
         return out;
     }
 
-    function scan() {
-        const roots = [document.querySelector('.view.active'), document.getElementById('tapeContainer'),
+    /* C-03: the registry had no eviction path - a strip whose element was replaced by a view
+       rebuild stayed in the Map (with its observer) for the session. Disconnected entries are
+       dropped here; the count is exposed for the status line. */
+    function sweep() {
+        let dropped = 0;
+        for (const [el, st] of [...guards]) {
+            if (el.isConnected) continue;
+            try { if (st.obs) st.obs.disconnect(); } catch (e) { /* already gone */ }
+            guards.delete(el);
+            dropped += 1;
+        }
+        return dropped;
+    }
+
+    /* C-02: scanning the whole active view with getComputedStyle ran on every click and every 6 s.
+       A click only re-scans roots this view generation has not seen; the 6 s tick forces a full
+       pass (that is its job - a list that only became scrollable later). */
+    let scannedFor = null;
+    const scannedRoots = new Set();
+
+    function scan(force) {
+        sweep();                                   // C-03
+        const view = document.querySelector('.view.active');
+        if (view !== scannedFor) { scannedFor = view; scannedRoots.clear(); }
+        const roots = [view, document.getElementById('tapeContainer'),
                        document.getElementById('alertTable'), document.getElementById('logBody')];
         const seen = new Set();
         roots.forEach((root) => {
             if (!root || seen.has(root)) return;
             seen.add(root);
+            if (!force && scannedRoots.has(root)) return;
+            scannedRoots.add(root);
             scrollersUnder(root).forEach((el) => {
                 if (guards.has(el)) return;
                 guard(el, { label: labelFor(el) });
@@ -414,13 +444,31 @@
         ]);
     }
 
-    document.addEventListener('click', () => setTimeout(scan, 400));
+    /* C-02: one pending rescan, not one per click - a nav burst used to queue a full-view sweep
+       per step. */
+    let scanSoon = null;
+    function scheduleScan(delay) {
+        if (scanSoon !== null) return;
+        scanSoon = setTimeout(() => { scanSoon = null; scan(); }, delay);
+    }
+    document.addEventListener('click', () => scheduleScan(400));
     /* A strip that only becomes scrollable later (a tape filling with prints, an alert log growing)
-       must still be picked up. A rescan of the visible view is cheap and keeps that honest. */
-    setInterval(() => { if (!document.hidden) scan(); }, 6000);
-    document.addEventListener('ofap:relayout', () => setTimeout(scan, 400));
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(scan, 900));
-    else setTimeout(scan, 900);
+       must still be picked up. The forced pass is the catch-up; C-04: a paused board makes it a
+       no-op, and the interval is registered so a resume scans once immediately. */
+    function rescanTick() {
+        if (document.hidden || window.OFAP_PAUSED) return;
+        scan(true);
+    }
+    let rescanTimer = setInterval(rescanTick, 6000);
+    if (window.OFAPPause && typeof OFAPPause.register === 'function') {
+        OFAPPause.register(rescanTimer, () => {
+            rescanTimer = setInterval(rescanTick, 6000);
+            rescanTick();
+        });
+    }
+    document.addEventListener('ofap:relayout', () => scheduleScan(400));
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => scan(true));
+    else scan(true);
 
     /* Does a reader hold this element? The one question a renderer with its own follow logic has to
        ask before moving the offset (tape.js asked it not at all until P1-4, and its `scrollTop = 0`
@@ -431,6 +479,7 @@
     }
 
     window.OFAPSTRIPS = { guard: guard, scan: scan, state: guards, math: math, holds: holds,
+                          sweep: sweep,
                           step: step, locate: locate, release: release, rowHeight: rowHeight,
                           stripFor: stripFor,
                           holding: () => [...guards.values()].filter((s) => s.pending > 0 || s.held).length };

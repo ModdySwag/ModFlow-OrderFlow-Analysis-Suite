@@ -109,8 +109,14 @@ def normalize_stock_trade(msg: dict[str, Any], mid: Optional[float] = None,
     price = _num(msg.get("p"))
     if price <= 0:
         return None
+    stamp = parse_ts_ms(msg.get("t"))
+    if stamp <= 0:
+        # A present-but-unusable `t` used to become timestamp_ms=0 — a 1970 candle and phantom
+        # prints inside the live bar. Dropped, exactly like normalize_bar already drops ts == 0
+        # (audit D-06); the caller counts the drop.
+        return None
     return Tick(
-        timestamp_ms=parse_ts_ms(msg.get("t")),
+        timestamp_ms=stamp,
         price=price,
         size=_num(msg.get("s")),
         side=classify_side(price, mid),

@@ -203,18 +203,20 @@ def test_panels_scope_their_section_lookup_to_the_view_element():
 
 def test_the_shell_carries_a_csp_that_forbids_remote_hosts():
     """The shell is self-contained (every script/style/image is same-origin, no CDN, no web
-    font, no iframe), so its CSP must not allow any remote target — while keeping the two
-    allowances the app genuinely needs: the inline pre-paint boot script and the Studies
-    engine's `new Function` compilation of user-pasted modules."""
+    font, no iframe), so its CSP must not allow any remote target — while keeping only the one
+    allowance the app genuinely needs: the Studies engine's `new Function` compilation of
+    user-pasted modules. The inline pre-paint script is allowed by HASH (SEC-08) — the exact
+    hash is pinned in test_security_fixes.py."""
     import re as _re
 
     match = _re.search(r'http-equiv="Content-Security-Policy"\s+content="([^"]+)"', _html())
     assert match, "the shell lost its Content-Security-Policy"
     policy = match.group(1)
-    for directive in ("default-src 'self'", "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+    for directive in ("default-src 'self'", "script-src 'self'",
                       "style-src 'self' 'unsafe-inline'", "object-src 'none'",
                       "frame-src 'none'", "base-uri 'none'", "form-action 'self'"):
         assert directive in policy, f"CSP lost {directive!r}: {policy}"
+    assert "'unsafe-inline'" not in policy.split(";")[1], "script-src must not allow all inline"
     for loopback_ws in ("ws://127.0.0.1:*", "ws://localhost:*"):
         assert loopback_ws in policy, f"CSP must allow the app's own stream {loopback_ws!r}: {policy}"
     # the only permitted wildcard is the loopback WS port; everything else is closed
@@ -387,3 +389,26 @@ def test_the_engine_view_poll_only_runs_while_its_view_is_shown():
     src = (UI / "ofx-view.js").read_text(encoding="utf-8")
     assert '.view[data-view="ofx"]' in src, "the poll must scope its own section (not a bare data-view)"
     assert "classList.contains('active')" in src, "the poll must check that the view is the shown one"
+
+
+def test_the_panel_loaders_keep_their_request_sequencing():
+    """Only the newest load may paint (audit B-JS-01/02).
+
+    `loadChart`/`loadOrderbook`/`loadTape` (ui.js) and the Engine view's `load()` (ofx-view.js)
+    each capture a sequence token before their fetches and bail once a newer request has started.
+    Two overlapping loads resolve in either order, so without the guard a stale payload repaints
+    the panel for the previous instrument. This is the regression pin for that guard, plus the
+    top-bar↔Engine symbol bridge (B-JS-03) and the pointer-leave hover clear (C-07 / B-JS-04).
+    """
+    ui = (UI / "ui.js").read_text(encoding="utf-8")
+    view = (UI / "ofx-view.js").read_text(encoding="utf-8")
+    engine = (UI / "ofx.js").read_text(encoding="utf-8")
+
+    assert "let chartSeq = 0;" in ui and "seq !== chartSeq" in ui
+    assert "seq !== bookSeq" in ui and "seq !== tapeSeq" in ui
+    assert "let loadSeq = 0;" in view and "seq !== loadSeq" in view
+    # the symbol bridge between the top bar and the Engine head
+    assert "ofap:symbol" in ui and "ofap:symbol" in view and "function syncTopBar(" in view
+    # leaving the canvas clears the crosshair/tooltip state
+    assert "canvas.addEventListener('mouseleave'" in engine
+    assert "state.hover = null;" in engine

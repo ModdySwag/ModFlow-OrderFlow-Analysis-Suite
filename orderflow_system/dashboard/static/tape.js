@@ -50,10 +50,10 @@ class TimeAndSales {
                                 <option value="sell">Sells</option>
                             </select>
                         </label>
-                        <button id="tapeAutoScroll" class="tape-btn active" title="Auto-scroll">
+                        <button id="tapeAutoScroll" class="tape-btn active" title="Follow the newest prints as they arrive">
                             <span class="tape-btn-icon">↓</span>
                         </button>
-                        <button id="tapeClear" class="tape-btn" title="Clear tape">
+                        <button id="tapeClear" class="tape-btn" title="Clear the prints shown here (stored ticks stay on disk)">
                             <span class="tape-btn-icon">⌫</span>
                         </button>
                     </div>

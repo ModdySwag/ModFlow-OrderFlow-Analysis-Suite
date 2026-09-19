@@ -6,8 +6,8 @@
 
 # flowsurface (Rust) → OFAP: aggregation / backfill / persistence briefing (B)
 
-Source: `C:\Users\Moddy\AppData\Local\Temp\flowsurface_ref` (GPL-3.0, read-only, **ideas only — no code copying**).
-Target: `C:\Users\Moddy\OrderFlow-Analysis-Pro` (Python FastAPI + pywebview + JS/canvas + SQLite; 7-day tick retention; heatmap `max_columns 900 @ 1s`).
+Source: `C:\Users\<you>\AppData\Local\Temp\flowsurface_ref` (GPL-3.0, read-only, **ideas only — no code copying**).
+Target: `C:\Users\<you>\OrderFlow-Analysis-Pro` (Python FastAPI + pywebview + JS/canvas + SQLite; 7-day tick retention; heatmap `max_columns 900 @ 1s`).
 
 Correction up front: `data/src/chart/ticks/x.rs` is **not** the tick-bar module. It is the **time-axis label grid** (time labels + thinning). Tick *bars* live in `data/src/aggr/ticks.rs`; `data/src/chart/ticks/y.rs` is the price-axis grid. Both are covered below.
 

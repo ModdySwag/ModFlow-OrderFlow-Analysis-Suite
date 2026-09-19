@@ -74,13 +74,18 @@
             el.title = opts.title || 'the shared cursor: what every panel is reading right now';
             (opts.before ? host.insertBefore(el, opts.before) : host.appendChild(el));
         }
-        badges.push(el);
+        if (badges.indexOf(el) < 0) badges.push(el);      // C-06: one entry per badge element
         paintBadges();
         return el;
     }
 
     function paintBadges() {
         if (typeof document === 'undefined' || !document) return;
+        /* C-06: replaced panels leave disconnected entries behind — prune them here (1 Hz is
+           nothing; the list must not grow with every mount). */
+        for (let i = badges.length - 1; i >= 0; i -= 1) {
+            if (!badges[i] || !badges[i].isConnected) badges.splice(i, 1);
+        }
         const t = text();
         badges.forEach((el) => {
             if (!el || !el.isConnected) return;

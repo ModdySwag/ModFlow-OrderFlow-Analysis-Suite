@@ -88,7 +88,19 @@
 
     /* ── render ────────────────────────────────────────────────────────────── */
 
+    /* C-05: one live menu per table, and its document listener is removed when it closes — the
+       old shape leaked a listener and a detached .draw-menu subtree per column action. */
+    let currentMenu = null;
+    let currentOff = null;
+
+    function closeCurrentMenu() {
+        if (currentOff) { document.removeEventListener('mousedown', currentOff, true); currentOff = null; }
+        if (currentMenu && currentMenu.parentNode) currentMenu.parentNode.removeChild(currentMenu);
+        currentMenu = null;
+    }
+
     function menuFor(host, spec, prefs, refresh) {
+        closeCurrentMenu();
         const old = host.querySelector('.draw-menu');
         if (old) old.parentNode.removeChild(old);
         const menu = document.createElement('div');
@@ -125,12 +137,15 @@
             refresh();
         });
         host.appendChild(menu);
+        currentMenu = menu;
         setTimeout(() => {
+            const dialog = menu;
             const off = (ev2) => {
-                if (menu.contains(ev2.target)) return;
-                if (menu.parentNode) menu.parentNode.removeChild(menu);
-                document.removeEventListener('mousedown', off, true);
+                if (!dialog.isConnected) { closeCurrentMenu(); return; }
+                if (dialog.contains(ev2.target)) return;
+                closeCurrentMenu();
             };
+            currentOff = off;
             document.addEventListener('mousedown', off, true);
         }, 0);
     }
@@ -148,7 +163,7 @@
             const head = '<div class="oft-head">' + cols.map((c) => {
                 const on = sort && sort.key === c.key ? (sort.dir === 'asc' ? ' \u25b4' : ' \u25be') : '';
                 return '<span class="oft-th" draggable="true" data-key="' + c.key + '"' + (c.align === 'right' ? ' style="text-align:right"' : '')
-                    + ' title="click: sort \u00b7 right-click: columns &amp; grouping \u00b7 drag: reorder">' + c.label + on + '</span>';
+                    + ' title="Click to sort \u00b7 right-click for columns and grouping \u00b7 drag to reorder">' + c.label + on + '</span>';
             }).join('') + '</div>';
             const body = groups.map((g) => {
                 const ghead = spec.groupBy ? '<div class="oft-group">' + String(g.label) + ' (' + g.rows.length + ')</div>' : '';

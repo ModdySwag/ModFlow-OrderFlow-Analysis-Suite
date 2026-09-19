@@ -114,6 +114,14 @@ check('paths: setIn creates the missing blocks',
 check('paths: setIn overwrites a leaf',
     (() => { const o = { a: { b: 1 } }; R.setIn(o, 'a.b', 2); return o.a.b === 2; })());
 
+/* ── B5: the dimming and highlight clamps ──────────────────────────────── */
+check('clampDim: 0 is the identity, junk falls back to it',
+    R.clampDim(0) === 0 && R.clampDim(null) === 0 && R.clampDim('junk') === 0 && R.clampDim('') === 0);
+check('clampDim: the ceiling is 0.8', R.clampDim(99) === 0.8 && R.clampDim(-1) === 0);
+check('clampHighlight: off by default, 1 at the top',
+    R.clampHighlight(null) === 0 && R.clampHighlight(0.5) === 0.5 && R.clampHighlight(99) === 1
+    && R.clampHighlight(-2) === 0);
+
 console.log('ramp selftest: ' + ok + ' ok, ' + failures.length + ' failed');
 for (const f of failures) console.log('  FAIL', f);
 process.exit(failures.length ? 1 : 0);

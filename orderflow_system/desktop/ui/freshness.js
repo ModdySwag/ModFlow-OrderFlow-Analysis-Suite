@@ -118,6 +118,10 @@
     }
 
     function paint(id) {
+        /* D-12: replaced head elements left their chip entries behind — drop the disconnected. */
+        for (var i = chips.length - 1; i >= 0; i -= 1) {
+            if (!chips[i].el || !chips[i].el.isConnected) chips.splice(i, 1);
+        }
         var row = rows[id];
         var st = row ? stateOf(row) : null;
         var verdict = row ? pick(st) : '';
@@ -126,12 +130,12 @@
             if (!row) {
                 c.el.textContent = '\u2014';
                 c.el.className = 'ofap-fresh-chip';
-                c.el.title = 'the age of what this panel displays \u2014 nothing stamped yet';
+                c.el.title = 'The age of what this panel displays — nothing stamped yet.';
                 return;
             }
             c.el.textContent = textFor(st, verdict);
             c.el.className = 'ofap-fresh-chip is-' + verdict;
-            c.el.title = 'age of the newest sample this panel displays'
+            c.el.title = 'The age of the newest sample this panel displays.'
                 + (row.source === 'demo' ? ' (the server answered with demo data)' : '')
                 + ' \u00b7 window ' + fmtAge(row.windowMs);
             var section = c.el.closest ? c.el.closest('.view') : null;

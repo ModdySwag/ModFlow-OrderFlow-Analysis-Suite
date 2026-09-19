@@ -233,12 +233,14 @@
             timer = setInterval(function () { fetchState(false); }, POLL_MS);
         }
         var wrap = window.showView;
-        if (typeof wrap === 'function') {
-            window.showView = function (name) {
+        if (typeof wrap === 'function' && !wrap.__ofapWrapped_updates) {
+            var wrapped = function (name) {
                 var out = wrap.apply(this, arguments);
                 if (name === 'settings') setTimeout(function () { if (onScreen()) fetchState(false); }, 500);
                 return out;
             };
+            wrapped.__ofapWrapped_updates = true;
+            window.showView = wrapped;
         }
         document.addEventListener('visibilitychange', function () {
             if (!document.hidden) fetchState(false);      // back at the desk: re-ask once

@@ -24,6 +24,7 @@ from orderflow_system.data.models import Candle, Signal, SignalType, Side
 from orderflow_system.analytics.delta import DeltaEngine, DeltaResult
 from orderflow_system.analytics.footprint import FootprintBar
 from orderflow_system.config.settings import ExhaustionConfig
+from orderflow_system.patterns import remember_signal
 
 
 class ExhaustionDetector:
@@ -146,7 +147,7 @@ class ExhaustionDetector:
                 "high_at_exhaustion": current.high,
             },
         )
-        self._signal_history.append(signal)
+        remember_signal(self._signal_history, signal)
         return signal
 
     def _check_bearish_exhaustion(
@@ -216,7 +217,7 @@ class ExhaustionDetector:
                 "low_at_exhaustion": current.low,
             },
         )
-        self._signal_history.append(signal)
+        remember_signal(self._signal_history, signal)
         return signal
 
     @staticmethod

@@ -1,5 +1,6 @@
-"""B2 — heat ramp controls: the shared dials module, the seven new display variables, and the
-absolute-ceiling override on the depth map.
+"""B2 — heat ramp controls: the shared dials module, the registered display variables (the
+seven from B2 plus B5’s dimming and large-size highlight), and the absolute-ceiling override
+on the depth map.
 
 `ramp.js`'s own behaviour is pinned by `ramp.selftest.js` (node). What this file adds are the
 CONTRACTS around it: the 'balanced' scheme must equal the shipped defaults (a values equality, not
@@ -26,6 +27,8 @@ B2_PATHS = (
     "ofx.heat_contrast", "ofx.heat_floor", "ofx.heat_floor_pct",
     "atlas.heatmap.upper_cutoff_abs", "atlas.heatmap.contrast",
     "atlas.heatmap.floor", "atlas.heatmap.floor_pct",
+    # B5 (§118): the Bookmap pair — dimming and the large-size highlight, per surface.
+    "ofx.heat_dim", "ofx.heat_highlight", "atlas.heatmap.dim", "atlas.heatmap.highlight",
 )
 
 
@@ -49,7 +52,7 @@ def _schemes_from_js() -> list:
              "floor_pct": float(fp), "contrast": float(ct)} for i, lab, c, f, fp, ct in found]
 
 
-def test_the_seven_variables_are_registered_with_bounds():
+def test_the_scheme_dials_are_registered_with_bounds():
     for path in B2_PATHS:
         p = param_registry.BY_PATH.get(path)
         assert p is not None, "missing from the registry: " + path
@@ -100,6 +103,15 @@ def test_defaults_ship_the_old_look_and_the_sanitiser_clamps():
     assert o["heat_contrast"] == 2.5 and o["heat_floor"] == 0.0 and o["heat_floor_pct"] == 50.0
     assert h["contrast"] == 1.0 and h["floor"] == 0.0 and h["floor_pct"] == 50.0
     assert h["upper_cutoff_abs"] == 0.0
+    # B5 dials ship off and clamp at their own ceilings.
+    assert (o["heat_dim"], o["heat_highlight"], h["dim"], h["highlight"]) == (0.0, 0.0, 0.0, 0.0)
+    cfg["ofx"]["heat_dim"] = 99
+    cfg["ofx"]["heat_highlight"] = -1
+    cfg["atlas"]["heatmap"]["dim"] = "junk"
+    cfg["atlas"]["heatmap"]["highlight"] = 99
+    out2 = config_store._sanitise(cfg)
+    assert out2["ofx"]["heat_dim"] == 0.8 and out2["ofx"]["heat_highlight"] == 0.0
+    assert out2["atlas"]["heatmap"]["dim"] == 0.0 and out2["atlas"]["heatmap"]["highlight"] == 1.0
 
 
 def test_the_absolute_ceiling_overrides_the_percentile_one():
@@ -140,7 +152,9 @@ def test_the_module_parses_and_its_selftest_passes():
 def test_the_controls_are_in_the_page_and_ramp_js_loads_before_atlas():
     html = _text(INDEX)
     for cid in ("ofxHeatScheme", "ofxHeatContrast", "ofxHeatFloor", "ofxHeatGlobal",
-                "hmHeatScheme", "hmHeatContrast", "hmHeatFloor", "hmHeatGlobal"):
+                "ofxHeatDim", "ofxHeatHighlight",
+                "hmHeatScheme", "hmHeatContrast", "hmHeatFloor", "hmHeatGlobal",
+                "hmHeatDim", "hmHeatHighlight"):
         assert 'id="' + cid + '"' in html, "control missing from index.html: " + cid
     assert '/desktop/ramp.js' in html, "ramp.js is not loaded"
     assert html.index('/desktop/ramp.js') < html.index('/desktop/atlas.js'), (
@@ -150,6 +164,23 @@ def test_the_controls_are_in_the_page_and_ramp_js_loads_before_atlas():
         assert block, sel + " has no options block"
         ids = re.findall(r'<option value="([a-z]+)"', block.group(0))
         assert ids == ["balanced", "walls", "detail", "quiet", "custom"], (sel, ids)
+
+
+def test_the_engine_palette_scales_its_alphas_with_the_dim_dial():
+    src = _text(UI / "ofx.js")
+    assert "const dimmer = Math.min(0.8, Math.max(0, Number(dim) || 0));" in src
+    assert "const alpha = ((a + 1) / alphaSteps) * (1 - dimmer);" in src
+    assert "math.heatPalette(state.data.heatScale, state.params.ramp, 64, 32, heatGamma(), heatDim())" in src
+    assert "${heatGamma()}|${heatDim()}" in src          # the palette cache key tracks both dials
+    assert "if (hlNow > 0 && cell.size > 0 && cell.size >= hlNow)" in src
+
+
+def test_the_heatmap_view_paints_the_pair():
+    src = _text(UI / "atlas.js")
+    assert "if (heatDim > 0) ctx.globalAlpha = 1 - heatDim;" in src and "ctx.globalAlpha = 1;" in src
+    assert "const heatDim = RP ? RP.clampDim(hmDials.dim) : 0;" in src
+    assert "const heatHl = heatHlShare > 0 ? heatHlShare * Number(ref || 1) : 0;" in src
+    assert "if (heatHl > 0 && sv >= heatHl) {" in src
 
 
 def test_the_audit_knows_the_module():

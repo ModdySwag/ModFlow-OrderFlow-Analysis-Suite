@@ -48,10 +48,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     initControls();
     connectWebSocket();
 
-    setInterval(() => refreshFastData(), 1000);
-    setInterval(() => refreshSlowData(), 5000);
+    /* D-02: one ping timer for the page (it used to be created inside connectWebSocket, so a
+       reconnect leaked one per close), and a hidden tab stops polling. */
+    startPing();
+    setInterval(() => { if (document.hidden) return; refreshFastData(); }, 1000);
+    setInterval(() => { if (document.hidden) return; refreshSlowData(); }, 5000);
     refreshScannerLoop();
-    setInterval(() => refreshScannerLoop(), 5000);
+    setInterval(() => { if (document.hidden) return; refreshScannerLoop(); }, 5000);
 
     window.addEventListener('resize', handleResize);
     updatePriceDisplay(null, null);
@@ -219,6 +222,9 @@ async function refreshSlowData() {
 // ════════════════════════════════════════════
 
 async function switchInstrument(symbol) {
+    /* D-06: a new instrument starts with no markers from the previous one. */
+    state.markers = [];
+    applyMarkers();
     state.activeSymbol = symbol;
     const select = document.getElementById('symbolSelect');
     if (select.value !== symbol) select.value = symbol;
@@ -777,7 +783,11 @@ function connectWebSocket() {
         } catch (e) {}
     };
 
-    setInterval(() => {
+}
+
+function startPing() {
+    if (state.pingTimer) return;                 // one interval per page, not one per reconnect
+    state.pingTimer = setInterval(() => {
         if (state.ws && state.ws.readyState === WebSocket.OPEN) state.ws.send('ping');
     }, 30000);
 }
@@ -884,6 +894,8 @@ function handleSignal(symbol, data) {
         const marker = signalToMarker(data);
         if (marker) {
             state.markers.push(marker);
+            /* D-06: the marker list grew per signal and survived an instrument switch. */
+            if (state.markers.length > 200) state.markers.splice(0, state.markers.length - 200);
             applyMarkers();
         }
     }

@@ -104,8 +104,16 @@ class BinanceDepthBook:
     # ── ingest ────────────────────────────────────────────────
     def snapshot(self, last_update_id: int, bids: list, asks: list, ts_ms: int = 0) -> int:
         """Install a REST snapshot and replay what buffered meanwhile. Returns diffs replayed."""
-        self.bids = {lv.price: lv.quantity for lv in map(_level, bids) if lv is not None and lv.quantity > 0}
-        self.asks = {lv.price: lv.quantity for lv in map(_level, asks) if lv is not None and lv.quantity > 0}
+        book_bids = {lv.price: lv.quantity for lv in map(_level, bids) if lv is not None and lv.quantity > 0}
+        book_asks = {lv.price: lv.quantity for lv in map(_level, asks) if lv is not None and lv.quantity > 0}
+        if not book_bids or not book_asks:
+            # A one-sided "book" is what a halt or a garbage payload looks like; installing it would
+            # publish an empty, live-looking book (audit D-09). Keep the old one, stay stale.
+            self.junk_values += 1
+            self._mark_stale("a one-sided snapshot")
+            return 0
+        self.bids = book_bids
+        self.asks = book_asks
         self.last_update_id = int(last_update_id or 0)
         self.has_snapshot = True
         self.stale = False
@@ -259,6 +267,9 @@ class BinanceFeed:
         self.on_orderbook = on_orderbook
         self.depth_ms = int(depth_ms)
         self.snapshot_levels = int(snapshot_levels)
+        #: The deferred snapshot kick-off handles — a *set*, because one slot per feed lost a
+        #: handle whenever two symbols were stale at once (MEM-A2-07). All cancelled in stop().
+        self._snapshot_later: set[asyncio.TimerHandle] = set()
         self.rest_base = str(rest_base).rstrip("/")
         self.ws_url = ws_url
         self.snapshot_cooldown_s = float(snapshot_cooldown_s)
@@ -270,6 +281,7 @@ class BinanceFeed:
         self._snapshot_last: dict[str, float] = {}
         self._ts_fallback_warned = False
         self.junk_prints = 0
+        self.junk_frames = 0
         self.ticks = 0
         self._stale_announced: set[str] = set()
 
@@ -285,8 +297,14 @@ class BinanceFeed:
         await self._session.run()
 
     async def stop(self) -> None:
-        for task in list(self._snapshot_tasks.values()):
+        for handle in list(self._snapshot_later):
+            handle.cancel()
+        self._snapshot_later.clear()
+        tasks = list(self._snapshot_tasks.values())
+        for task in tasks:
             task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         self._snapshot_tasks.clear()
         if self._session is not None:
             await self._session.stop()
@@ -337,10 +355,22 @@ class BinanceFeed:
             return False
         kind = msg.get("e")
         if kind in ("trade", "aggTrade"):
-            await self._handle_trade(msg)
+            try:
+                await self._handle_trade(msg)
+            except (TypeError, ValueError, KeyError) as exc:
+                # A non-numeric stamp or price used to raise out of the frame handler and through
+                # the session's read loop — one bad frame must cost one frame (audit D-10).
+                self.junk_frames += 1
+                logger.warning("Binance: junk trade frame dropped (%s)", exc)
+                return False
             return True
         if kind == "depthUpdate":
-            await self._handle_depth(msg)
+            try:
+                await self._handle_depth(msg)
+            except (TypeError, ValueError, KeyError) as exc:
+                self.junk_frames += 1
+                logger.warning("Binance: junk depth frame dropped (%s)", exc)
+                return False
             return True
         # subscribe/unsubscribe acks carry `result`/`id` and nothing to do
         return False
@@ -436,7 +466,14 @@ class BinanceFeed:
             # ask again, rate-limited, so a stale book always has a way back. The follow-up is
             # scheduled *after* this task finishes — a synchronous re-schedule would dedupe
             # against itself and the book would stay stale forever.
-            asyncio.get_running_loop().call_later(0.0, self._schedule_snapshot, symbol)
+            handle: asyncio.TimerHandle
+
+            def _fire() -> None:
+                self._snapshot_later.discard(handle)   # MEM-A2-07: one set, discarded when fired
+                self._schedule_snapshot(symbol)
+
+            handle = asyncio.get_running_loop().call_later(0.0, _fire)
+            self._snapshot_later.add(handle)
 
     def _fetch_snapshot(self, symbol: str) -> dict:
         query = urllib.parse.urlencode({"symbol": symbol, "limit": self.snapshot_levels})
@@ -459,6 +496,7 @@ class BinanceFeed:
             "gaps": sum(b.gaps for b in self.books.values()),
             "dropped_deltas": sum(b.dropped for b in self.books.values()),
             "junk_values": sum(b.junk_values for b in self.books.values()) + self.junk_prints,
+            "junk_frames": self.junk_frames,
             "seq": {s: b.last_update_id for s, b in self.books.items()},
         }
 
@@ -468,6 +506,7 @@ class BinanceFeed:
             "symbols": list(self.books),
             "ticks": self.ticks,
             "junk_prints": self.junk_prints,
+            "junk_frames": self.junk_frames,
             "books": {s: b.health() for s, b in self.books.items()},
         }
         if self._session is not None:

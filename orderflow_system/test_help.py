@@ -489,3 +489,26 @@ def test_every_inline_help_link_names_a_real_topic(corpus):
             seen += 1
             assert topic in ids, f"{path.name} links help topic {topic!r}, which does not exist"
     assert seen >= 2, "no inline help links found at all"
+
+
+def test_the_lifetime_checks_are_on_the_diagnostic_surface(monkeypatch):
+    """G-04: the three lifetime/memory check ids appear, and the ring check turns warn when full."""
+    from orderflow_system.desktop import help as help_mod
+    from orderflow_system.desktop import logs as logs_mod
+
+    kwargs = dict(cfg={}, status={"running": False, "symbols": []}, storage={},
+                  log_text="", mt5={})
+    report = help_mod.check_report(**kwargs)
+    ids = {c["id"] for c in report["checks"]}
+    assert {"mem.log_buffer", "lifetime.tasks", "lifetime.engine"} <= ids, sorted(ids)
+
+    saved = list(logs_mod._buffer)
+    try:
+        logs_mod._buffer.extend({"level": "INFO", "msg": "x", "ts": n}
+                                for n in range(logs_mod.MAX_LINES + 5))
+        report2 = help_mod.check_report(**kwargs)
+        row = next(c for c in report2["checks"] if c["id"] == "mem.log_buffer")
+        assert row["level"] == "warn", row
+    finally:
+        logs_mod._buffer.clear()
+        logs_mod._buffer.extend(saved)

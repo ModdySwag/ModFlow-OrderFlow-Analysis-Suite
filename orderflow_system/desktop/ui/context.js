@@ -193,12 +193,14 @@ function ctxStart() {
     }
     setTimeout(tryMount, 1800);
     const _showView = window.showView;
-    if (typeof _showView === 'function') {
-        window.showView = (name, ...rest) => {
+    if (typeof _showView === 'function' && !_showView.__ofapWrapped_context) {
+        const wrapped = (name, ...rest) => {
             const out = _showView(name, ...rest);
             if (name === 'overview') setTimeout(ctxRefresh, 400);
             return out;
         };
+        wrapped.__ofapWrapped_context = true;
+        window.showView = wrapped;
     }
     if (typeof window.boot === 'function') {
         const _boot = window.boot;

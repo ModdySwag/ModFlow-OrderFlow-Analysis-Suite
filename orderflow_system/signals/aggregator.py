@@ -24,8 +24,15 @@ from orderflow_system.data.models import (
 )
 from orderflow_system.signals.profile_framing import DailyBias, QualifiedLevel
 from orderflow_system.config.settings import BiasDirection
+from orderflow_system.patterns import remember_signal
 
 logger = logging.getLogger(__name__)
+
+#: MEM-A1-04: watched levels are working state, not an archive. The radar keeps its own
+#: lifecycle (max_age_ms + spent_keep_ms) and the entry check only reads the nearest level, so
+#: 200 per instrument is far more than a session of actionable ones and makes the per-signal
+#: scan bounded. The pattern is the file next door: `patterns.remember_signal`.
+MAX_WATCHED_LEVELS = 200
 
 
 @dataclass
@@ -147,7 +154,14 @@ class SignalAggregator:
             if abs(existing.price - level.price) / max(level.price, 1) < 0.0001:
                 return  # Already watching this level
 
-        self._watched_levels[instrument].append(level)
+        watched = self._watched_levels[instrument]
+        watched.append(level)
+        # MEM-A1-04: watched levels are working state, not history — the radar expires its own
+        # levels and the state machine only ever reads the nearest one, so the list is capped
+        # (oldest dropped). Unbounded, it grew for the whole session (audit A1-04) and made the
+        # per-absorption scan linear.
+        if len(watched) > MAX_WATCHED_LEVELS:
+            del watched[:-MAX_WATCHED_LEVELS]
 
         # Only create WATCHING trade if no active trade yet
         active = self._active_trades.get(instrument)
@@ -231,7 +245,7 @@ class SignalAggregator:
             ),
         )
         self._last_signal_time[instrument] = now_ms
-        self._signal_history.append(agg)
+        remember_signal(self._signal_history, agg)
         return agg
 
     def _handle_absorption_at_level(
@@ -291,7 +305,7 @@ class SignalAggregator:
             ),
         )
         self._last_signal_time[instrument] = now_ms
-        self._signal_history.append(agg)
+        remember_signal(self._signal_history, agg)
         return agg
 
     def _handle_initiative_for_be(
@@ -319,7 +333,7 @@ class SignalAggregator:
             ),
         )
         self._last_signal_time[instrument] = now_ms
-        self._signal_history.append(agg)
+        remember_signal(self._signal_history, agg)
         return agg
 
     def _handle_initiative_for_trail(
@@ -358,7 +372,7 @@ class SignalAggregator:
             ),
         )
         self._last_signal_time[instrument] = now_ms
-        self._signal_history.append(agg)
+        remember_signal(self._signal_history, agg)
         return agg
 
     def _handle_exit_warning(
@@ -392,7 +406,7 @@ class SignalAggregator:
             ),
         )
         self._last_signal_time[instrument] = now_ms
-        self._signal_history.append(agg)
+        remember_signal(self._signal_history, agg)
         return agg
 
     def _handle_sweep_at_level(
@@ -417,7 +431,7 @@ class SignalAggregator:
             ),
         )
         self._last_signal_time[instrument] = now_ms
-        self._signal_history.append(agg)
+        remember_signal(self._signal_history, agg)
         return agg
 
     def _compute_composite_score(

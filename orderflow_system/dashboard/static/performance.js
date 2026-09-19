@@ -99,7 +99,7 @@ class PerformanceDashboard {
                 <div class="perf-trades-section">
                     <div class="perf-section-header">
                         <span class="perf-section-title">Recent Trades</span>
-                        <button class="perf-export-btn" id="perfExport" title="Export CSV">⬇ Export</button>
+                        <button class="perf-export-btn" id="perfExport" title="Export the trade list as CSV">⬇ Export</button>
                     </div>
                     <div class="perf-trades-table" id="perfTrades">
                         <table class="perf-table">
@@ -228,15 +228,88 @@ class PerformanceDashboard {
     /**
      * Add completed trade
      */
+    /* D-08: the list was unbounded and every add re-ran the full stats + equity + canvas pass.
+        Capped, and the recalculation is debounced to one per 250 ms. */
+    _scheduleStats() {
+        if (this._statsTimer) return;
+        this._statsTimer = setTimeout(() => {
+            this._statsTimer = null;
+            this._recalculateStats();
+        }, 250);
+    }
+
+    /* D-08: running stats. addTrade used to re-scan the whole list per add (10,000 adds meant
+       10,000 full passes over up to 2,000 trades). The counts, sums, daily figures and the
+       pattern table are maintained incrementally now; only the equity/DD curve still needs the
+       list order and that runs on the 250 ms debounce. `_accRemove` subtracts what the cap
+       evicts, so the accumulators stay equal to a full recompute (pinned by
+       legacy-widgets.selftest.js). */
+    _newAcc() {
+        return { wins: 0, losses: 0, breakevens: 0, winPnl: 0, lossPnl: 0, totalPnl: 0,
+                 dailyPnl: 0, dailyCount: 0, dailyKey: new Date().toDateString(), byPattern: {} };
+    }
+
+    _accRoll(acc) {
+        const today = new Date().toDateString();
+        if (acc.dailyKey !== today) { acc.dailyKey = today; acc.dailyPnl = 0; acc.dailyCount = 0; }
+        return today;
+    }
+
+    _accAdd(trade) {
+        const acc = this._acc || (this._acc = this._newAcc());
+        const today = this._accRoll(acc);
+        const pnl = trade.pnl || 0;
+        if (pnl > 0) { acc.wins++; acc.winPnl += pnl; }
+        else if (pnl < 0) { acc.losses++; acc.lossPnl += Math.abs(pnl); }
+        else { acc.breakevens++; }
+        acc.totalPnl += pnl;
+        if (new Date(trade.timestamp).toDateString() === today) { acc.dailyPnl += pnl; acc.dailyCount++; }
+        const pattern = trade.pattern || 'Unknown';
+        const row = acc.byPattern[pattern] || (acc.byPattern[pattern] = { wins: 0, losses: 0, pnl: 0, trades: 0 });
+        row.trades++; row.pnl += pnl;
+        if (pnl > 0) row.wins++; else if (pnl < 0) row.losses++;
+        return acc;
+    }
+
+    _accRemove(trade) {
+        const acc = this._acc;
+        if (!acc || !trade) return acc;
+        const today = this._accRoll(acc);
+        const pnl = trade.pnl || 0;
+        if (pnl > 0) { acc.wins--; acc.winPnl -= pnl; }
+        else if (pnl < 0) { acc.losses--; acc.lossPnl -= Math.abs(pnl); }
+        else { acc.breakevens--; }
+        acc.totalPnl -= pnl;
+        if (new Date(trade.timestamp).toDateString() === today) { acc.dailyPnl -= pnl; acc.dailyCount--; }
+        const pattern = trade.pattern || 'Unknown';
+        const row = acc.byPattern[pattern];
+        if (row) {
+            row.trades--; row.pnl -= pnl;
+            if (pnl > 0) row.wins--; else if (pnl < 0) row.losses--;
+            if (row.trades <= 0) delete acc.byPattern[pattern];
+        }
+        return acc;
+    }
+
+    _rebuildAcc() {
+        this._acc = this._newAcc();
+        for (let i = this.trades.length - 1; i >= 0; i--) this._accAdd(this.trades[i]);
+        return this._acc;
+    }
+
     addTrade(trade) {
-        this.trades.unshift({
+        const entry = {
             ...trade,
             id: trade.id || Date.now(),
             timestamp: trade.timestamp || Date.now()
-        });
+        };
+        this.trades.unshift(entry);
+        this._accAdd(entry);
 
-        // Update stats
-        this._recalculateStats();
+        // Cap the list (the evicted trade is subtracted, so the accumulators stay exact), then
+        // repaint stats on a debounce (D-08: not per add)
+        while (this.trades.length > 2000) this._accRemove(this.trades.pop());
+        this._scheduleStats();
         this._render();
     }
 
@@ -245,65 +318,37 @@ class PerformanceDashboard {
      */
     setTrades(trades) {
         this.trades = trades || [];
+        this._rebuildAcc();
         this._recalculateStats();
         this._render();
     }
 
     _recalculateStats() {
-        const today = new Date().toDateString();
-        const todayTrades = this.trades.filter(t => 
-            new Date(t.timestamp).toDateString() === today
-        );
+        /* D-08: the counts, sums, daily figures and the pattern table come from the running
+           accumulators (maintained per add). Only the equity/DD pass still reads the list in
+           order, and this method runs on the debounce — not per add. */
+        const acc = this._acc || this._rebuildAcc();
+        this._accRoll(acc);
 
-        let wins = 0, losses = 0, breakevens = 0;
-        let totalWinPnL = 0, totalLossPnL = 0;
-        let dailyPnL = 0;
         let equity = 0;
         let peak = 0;
         let maxDD = 0;
-        const byPattern = {};
-
         this.trades.forEach(trade => {
             const pnl = trade.pnl || 0;
-            const rMultiple = trade.rMultiple || 0;
-
-            if (pnl > 0) {
-                wins++;
-                totalWinPnL += pnl;
-            } else if (pnl < 0) {
-                losses++;
-                totalLossPnL += Math.abs(pnl);
-            } else {
-                breakevens++;
-            }
-
-            // Equity curve
             equity += pnl;
             if (equity > peak) peak = equity;
             const dd = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
             if (dd > maxDD) maxDD = dd;
-
-            // Pattern tracking
-            const pattern = trade.pattern || 'Unknown';
-            if (!byPattern[pattern]) {
-                byPattern[pattern] = { wins: 0, losses: 0, pnl: 0, trades: 0 };
-            }
-            byPattern[pattern].trades++;
-            byPattern[pattern].pnl += pnl;
-            if (pnl > 0) byPattern[pattern].wins++;
-            else if (pnl < 0) byPattern[pattern].losses++;
         });
 
-        todayTrades.forEach(t => dailyPnL += (t.pnl || 0));
-
-        const totalTrades = wins + losses + breakevens;
-        const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
-        const avgWin = wins > 0 ? totalWinPnL / wins : 0;
-        const avgLoss = losses > 0 ? totalLossPnL / losses : 0;
+        const totalTrades = acc.wins + acc.losses + acc.breakevens;
+        const winRate = totalTrades > 0 ? (acc.wins / totalTrades) * 100 : 0;
+        const avgWin = acc.wins > 0 ? acc.winPnl / acc.wins : 0;
+        const avgLoss = acc.losses > 0 ? acc.lossPnl / acc.losses : 0;
         const avgRR = avgLoss > 0 ? avgWin / avgLoss : 0;
-        
+
         // Expectancy = (Win% × Avg Win) - (Loss% × Avg Loss)
-        const expectancy = totalTrades > 0 
+        const expectancy = totalTrades > 0
             ? ((winRate / 100) * avgWin) - (((100 - winRate) / 100) * avgLoss)
             : 0;
 
@@ -311,19 +356,19 @@ class PerformanceDashboard {
 
         this.stats = {
             totalTrades,
-            wins,
-            losses,
-            breakevens,
+            wins: acc.wins,
+            losses: acc.losses,
+            breakevens: acc.breakevens,
             totalPnL: equity,
-            dailyPnL,
+            dailyPnL: acc.dailyPnl,
             avgWin,
             avgLoss,
             avgRR,
             expectancy,
             maxDrawdown: maxDD,
             currentDrawdown: currentDD,
-            byPattern,
-            tradesToday: todayTrades.length
+            byPattern: acc.byPattern,
+            tradesToday: acc.dailyCount
         };
 
         // Build equity curve

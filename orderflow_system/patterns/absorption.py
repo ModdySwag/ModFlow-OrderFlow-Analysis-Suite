@@ -29,6 +29,7 @@ from orderflow_system.data.models import (
 from orderflow_system.analytics.footprint import FootprintBar
 from orderflow_system.analytics.delta import DeltaResult
 from orderflow_system.config.settings import AbsorptionConfig
+from orderflow_system.patterns import remember_signal
 
 
 @dataclass
@@ -258,7 +259,7 @@ class AbsorptionDetector:
             strength=strength,
             details=details,
         )
-        self._signal_history.append(signal)
+        remember_signal(self._signal_history, signal)
         return signal
 
     @property

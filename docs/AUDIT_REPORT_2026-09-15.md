@@ -1,6 +1,6 @@
 # ModFlow OrderFlow Analysis Suite — Audit & Enhancement Report (v2, recompiled)
 
-**Date:** 2026-09-15 · **Scope:** `C:\Users\Moddy\OrderFlow-Analysis-Pro` — all app-authored code
+**Date:** 2026-09-15 · **Scope:** `C:\Users\<you>\OrderFlow-Analysis-Pro` — all app-authored code
 **Supersedes:** `AUDIT_REPORT_2026-09-15.md` v1 — archived at `docs/archive/AUDIT_REPORT_2026-09-15_v1.md`
 
 ## Changelog — what changed in this recompile
@@ -23,8 +23,8 @@
 
 | Document | What it contributes |
 |---|---|
-| `C:\Users\Moddy\Desktop\code.txt` | Alpaca enhancement report: setup flow, search redesign, feed rules, error table, perf list |
-| `C:\Users\Moddy\Desktop\report.txt` | Codebase audit: P1–P8 findings, "what I'd fix first" order |
+| `C:\Users\<you>\Desktop\code.txt` | Alpaca enhancement report: setup flow, search redesign, feed rules, error table, perf list |
+| `C:\Users\<you>\Desktop\report.txt` | Codebase audit: P1–P8 findings, "what I'd fix first" order |
 | `AUDIT_REPORT_2026-09-15.md` v1 | Prior merge of the two + a first source pass |
 | `docs/ALPACA_INTEGRATION_PLAN.md` | Alpaca product plan (what Alpaca adds / cannot add, phases, safety, risk register) |
 | `docs/ALPACA_UPGRADE_EXECUTION_PLAN.md` | The executable plan derived from this report |

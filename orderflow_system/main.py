@@ -204,6 +204,10 @@ class InstrumentPipeline:
             "ticks": self._tick_count,
             "candles": self._candle_count,
             "cum_delta": self.delta_engine.cumulative_delta,
+            "late_prints": self.candle_builder.late_prints,
+            # SEC-06/SEC-16: the refused-print counters are system-level — one feed per run, gated
+            # before dispatch — gathered in engine.live_status()'s `quality` block, so they
+            # deliberately do not appear in this per-pipeline dict.
         }
 
 
@@ -226,6 +230,33 @@ def db_path_for_this_process() -> str:
         return str(config_store.db_path())
     except Exception:                              # pragma: no cover - desktop package absent
         return configured or str(DB_PATH)
+
+
+async def _run_owned(awaitables) -> None:
+    """Run the engine's concurrent group with an owner (MEM-A1-01).
+
+    ``asyncio.gather`` propagates the first exception but leaves the surviving members
+    running, and once it has raised, cancelling the finished gather task cannot reach
+    them (verified with a stdlib probe). The result was that one transient error could
+    orphan a fully live engine — feeds still streaming and still writing to the database
+    — while the UI showed "error" and the operator's next Start built a second engine
+    over it. Here the group is explicit: on the first failure (or on cancellation) every
+    pending member is cancelled and awaited before the exception leaves, so whoever
+    catches it owns a dead group and can dispose the system safely.
+    """
+    tasks = [asyncio.ensure_future(item) for item in awaitables]
+    try:
+        done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+        for task in done:
+            exc = task.exception()
+            if exc is not None:
+                raise exc
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 class OrderflowSystem:
@@ -418,6 +449,7 @@ class OrderflowSystem:
                 self.alpaca_feed = AlpacaFeed(
                     symbols=mapped,
                     on_tick=self._on_tick,
+                    on_bar=self._on_alpaca_bar,
                     key_id=ALPACA.key_id,
                     secret=ALPACA.secret,
                     paper=ALPACA.paper,
@@ -480,26 +512,57 @@ class OrderflowSystem:
             feed_tasks.append(uvi_server.serve())
             logger.info(f"Dashboard enabled at http://{DASHBOARD.host}:{DASHBOARD.port}")
 
-        # Run feed(s) + periodic tasks + dashboard concurrently
-        await asyncio.gather(
-            *feed_tasks,
-            self._periodic_tasks(),
-        )
+        # Run feed(s) + periodic tasks + dashboard concurrently. MEM-A1-01: an owned group —
+        # a failed member cancels its siblings before the error leaves this frame, so a crash
+        # can never orphan a live engine (gather propagates the exception but leaves the
+        # survivors running with nothing holding a cancellable handle).
+        await _run_owned([*feed_tasks, self._periodic_tasks()])
 
     async def stop(self):
         """Gracefully shut down."""
         logger.info("Shutting down...")
         self._running = False
-        if self.feed:
-            await self.feed.stop()
-        if self.mt5_feed:
-            await self.mt5_feed.stop()
-        if self.alpaca_feed:
-            await self.alpaca_feed.stop()
-        if self.nt_feed:
-            await self.nt_feed.stop()
-        await self.db.close()
+        try:
+            if self.feed:
+                await self.feed.stop()
+            if self.mt5_feed:
+                await self.mt5_feed.stop()
+            if self.alpaca_feed:
+                await self.alpaca_feed.stop()
+            if self.nt_feed:
+                await self.nt_feed.stop()
+        finally:
+            # MEM-A1-07: the last batch and the database close are not optional — this block
+            # runs even when a feed hangs and the engine's 15 s watchdog cancels this
+            # coroutine mid-cleanup (a cancelled stop used to leave the store open and the
+            # final tick batch lost). Each step is bounded so a stuck handle cannot pin it.
+            try:
+                await asyncio.wait_for(self._drain_tick_buffers(), timeout=10)
+            except Exception as exc:                  # noqa: BLE001 — timeout included
+                logger.warning("final tick flush did not finish: %s", exc)
+            try:
+                await asyncio.wait_for(self.db.close(), timeout=10)
+            except Exception as exc:                  # noqa: BLE001
+                logger.warning("database close did not finish: %s", exc)
         logger.info("System stopped.")
+
+    async def _drain_tick_buffers(self) -> None:
+        """Persist whatever the last batch left behind, before the database closes.
+
+        The periodic flusher checks ``_running`` before its body, so stopping skipped exactly the
+        final, unsent batch — measured 35 ticks lost in one stop/restart cycle (audit A-03).
+        """
+        for symbol in list(self._tick_buffers.keys()):
+            batch = self._tick_buffers[symbol]
+            if not batch:
+                continue
+            try:
+                await self.db.insert_ticks_batch(symbol, batch)
+            except Exception as exc:                 # noqa: BLE001
+                self._db_write_failures += 1
+                logger.warning("final tick flush failed for %s: %s", symbol, exc)
+            finally:
+                self._tick_buffers[symbol] = []
 
     def _download_mt5_history_sync(self):
         """
@@ -770,30 +833,52 @@ class OrderflowSystem:
     async def _handle_signal(
         self, symbol: str, pipeline: InstrumentPipeline, signal: Signal
     ):
-        """Route a signal through the aggregator and send alerts."""
+        """Route a signal through the aggregator and send alerts.
+
+        MEM-A1-09: both halves are guarded with the same rule as the tick path (:671-685) —
+        this runs inside the venue's frame handler (orderbook sweeps) and the candle-close
+        callback, and one transient persistence or alert error must not escape into the feed
+        loop (the tick path was hardened for exactly this; the signal path was not).
+        """
         # Store raw signal
-        await self.db.insert_signal(symbol, signal)
+        try:
+            await self.db.insert_signal(symbol, signal)
+        except Exception as exc:                     # noqa: BLE001
+            self._db_write_failures += 1
+            if self._db_write_failures in (1, 10, 100):
+                logger.warning("signal persistence failed (%d so far): %s",
+                               self._db_write_failures, exc)
 
         # Get current bias
         bias = pipeline.profile_framing.current_bias
 
-        # Aggregate with context
-        agg = self.aggregator.process_signal(
-            instrument=symbol,
-            signal=signal,
-            bias=bias,
-            current_price=pipeline.current_price,
-            recent_candles=pipeline.candle_builder.get_recent_candles(5),
-        )
+        try:
+            # Aggregate with context
+            agg = self.aggregator.process_signal(
+                instrument=symbol,
+                signal=signal,
+                bias=bias,
+                current_price=pipeline.current_price,
+                recent_candles=pipeline.candle_builder.get_recent_candles(5),
+            )
 
-        if agg:
-            trade = self.aggregator.get_active_trade(symbol)
-            await self.telegram.send_signal_alert(symbol, agg, bias, trade)
+            if agg:
+                trade = self.aggregator.get_active_trade(symbol)
+                await self.telegram.send_signal_alert(symbol, agg, bias, trade)
 
-            # Broadcast signal + trade state to dashboard
-            await self.ws_manager.broadcast_signal(symbol, agg)
-            if trade:
-                await self.ws_manager.broadcast_trade_state(symbol, trade)
+                # Broadcast signal + trade state to dashboard
+                await self.ws_manager.broadcast_signal(symbol, agg)
+                if trade:
+                    await self.ws_manager.broadcast_trade_state(symbol, trade)
+        except Exception as exc:                     # noqa: BLE001
+            self._db_write_failures += 1
+            logger.warning("signal handling failed for %s: %s", symbol, exc)
+
+    def _on_alpaca_bar(self, symbol: str, candle) -> None:
+        """Seeded REST bars feed the chart's own bar series — never the tick store (audit D-07)."""
+        pipeline = self.pipelines.get(symbol)
+        if pipeline is not None:
+            pipeline.candle_builder.load_historical_candles([candle])
 
     async def _run_alpaca_feed(self):
         """Seed the history, then start the streams (a fresh chart reads as broken)."""
@@ -829,6 +914,13 @@ class OrderflowSystem:
         while self._running:
             await asyncio.sleep(10)
             now = asyncio.get_event_loop().time()
+            # G-05: re-clamp inside the loop — the comment above claims a number typed in Settings
+            # is in force within a minute, but the interval was bound once at loop entry.
+            try:
+                _sh, _rd, _ph = _clamp_data(_config_store.load_config())
+                prune_interval = max(1, _ph) * 3600
+            except Exception:                        # noqa: BLE001 — keep the last good interval
+                pass
 
             # Flush remaining tick buffers. Guarded per symbol: this loop also rebuilds the volume
             # profiles, runs retention and broadcasts stats, and one failing write must not end it
@@ -844,11 +936,16 @@ class OrderflowSystem:
                 finally:
                     self._tick_buffers[symbol] = []
 
-            # Periodic VP rebuild
+            # Periodic VP rebuild. MEM-A1-01: guarded per symbol like every other job in
+            # this loop — this call was the one unguarded path (a locked/read-only DB here
+            # used to end the periodic loop), and it is what a transient DB error hits first.
             if now - last_profile > profile_interval:
                 last_profile = now
                 for symbol, pipeline in self.pipelines.items():
-                    await self._rebuild_volume_profile(symbol, pipeline)
+                    try:
+                        await self._rebuild_volume_profile(symbol, pipeline)
+                    except Exception as exc:          # noqa: BLE001
+                        logger.warning("volume-profile rebuild failed for %s: %s", symbol, exc)
 
             # R11: the economic calendar's event alerts (off unless switched on in the panel)
             if now - last_calendar > calendar_interval:
@@ -924,6 +1021,10 @@ class OrderflowSystem:
         vacuum = await self.db.ensure_incremental_autovacuum() if (deleted or reclaimable) else "skipped"
         if deleted or reclaimable:
             await self.db.vacuum_incremental()
+        else:
+            # MEM-A2-10: a pass that deleted nothing still checkpoints what it can, so the WAL
+            # does not grow between the passes that do truncate.
+            await self.db.checkpoint_passive()
         after = await self.db.storage_snapshot()
         summary = {
             "at_ms": int(datetime.now(timezone.utc).timestamp() * 1000),
@@ -1126,6 +1227,7 @@ class OrderflowSystem:
                 f"[{symbol}] VP rebuilt: POC={vp.poc:.2f} "
                 f"VAH={vp.vah:.2f} VAL={vp.val:.2f} "
                 f"Shape={vp.shape} | Bias={bias.direction.value}"
+                + (f" | derived: {vp.derived_candles} candles without footprint" if vp.derived_candles else "")
             )
 
             # Broadcast VP + bias to dashboard
@@ -1136,6 +1238,7 @@ class OrderflowSystem:
                 "shape": vp.shape,
                 "total_volume": vp.total_volume,
                 "lvn_levels": vp.lvn_levels,
+                "derived_candles": int(vp.derived_candles or 0),   # SEC-14: fabricated share, on the wire
                 "volume_at_price": {
                     str(p): v for p, v in sorted(vp.volume_at_price.items())
                 },

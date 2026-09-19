@@ -257,3 +257,33 @@ def test_the_test_stream_can_skip_auth():
     asyncio.run(run())
     assert stream.require_auth is False
     assert not any(frame.get("action") == "auth" for frame in sock.sent), "no keys, no auth frame"
+
+
+# ── MEM-A2-05: the mid cache belongs to one stream and dies with a reconnect ─────────────────
+def test_the_mid_cache_is_per_stream_and_cleared_on_connect():
+    one = AlpacaStream("k", "s", connect_factory=factory_for([FakeSocket()]))
+    two = AlpacaStream("k", "s", connect_factory=factory_for([FakeSocket()]))
+    assert one._mid_cache is not two._mid_cache, "shared class state was the bug"
+
+    one._handle_message({"T": "q", "S": "AAPL", "bp": 100.0, "ap": 100.2, "bs": 1, "as": 1,
+                         "t": "2026-09-15T13:30:00Z"})
+    assert one._last_mid("AAPL") is not None
+    assert two._last_mid("AAPL") is None, "the other stream has its own reference price"
+
+    async def reconnect():
+        stream = AlpacaStream("k", "s", connect_factory=factory_for([FakeSocket(hang=True)]))
+        stream._mid_cache["AAPL"] = 1.0           # stale state from a previous connection
+        task = asyncio.ensure_future(stream.run())
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            if not stream._mid_cache:
+                break
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return stream
+
+    stream = asyncio.run(reconnect())
+    assert stream._last_mid("AAPL") is None, "a reconnect clears the reference prices"

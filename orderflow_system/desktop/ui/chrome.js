@@ -32,15 +32,19 @@
            never hides with either bar — the lesson the rail taught: a control must not vanish
            with the thing it controls. */
         var TOGGLES = { rail: '#railToggle', menubar: '#menubarToggle' };
-        var GLYPHS = { rail: ['\u21e4', '\u21e5'], menubar: ['\u2303', '\u2304'] };   // [visible, hidden]
+        var GLYPHS = { rail: ['\u21e4', '\u21e5'] };                   // [visible, hidden]
+        var WORDS = { menubar: ['menu hide', 'menu show'] };           // §94 — the label IS the face
         var tgl = TOGGLES[which] ? document.querySelector(TOGGLES[which]) : null;
         if (tgl) {
             tgl.setAttribute('aria-pressed', String(!!on));
             tgl.classList.toggle('on', !!on);
-            /* Directional face: the glyph shows what pressing it will DO (owner's note). The
-               labelled menu-bar toggle (§93) keeps its word, so its glyph lives in its own span. */
+            /* Directional face: what pressing it will DO, said on the control itself (owner's
+               note). The rail keeps a glyph; the menu-bar toggle (§94) says it in words — no
+               caret (the owner read the bare glyph as decoration). */
             var glyph = GLYPHS[which];
-            if (glyph) (tgl.querySelector('.ct-face') || tgl).textContent = glyph[on ? 1 : 0];
+            if (glyph) tgl.textContent = glyph[on ? 1 : 0];
+            var words = WORDS[which];
+            if (words) tgl.textContent = words[on ? 1 : 0];
             tgl.title = (on ? 'Show' : 'Hide') + (which === 'rail' ? ' the side rail (R)' : ' the top menu bar (B)');
         }
         if (remember !== false) { const s = read(); s[which] = !!on; write(s); }

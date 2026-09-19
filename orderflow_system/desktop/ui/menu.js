@@ -204,7 +204,7 @@
         const names = Object.keys(all).sort();
         const wsList = names.length
             ? names.map((name) => `<span class="menu-ws"><button data-ws-load="${esc(name)}">${esc(name)}</button>`
-                + `<button class="menu-ws-x" data-ws-del="${esc(name)}" title="delete this workspace">×</button></span>`).join('')
+                + `<button class="menu-ws-x" data-ws-del="${esc(name)}" title="Delete this workspace">×</button></span>`).join('')
             : '<span class="dim">no saved workspaces yet</span>';
 
         host.innerHTML = `<div class="menu-col">
@@ -244,18 +244,117 @@
         if (el('statusHint')) el('statusHint').textContent = 'Ctrl+K palette · P pause · ? hotkeys · ☰ menu';
     }
 
+    /* §117 — the sheet edits the map. A dispatched row gets a **Change** button: click it, press
+       the new combination, and it is written to ui.keys in the config (keys.js applies it in the
+       same breath). A chord another binding already holds is refused with the owner named —
+       never silently stolen — and every change is reversible (Reset on the row, Reset all in
+       the header). The sheet still renders from OFAPKEYS.list(): one list, one dispatcher. */
+    const hkState = { capture: '', msg: '' };
+
+    function hkLabel(id) {
+        const rows = (window.OFAPKEYS && OFAPKEYS.list) ? OFAPKEYS.list() : [];
+        const row = rows.filter((r) => r.id === id)[0];
+        return row ? row.label : id;
+    }
+
     function paintHotkeys() {
         const host = el('hotkeySheet');
         if (!host) return;
         const rows = (window.OFAPKEYS && OFAPKEYS.list) ? OFAPKEYS.list() : [];
-        host.innerHTML = `<div class="overlay-title">Hotkeys</div>`
+        const anyCustom = rows.some((r) => r.custom);
+        const head = (hkState.capture
+            ? `<div class="hk-msg">press the new combination for “${esc(hkLabel(hkState.capture))}” — Esc cancels</div>`
+            : '')
+            + (hkState.msg ? `<div class="hk-msg">${esc(hkState.msg)}</div>` : '');
+        host.innerHTML = `<div class="overlay-title">Hotkeys`
+            + (anyCustom ? ` <button class="btn small" id="hkResetAll">Reset all changes</button>` : '')
+            + `</div>` + head
             + (rows.length
-                ? `<table class="hk-table"><thead><tr><th>Keys</th><th>Action</th><th>Scope</th></tr></thead><tbody>`
-                  + rows.map((r) => `<tr><td class="hk-keys">${esc(r.keys)}</td><td>${esc(r.label)}</td>`
-                    + `<td class="hk-scope ${r.scope === 'Global' ? 'on' : ''}">${esc(r.scope)}</td></tr>`).join('')
+                ? `<table class="hk-table"><thead><tr><th>Keys</th><th>Action</th><th>Scope</th><th></th></tr></thead><tbody>`
+                  + rows.map((r) => {
+                        const capturing = hkState.capture === r.id;
+                        const keys = capturing
+                            ? 'press…'
+                            : esc(r.keys) + (r.custom ? ` <span class="dim">(was ${esc(r.defaults)})</span>` : '');
+                        const edit = r.dispatched
+                            ? `<button class="btn small hk-edit" data-hk="${esc(r.id)}">Change</button>`
+                              + (r.custom ? ` <button class="btn small hk-reset" data-hk="${esc(r.id)}">Reset</button>` : '')
+                            : '';
+                        return `<tr class="${capturing ? 'hk-capturing' : ''}"><td class="hk-keys">${keys}</td>`
+                            + `<td>${esc(r.label)}</td>`
+                            + `<td class="hk-scope ${r.scope === 'Global' ? 'on' : ''}">${esc(r.scope)}</td>`
+                            + `<td class="hk-act">${edit}</td></tr>`;
+                    }).join('')
                   + `</tbody></table>`
                 : '<div class="dim">the shortcut map is still loading…</div>')
-            + `<div class="dim">Generated from the one shortcut map (keys.js), so every key the app honours is here — and no key fires while the focus is in a field.</div>`;
+            + `<div class="dim">Generated from the one shortcut map (keys.js) — every key the app honours is here, and no key fires while the focus is in a field. Change gives a row your own combination; a taken chord is refused with its owner named, and Reset brings the shipped keys back.</div>`;
+        const resetAll = el('hkResetAll');
+        if (resetAll) resetAll.onclick = () => resetAllKeys();
+        host.querySelectorAll('.hk-edit').forEach((btn) => {
+            btn.onclick = (ev) => { ev.stopPropagation(); beginCapture(btn.getAttribute('data-hk')); };
+        });
+        host.querySelectorAll('.hk-reset').forEach((btn) => {
+            btn.onclick = (ev) => { ev.stopPropagation(); resetOneKey(btn.getAttribute('data-hk')); };
+        });
+    }
+
+    /* The capture owns the keyboard while it is armed: the listener runs in the capture phase,
+       so the combination never reaches the dispatcher (and never types into the page). */
+    function captureKeys(ev) {
+        if (!hkState.capture) return;
+        ev.preventDefault();
+        if (ev.stopPropagation) ev.stopPropagation();
+        const key = String(ev.key || '');
+        if (key === 'Escape') { hkState.capture = ''; hkState.msg = 'nothing changed'; paintHotkeys(); return; }
+        if (/^(control|shift|alt|meta|altgraph|capslock|dead)$/i.test(key)) return;   // a modifier alone is not a chord
+        if (!window.OFAPKEYS) return;
+        const chord = OFAPKEYS.canonical(ev);
+        if (!chord) return;
+        const clash = OFAPKEYS.conflicts(chord, hkState.capture);
+        if (clash.length) {
+            hkState.msg = OFAPKEYS.pretty(chord) + ' is already taken by: '
+                + clash.map((c) => c.label + ' (' + c.scope + ')').join(', ')
+                + ' — press another combination, or Esc to cancel';
+            paintHotkeys();
+            return;
+        }
+        const id = hkState.capture;
+        OFAPKEYS.rebind(id, [chord]);
+        hkState.capture = '';
+        hkState.msg = 'changed to ' + OFAPKEYS.pretty(chord);
+        void saveKeys();
+        OFAPKEYS.annotate();
+        paintHotkeys();
+    }
+
+    function beginCapture(id) { hkState.capture = id; hkState.msg = ''; paintHotkeys(); }
+
+    function resetOneKey(id) {
+        OFAPKEYS.clearOverride(id);
+        hkState.msg = 'reset “' + hkLabel(id) + '” to its shipped keys';
+        void saveKeys();
+        OFAPKEYS.annotate();
+        paintHotkeys();
+    }
+
+    function resetAllKeys() {
+        OFAPKEYS.clearAllOverrides();
+        hkState.msg = 'all shortcut changes reset';
+        void saveKeys();
+        OFAPKEYS.annotate();
+        paintHotkeys();
+    }
+
+    /* One write per change, through the standard config patch. Emptied overrides travel as []
+       so the store’s rebuild (which drops them) can actually remove a stored chord — a plain
+       merge would keep it. The map is always the WHOLE map, so nothing else can drift. */
+    async function saveKeys() {
+        try {
+            await api('/api/control/config', { method: 'POST',
+                body: { ui: { keys: { version: 1, overrides: OFAPKEYS.overrides() } } } });
+        } catch (err) {
+            hkState.msg = 'changed in this session, but saving failed: ' + err;
+        }
     }
 
     /* ── open / close / keys ─────────────────────────────────────────────────── */
@@ -286,6 +385,9 @@
         if (el('menuBtn')) el('menuBtn').onclick = (ev) => { ev.stopPropagation(); state.open ? close() : open(); };
         if (el('menuClose')) el('menuClose').onclick = close;
         if (el('hotkeyClose')) el('hotkeyClose').onclick = () => showHotkeys(false);
+        /* §117: the rebind capture. Capture phase, so an armed capture never lets a
+           combination fall through to the dispatcher or into a focused field. */
+        document.addEventListener('keydown', captureKeys, true);
         if (el('menuFilter')) el('menuFilter').oninput = (ev) => { state.filter = ev.target.value; paintMenu(); };
         document.addEventListener('click', (ev) => {
             const panel = el('menuPanel');

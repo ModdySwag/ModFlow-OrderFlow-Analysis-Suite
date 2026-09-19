@@ -15,7 +15,7 @@ new Function('window', 'document', src)(win, undefined);
 const S2 = win.OFAPSCOPES;
 
 check('the module is exposed without a document', () => {
-    assert(S2 && Array.isArray(S2.SCOPED) && S2.SCOPED.length === 12, 'twelve scoped dials');
+    assert(S2 && Array.isArray(S2.SCOPED) && S2.SCOPED.length === 16, 'sixteen scoped dials (B5 added the dim/highlight pair per surface)');
     assert(typeof S2.capture === 'function' && typeof S2.planApply === 'function');
     assert(typeof S2.applyFor === 'function' && typeof S2.forget === 'function');
 });

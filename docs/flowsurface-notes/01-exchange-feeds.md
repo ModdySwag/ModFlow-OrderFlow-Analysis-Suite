@@ -6,7 +6,7 @@
 
 # flowsurface `exchange/` crate — data-feed ingestion briefing (IDEAS for a Python feed layer)
 
-Source: `C:\Users\Moddy\AppData\Local\Temp\flowsurface_ref` @ c1388d4, GPL-3.0.
+Source: `C:\Users\<you>\AppData\Local\Temp\flowsurface_ref` @ c1388d4, GPL-3.0.
 **Ideas/designs only — no code may be copied into OFAP.**
 Target: ModFlow OrderFlow Analysis Suite (`orderflow_system/data/bybit_feed.py`, alpaca feeds, WS manager, atlas layer).
 Line refs are `path:line` relative to repo root. Nothing was run; everything below is read from source.

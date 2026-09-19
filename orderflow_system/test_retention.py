@@ -206,3 +206,155 @@ def test_the_vacuum_conversion_refuses_without_free_space(tmp_path, monkeypatch)
 
     monkeypatch.setattr(_shutil, "disk_usage", lambda _p: types.SimpleNamespace(free=1))
     assert asyncio.run(run()) == "no-space"
+
+
+# ── MEM-A2-09 / MEM-A2-10: the journal joins retention; the WAL result is checked ────────────
+def test_retention_covers_the_trade_journal():
+    import sqlite3  # noqa: F401  (the scenario uses the raw handle through Database)
+
+    async def scenario():
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(str(Path(td) / "t.db"))
+            await db.connect()
+            old = NOW_MS - 40 * DAY
+            new = NOW_MS - 1 * DAY
+            for entry, exit_ in ((old, old), (new, new), (None, None)):
+                await db._db.execute(
+                    "INSERT INTO trade_journal (instrument, direction, entry_time_ms, exit_time_ms) "
+                    "VALUES (?, ?, ?, ?)", ("BTCUSDT", "buy", entry, exit_))
+            await db._db.commit()
+
+            out = await db.prune_other_tables(NOW_MS - 30 * DAY)
+            assert out["trade_journal"] == 1, out
+            cur = await db._db.execute("SELECT COUNT(*) FROM trade_journal")
+            assert int((await cur.fetchone())[0]) == 2, "the recent and the undated rows survive"
+            await db.close()
+
+    asyncio.run(scenario())
+
+
+def test_the_event_history_takes_the_configured_window():
+    from orderflow_system.atlas.history import EventHistory
+    from orderflow_system.atlas.hub import FeatureHub
+    from orderflow_system.atlas.services import attach_services
+
+    assert EventHistory(":memory:").retention_days == 7.0
+    assert EventHistory(":memory:", retention_days=1).retention_days == 1.0
+
+    hub = FeatureHub({})
+    attach_services(hub, {"history": {"enabled": False, "retention_days": 3}})
+    assert hub.history is not None and hub.history.retention_days == 3.0, \
+        "the configured window reaches the event log, not its own default"
+
+
+def test_the_wal_checkpoint_reports_the_pragmas_own_answer():
+    import sqlite3
+
+    async def scenario():
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "t.db"
+            db = Database(str(path))
+            await db.connect()
+            await db.insert_ticks_batch("BTCUSDT", [_tick(NOW_MS) for _ in range(100)])
+
+            reader = sqlite3.connect(str(path))
+            reader.execute("BEGIN")
+            reader.execute("SELECT COUNT(*) FROM ticks").fetchone()
+            busy = await db.checkpoint_passive()
+            cur = await db._db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            row = await cur.fetchone()
+            assert busy == (not int(row[0])), "the helper reports the pragma's own busy flag"
+            reader.rollback()
+            reader.close()
+
+            await db.vacuum_incremental()
+            wal = path.with_name(path.name + "-wal")
+            assert (not wal.exists()) or wal.stat().st_size == 0, \
+                "a quiet truncate leaves an empty WAL, not a growing one"
+            await db.close()
+
+    asyncio.run(scenario())
+
+
+def test_the_periodic_runner_prunes_on_its_interval_and_survives_a_failure(monkeypatch):
+    """G-05: the runner prunes when due (re-clamping each pass) and a failing prune does not end it."""
+    from orderflow_system.main import OrderflowSystem
+    from orderflow_system.desktop import config_store as _cs
+
+    class _Sentinel(Exception):
+        pass
+
+    passes = {"n": 0}
+    prunes = []
+
+    system = object.__new__(OrderflowSystem)
+    system._running = True
+    system._tick_buffers = {}
+    system.pipelines = {}
+    system._db_write_failures = 0
+    system._recent_ticks = {}
+    system._recent_ticks_max = 10
+
+    class _DB:
+        async def insert_ticks_batch(self, symbol, batch):
+            return None
+
+    class _WS:
+        client_count = 0
+
+        async def broadcast_stats(self, payload):
+            return None
+
+        async def broadcast(self, channel, payload, symbol=""):
+            return None
+
+    async def _prune():
+        prunes.append(passes["n"])
+        if len(prunes) == 1:
+            raise RuntimeError("prune failed once")            # the loop must survive this
+        return {"skipped": "test"}
+
+    async def _noop():
+        return None
+
+    system.db = _DB()
+    system.data_source = type("_DS", (), {"value": "bybit"})()
+    system.ws_manager = _WS()
+    system._prune_storage = _prune
+    system._storage_tick = _noop
+    system._calendar_tick = _noop
+
+    monkeypatch.setattr(_cs, "load_config",
+                        lambda: {"data": {"prune_interval_hours": 1, "session_start_hour": 0,
+                                          "retention_days": 7}})
+
+    real_sleep = asyncio.sleep
+    sleeps = {"n": 0}
+    # the loop clock must advance past the (minimum 1 h) prune interval, or "due" never happens:
+    # each read moves an hour, so every pass is due — exactly what the pin wants to observe.
+    clock = {"t": 10_000.0}
+
+    class _Loop:
+        def time(self):
+            clock["t"] += 3_700.0
+            return clock["t"]
+
+    monkeypatch.setattr(asyncio, "get_event_loop", lambda: _Loop())
+
+    async def fake_sleep(seconds):
+        sleeps["n"] += 1
+        passes["n"] = sleeps["n"]
+        if sleeps["n"] >= 3:                                   # two body passes, then stop
+            raise _Sentinel()
+        await real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    try:
+        asyncio.run(system._periodic_tasks())
+    except _Sentinel:
+        pass
+    finally:
+        monkeypatch.undo()
+
+    assert len(prunes) >= 2, f"the prune ran on its interval each pass: {prunes}"
+    assert prunes[0] == 1 and prunes[1] == 2, "once per pass, not once per tick"

@@ -508,6 +508,53 @@ def test_to_dict_round_trips_through_json():
     assert [o["id"] for o in account.open_orders()] == ["o2"]
 
 
+# ══════════════════════════════════════════════════════════════
+# The bracket, edited after entry (§118)
+# ══════════════════════════════════════════════════════════════
+
+def test_exits_can_be_set_moved_and_cleared_on_an_open_position():
+    account = make()
+    assert account.exits() == {"stop_loss": None, "take_profit": None}
+    refused = account.set_exits(stop_loss=4999.0)
+    assert refused["ok"] is False and "no open position" in refused["reason"]
+
+    fill(account, "buy", 2, 5000.0, ts_ms=1_000, stop_loss=4999.0, take_profit=5004.0)
+    assert account.exits() == {"stop_loss": 4999.0, "take_profit": 5004.0}
+
+    moved = account.set_exits(stop_loss=4999.5, take_profit=5004.0, ts_ms=1_100)
+    assert moved["ok"] is True and moved["changed"] is True
+    assert account.exits()["stop_loss"] == 4999.5
+    # the tape still decides, and the MOVED stop is the one that fires
+    fills = account.on_trade(4999.5, 1, "sell", ts_ms=2_000)
+    assert fills[0]["reason"] == "stop_loss" and fills[0]["price"] == 4999.5
+
+
+def test_clearing_one_leg_keeps_the_other_and_junk_is_refused_without_clearing():
+    account = make()
+    fill(account, "buy", 1, 5000.0, ts_ms=1_000, stop_loss=4999.0, take_profit=5004.0)
+
+    junk = account.set_exits(stop_loss="abc", take_profit=5004.0)
+    assert junk["ok"] is False and "stop_loss" in junk["reason"]
+    assert account.exits() == {"stop_loss": 4999.0, "take_profit": 5004.0}   # nothing moved
+
+    cleared = account.set_exits(stop_loss=4999.0, take_profit=None)
+    assert cleared["ok"] is True and cleared["changed"] is True
+    assert account.exits() == {"stop_loss": 4999.0, "take_profit": None}
+    assert account.on_trade(5009.0, 1, "buy", ts_ms=2_000) == []             # no target to hit
+    assert account.position()["side"] == "long"
+    assert account.on_trade(4999.0, 1, "sell", ts_ms=3_000)[0]["reason"] == "stop_loss"
+
+
+def test_an_unchanged_bracket_reports_changed_false_and_exits_survive_a_round_trip():
+    account = make()
+    fill(account, "buy", 1, 5000.0, ts_ms=1_000, stop_loss=4999.0)
+    same = account.set_exits(stop_loss=4999.0, take_profit=None)
+    assert same["ok"] is True and same["changed"] is False
+    account.set_exits(stop_loss=4998.0, take_profit=5002.0)
+    restored = PaperAccount.from_dict(json.loads(json.dumps(account.to_dict())))
+    assert restored.exits() == {"stop_loss": 4998.0, "take_profit": 5002.0}
+
+
 def test_from_dict_is_tolerant_of_junk():
     account = PaperAccount.from_dict({"tick_size": "abc", "orders": ["nonsense"], "position": None})
     assert account.tick_size == 0.01 and account.open_orders() == []

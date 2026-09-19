@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import functools
 import logging
 import socket
 import sys
+import threading
 import time
 from typing import Any, Optional
 
@@ -227,6 +229,42 @@ def base_configs() -> dict[str, InstrumentConfig]:
 # Capability discovery (what can this machine + data source actually do?)
 # ──────────────────────────────────────────────────────────────
 
+#: MT5 is a process-global module: while the engine runs, its feed owns the terminal session and
+#: a probe that calls ``mt5.shutdown()`` on that same module kills the feed's session (audit
+#: A-05). Probes are serialised with this lock, and the shutdown helper leaves the session alone
+#: while the feed is up.
+_MT5_PROBE_LOCK = threading.Lock()
+
+
+def _mt5_feed_owns_session() -> bool:
+    """True while a running engine has an MT5 feed holding the terminal session.
+
+    ``engine.system`` is a property (the codebase reads it as an attribute everywhere), and the
+    ``is True`` test keeps a stub or mock attribute from reading as an owning feed.
+    """
+    feed = getattr(engine.system, "mt5_feed", None)
+    return bool(feed is not None and getattr(feed, "_initialized", False) is True)
+
+
+def _mt5_shutdown_unless_owned(mt5: Any) -> None:
+    """Release a probe's own session — unless the live feed owns it (then the probe must not)."""
+    if _mt5_feed_owns_session():
+        return
+    try:
+        mt5.shutdown()
+    except Exception:
+        pass
+
+
+def _mt5_serialised(fn):
+    """Run one MT5 probe at a time — the module is process-global and concurrent probes raced."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with _MT5_PROBE_LOCK:
+            return fn(*args, **kwargs)
+    return wrapper
+
+
 def mt5_status() -> dict[str, Any]:
     """Is the MetaTrader5 bridge even installable/usable on this machine?"""
     info: dict[str, Any] = {"available": False, "reason": "", "terminal": None}
@@ -245,6 +283,7 @@ def mt5_status() -> dict[str, Any]:
     return info
 
 
+@_mt5_serialised
 def mt5_probe(payload: dict[str, Any]) -> dict[str, Any]:
     """Try to bring the MetaTrader 5 bridge up with the settings the user typed.
 
@@ -348,10 +387,7 @@ def mt5_probe(payload: dict[str, Any]) -> dict[str, Any]:
             except Exception:
                 out["symbols"][str(sym)] = False
     finally:
-        try:
-            mt5.shutdown()
-        except Exception:
-            pass
+        _mt5_shutdown_unless_owned(mt5)
 
     out["ok"] = True
     out["stage"] = "ready"
@@ -413,6 +449,7 @@ def _mt5_begin(payload: dict[str, Any] | None) -> tuple[Any, Optional[str]]:
     return mt5, None
 
 
+@_mt5_serialised
 def mt5_symbol_names(payload: dict[str, Any] | None = None, *, refresh: bool = False) -> dict[str, Any]:
     """Every symbol the connected broker lists, cached for MT5_SYMBOLS_TTL_S.
 
@@ -432,15 +469,13 @@ def mt5_symbol_names(payload: dict[str, Any] | None = None, *, refresh: bool = F
     try:
         listed = mt5.symbols_get()
     finally:
-        try:
-            mt5.shutdown()
-        except Exception:
-            pass
+        _mt5_shutdown_unless_owned(mt5)
     names = sorted({str(getattr(s, "name", "") or "") for s in (listed or []) if getattr(s, "name", "")})
     cache.update({"key": key, "at": time.time(), "names": names})
     return {"ok": True, "available": True, "cached": False, "names": names, "total": len(names)}
 
 
+@_mt5_serialised
 def mt5_symbols(payload: dict[str, Any] | None = None, query: str = "",
                 limit: int = 40, names: Optional[list[str]] = None) -> dict[str, Any]:
     """Broker symbol rows for the look-up: matches for ``query`` (or exactly ``names``), each
@@ -492,13 +527,11 @@ def mt5_symbols(payload: dict[str, Any] | None = None, query: str = "",
                 "description": str(getattr(info, "description", "") or "") if info is not None else "",
             })
     finally:
-        try:
-            mt5.shutdown()
-        except Exception:
-            pass
+        _mt5_shutdown_unless_owned(mt5)
     return {"ok": True, "available": True, "total": len(listed), "symbols": rows}
 
 
+@_mt5_serialised
 def mt5_validate_symbols(names: list[str], payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Check specific broker names at add time: {name: {listed, tick_size, description}}.
 
@@ -529,10 +562,7 @@ def mt5_validate_symbols(names: list[str], payload: dict[str, Any] | None = None
                 "description": str(getattr(info, "description", "") or "") if info is not None else "",
             }
     finally:
-        try:
-            mt5.shutdown()
-        except Exception:
-            pass
+        _mt5_shutdown_unless_owned(mt5)
     return {"ok": True, "available": True, "symbols": out}
 
 
@@ -1180,9 +1210,10 @@ async def _wire_atlas(system, cfg: dict) -> Any:
 
     hub.set_sink(sink)
 
-    # keep every enabled instrument registered with its real tick size
+    # keep every enabled instrument registered with its real tick size. `register` (not
+    # `ensure`): a streamed symbol is protected from the REST-side eviction (MEM-A1-08).
     for pipeline in system.pipelines.values():
-        hub.ensure(pipeline.symbol, pipeline.config.tick_size)
+        hub.register(pipeline.symbol, pipeline.config.tick_size)
 
     original_tick = system._on_tick
     original_book = system._on_orderbook
@@ -1270,6 +1301,13 @@ class EngineController:
     async def start(self, cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         if self._state in ("starting", "running"):
             return {"ok": False, "error": f"engine already {self._state}"}
+        if self._system is not None:
+            # MEM-A1-01: an undisposed system from a previous run (a crash that ended the
+            # supervisor without teardown) — never build a second engine over a live one
+            # that is still streaming and writing; dispose the old one first.
+            logger.warning("start(): disposing the previous run's system before starting")
+            await self._dispose(self._system)
+            self._system = None
 
         cfg = cfg or config_store.load_config()
         self._loop = asyncio.get_running_loop()
@@ -1321,6 +1359,14 @@ class EngineController:
             self._task = asyncio.create_task(self._run(system))
             self._state = "running"
             logger.info("Engine started: source=%s symbols=%s", self._source, self._symbols)
+            try:
+                # What this run consumes is fixed from here: stamp it, so a later config change
+                # can be named ("restart to apply: instruments") instead of guessed. Bookkeeping
+                # only — a live engine is never failed over it.
+                from orderflow_system.desktop import profiles as profiles_mod
+                profiles_mod.note_engine_start(cfg)
+            except Exception:
+                logger.debug("engine start stamp failed", exc_info=True)
             return {"ok": True, "state": self._state, "symbols": self._symbols,
                     "skipped": self._skipped, "source": self._source}
         except Exception as exc:                 # never take the GUI down with us
@@ -1328,6 +1374,55 @@ class EngineController:
             self._error = f"{type(exc).__name__}: {exc}"
             logger.exception("Engine start failed")
             return {"ok": False, "error": self._error}
+
+    async def _dispose(self, system) -> None:
+        """Stop one system's services and release it — the single teardown path.
+
+        MEM-A1-01: used by stop(), by the crash path in _run() and by start() when a
+        previous run left an undisposed system behind. It never touches ``self._task``
+        (the crash path calls it from inside that very task).
+        """
+        if system is None:
+            return
+        hub = getattr(system, "_atlas_hub", None)
+        if hub is not None:
+            try:
+                await hub.stop_feeds()
+            except Exception:
+                logger.debug("atlas feed stop failed", exc_info=True)
+            # The atlas event-history flusher is a task with its own lifecycle; stopping
+            # the feeds alone left one orphaned per engine stop/restart cycle (audit A-01).
+            history = getattr(hub, "history", None)
+            if history is not None:
+                try:
+                    await history.stop()
+                except Exception:
+                    logger.debug("atlas history stop failed", exc_info=True)
+            # MEM-A1-03: the notifier half of the same remediation — the engine that
+            # started the Telegram client closes it (Bot.shutdown()), never the GC.
+            notifier = getattr(hub, "notifier", None)
+            if notifier is not None:
+                try:
+                    await notifier.stop()
+                except Exception:
+                    logger.debug("atlas notifier stop failed", exc_info=True)
+            # MEM-A1-06: cancel the hub's in-flight fire-and-forget emissions so a stop leaves
+            # none of its tasks running (they were previously unreferenced and uncancellable).
+            shutdown = getattr(hub, "shutdown", None)
+            if shutdown is not None:
+                try:
+                    await shutdown()
+                except Exception:
+                    logger.debug("atlas hub task shutdown failed", exc_info=True)
+        system._running = False
+        try:
+            await asyncio.wait_for(system.stop(), timeout=15)
+        except asyncio.TimeoutError:
+            logger.warning("Engine stop timed out — cancelling tasks")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Error during engine stop: %s", exc)
 
     async def _run(self, system) -> None:
         try:
@@ -1337,29 +1432,32 @@ class EngineController:
             raise
         except Exception as exc:
             self._error = f"{type(exc).__name__}: {exc}"
-            self._state = "error"
             logger.exception("Engine crashed")
+            # MEM-A1-01: a failed run must not leave a live system behind — the group's
+            # ownership fix cancels the sibling tasks; this releases the system those
+            # siblings belonged to, so the next Start starts from nothing.
+            try:
+                await self._dispose(system)
+            except Exception:
+                logger.warning("engine teardown after a crash failed", exc_info=True)
+            try:
+                from orderflow_system.dashboard import app as dashboard_app
+                if dashboard_app.get_system() is system:
+                    dashboard_app.set_system(None)
+            except Exception:
+                logger.debug("dashboard system clear failed", exc_info=True)
+            if self._system is system:
+                self._system = None
+                self._symbols = []
+                self._started_at = None
+            self._state = "error"
 
     async def stop(self) -> dict[str, Any]:
         if self._state == "stopped" and self._system is None:
             return {"ok": True, "state": "stopped"}
         self._state = "stopping"
-        system = self._system
         try:
-            if system is not None:
-                hub = getattr(system, "_atlas_hub", None)
-                if hub is not None:
-                    try:
-                        await hub.stop_feeds()
-                    except Exception:
-                        logger.debug("atlas feed stop failed", exc_info=True)
-                system._running = False
-                try:
-                    await asyncio.wait_for(system.stop(), timeout=15)
-                except asyncio.TimeoutError:
-                    logger.warning("Engine stop timed out — cancelling tasks")
-        except Exception as exc:
-            logger.warning("Error during engine stop: %s", exc)
+            await self._dispose(self._system)
         finally:
             if self._task is not None:
                 self._task.cancel()
@@ -1402,6 +1500,9 @@ class EngineController:
                 "volume_profile", "bias", "orderbook", "scanner", "strategy")
         recent = (getattr(system, "_recent_ticks", {}) or {}) if system is not None else {}
         last_candles = (getattr(system, "_last_candles", {}) or {}) if system is not None else {}
+        #: SEC-13: what the feeds refused, in front of the user (filled in below when the engine
+        #: is running; zeros are the honest answer when it is stopped).
+        quality = {"late_prints": 0, "rejected_ticks": 0}
         if system is None:
             endpoints = {k: "demo" for k in keys}
         else:
@@ -1419,6 +1520,14 @@ class EngineController:
                 if any(getattr(s, "stale", False) for s in snapshots):
                     return "stale"
                 return "live" if any(s is not None for s in snapshots) else "warming"
+
+            # SEC-13: the feeds and the candle builders count what they refuse (late prints, a
+            # non-finite price, a lost book) — those counters are what tells a trader whether the
+            # tape in front of them is whole. They ride along with the live/warming map.
+            for pipe in list((getattr(system, "pipelines", {}) or {}).values()):
+                quality["late_prints"] += int(getattr(getattr(pipe, "candle_builder", None), "late_prints", 0) or 0)
+                quality["rejected_ticks"] += int(getattr(getattr(pipe, "feed", None), "_rejected_ticks", 0) or 0)
+            quality["rejected_ticks"] += int(getattr(getattr(system, "mt5_feed", None), "_rejected_ticks", 0) or 0)
 
             signals = getattr(system, "_recent_signals", {}) or {}
             pipelines = list(system.pipelines.values())
@@ -1462,6 +1571,7 @@ class EngineController:
             "state": self._state,
             "overall": overall,
             "endpoints": endpoints,
+            "quality": quality,               # SEC-13: what the feeds refused, in front of the user
             "age": age,
             "symbols": self._symbols,
             "source": self._source,

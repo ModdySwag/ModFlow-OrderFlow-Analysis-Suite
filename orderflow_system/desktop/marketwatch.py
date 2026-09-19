@@ -53,6 +53,10 @@ def _bybit_board() -> list[dict[str, Any]]:
 
 _MT5_OPEN: dict[str, tuple[float, float]] = {}   # symbol -> (fetched_at, prior-day open)
 _MT5_OPEN_TTL_S = 300.0
+#: MEM-B-07: the board can be paged over thousands of broker symbols, one insert each; the map is
+#: capped and expired keys are reclaimed, so browsing cannot grow it for the session.
+_MT5_OPEN_MAX = 2_000
+_BOARD_CACHE_MAX = 8
 
 
 def _mt5_daily_open(mt5: Any, symbol: str) -> float:
@@ -74,6 +78,15 @@ def _mt5_daily_open(mt5: Any, symbol: str) -> float:
         opening = 0.0
     if opening:
         _MT5_OPEN[symbol] = (now, opening)
+        if len(_MT5_OPEN) > _MT5_OPEN_MAX:
+            # MEM-B-07: expired keys first, then the oldest — browsing the broker board cannot
+            # grow this map for the session.
+            for stale in [key for key, (at, _v) in _MT5_OPEN.items()
+                          if now - at >= _MT5_OPEN_TTL_S]:
+                _MT5_OPEN.pop(stale, None)
+        while len(_MT5_OPEN) > _MT5_OPEN_MAX:
+            oldest = min(_MT5_OPEN.items(), key=lambda item: item[1][0])[0]
+            _MT5_OPEN.pop(oldest, None)
     return opening
 
 
@@ -116,10 +129,9 @@ def _mt5_visible_board(needle: str, limit: int, offset: int) -> dict[str, Any]:
                 pass
             rows.append(row)
     finally:
-        try:
-            mt5.shutdown()
-        except Exception:
-            pass
+        # E-05: the same ownership rule the symbol search follows — a probe never shuts down a
+        # session the live MT5 feed owns (the old unguarded shutdown() killed a streaming engine).
+        engine_mod._mt5_shutdown_unless_owned(mt5)
     note = (f"MT5 — mirroring the terminal's own Market Watch "
             f"({len(names)} symbol{'s' if len(names) != 1 else ''} visible), quotes live off it"
             + (f" · filtered on “{needle}”" if needle else ""))
@@ -205,6 +217,13 @@ def _exchange_board(venue: str, *, opener: Any = None) -> list[dict[str, Any]]:
 
     rows = [row for row in rows if row["symbol"]]
     rows.sort(key=lambda row: row["symbol"])
+    # MEM-B-07: expired boards are dropped on insert (there are only a handful of venues, but a
+    # venue that fails to refresh must not pin its rows forever either)
+    for stale in [key for key, (at, _v) in _BOARD_CACHE.items() if now - at >= _BOARD_TTL_S * 4]:
+        _BOARD_CACHE.pop(stale, None)
+    if len(_BOARD_CACHE) > _BOARD_CACHE_MAX:
+        oldest = min(_BOARD_CACHE.items(), key=lambda item: item[1][0])[0]
+        _BOARD_CACHE.pop(oldest, None)
     _BOARD_CACHE[venue] = (now, rows)
     return rows
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 import time
 from typing import Any, Optional
 
@@ -205,6 +206,9 @@ async def profile(symbol: str, levels: int = Query(default=160, le=400)) -> dict
             if profiles:
                 from orderflow_system.analytics.volume_profile import shape_story
                 latest = profiles[-1]
+                # SEC-14: the stored profile's own fabrication count rides to the screen —
+                # a shape/POC read partly built from even-smeared candles says so.
+                snap["derived_candles"] = int(getattr(latest, "derived_candles", 0) or 0)
                 words = shape_story(getattr(latest, "shape", "") or "")
                 snap["shape"] = {"value": getattr(latest, "shape", "") or "unknown",
                                  "label": words["label"], "story": words["story"],
@@ -304,6 +308,9 @@ def _alpaca_pair(symbol: str) -> str:
 
 
 _SNAPSHOT_CACHE: dict[str, tuple[float, Any]] = {}
+#: G-07: a small LRU bound on top of the 2 s read TTL — the map was write-only by access, so a
+#: venue walk (200 configured symbols) kept every pair's payload resident.
+_SNAPSHOT_CACHE_MAX = 128
 
 
 def _venue_tops(symbol: str) -> list:
@@ -362,6 +369,12 @@ def _venue_tops(symbol: str) -> list:
         except Exception as exc:                               # noqa: BLE001
             payload = {"error": f"{type(exc).__name__}: {exc}"}
         _SNAPSHOT_CACHE[pair] = (now, payload)
+        if len(_SNAPSHOT_CACHE) > _SNAPSHOT_CACHE_MAX:
+            for stale in [k for k, (at, _v) in _SNAPSHOT_CACHE.items() if now - at >= 2.0]:
+                _SNAPSHOT_CACHE.pop(stale, None)
+        while len(_SNAPSHOT_CACHE) > _SNAPSHOT_CACHE_MAX:
+            oldest = min(_SNAPSHOT_CACHE.items(), key=lambda item: item[1][0])[0]
+            _SNAPSHOT_CACHE.pop(oldest, None)
 
     if not isinstance(payload, dict) or payload.get("error"):
         tops.append(VenueTop(venue="alpaca", label="Alpaca", kind="quote", ok=False,
@@ -602,10 +615,14 @@ async def replay_play(payload: dict = Body(default={})) -> dict[str, Any]:
 
     async def feed(tick) -> None:
         h = get_hub()
+        # SEC-04: stamp the print and keep the alert channels out of the replay (the views still
+        # get every tick — that is what replay is for).
+        tick.replay = True
         h.on_tick(rp.status()["symbol"], tick)
         # R9: the simulated account rides the same prints the views do, so a fill is a real print
         # from the tape being replayed (or the live stream) — never an invented price.
         _paper["last_price"] = float(tick.price)
+        _paper["last_ts_ms"] = int(tick.timestamp_ms)   # the ledger's tape clock
         account = _paper.get("account")
         if account is not None:
             try:
@@ -613,6 +630,10 @@ async def replay_play(payload: dict = Body(default={})) -> dict[str, Any]:
                                          str(as_value(tick.side)), int(tick.timestamp_ms))
                 for fill in fills or []:
                     _paper["fills"].append(fill)
+                    _paper_event("fill", order_id=fill.get("order_id") or "",
+                                 side=fill.get("side") or "", size=fill.get("size"),
+                                 price=fill.get("price"), order_kind=fill.get("kind") or "",
+                                 note=fill.get("reason") or "", at_ms=int(tick.timestamp_ms))
                 del _paper["fills"][:-40]
             except Exception:                     # noqa: BLE001 - a paper fill must never stop replay
                 logger.debug("the simulated account refused a print", exc_info=True)
@@ -623,7 +644,26 @@ async def replay_play(payload: dict = Body(default={})) -> dict[str, Any]:
         except Exception:
             pass
 
-    return await rp.play(feed, speed=speed)
+    hub = get_hub()
+    hub.replaying = True
+    try:
+        return await rp.play(feed, speed=speed)
+    finally:
+        hub.replaying = False
+
+
+@router.post("/replay/reset")
+async def replay_reset() -> dict[str, Any]:
+    """Drop the loaded tape and its rows (MEM-A1-11).
+
+    The replay transport is a module singleton and a load can hold tens of MB of rows; the
+    panel's Close button calls this so the memory is released when the user is done, not at
+    process exit.
+    """
+    rp = get_replay()
+    await rp.stop()
+    rp.reset()
+    return {"ok": True, "status": rp.status()}
 
 
 @router.post("/replay/pause")
@@ -651,20 +691,59 @@ async def replay_seek(payload: dict = Body(default={})) -> dict[str, Any]:
 
 # ── replay: the simulated account (R9) ─────────────────────────────────────
 
-_paper: dict[str, Any] = {"account": None, "fills": [], "last_price": 0.0}
+_paper: dict[str, Any] = {"account": None, "fills": [], "last_price": 0.0,
+                          "events": [], "event_count": 0, "last_ts_ms": 0}
+
+
+def _paper_event(kind: str, **fields: Any) -> dict[str, Any]:
+    """Append one lifecycle record to the session's ledger (the order log replay keeps).
+
+    ``at_ms`` is the replay clock — the last print's stamp — so the log reads in tape time
+    beside the chart it traded on; ``wall_ms`` is when the click happened. Capped oldest-first: a
+    long session must not grow without bound.
+    """
+    import time as _time
+
+    _paper["event_count"] = int(_paper.get("event_count") or 0) + 1
+    row = {"n": _paper["event_count"], "kind": str(kind),
+           "at_ms": int(fields.pop("at_ms", None) or _paper.get("last_ts_ms") or 0),
+           "wall_ms": int(_time.time() * 1000)}
+    row.update(fields)
+    events = _paper.setdefault("events", [])
+    events.append(row)
+    del events[:-300]
+    return row
+
+
+def _paper_exports_dir() -> "Path":
+    """The same exports folder the control router writes to (config dir / exports)."""
+    import os as _os
+    from pathlib import Path as _Path
+
+    try:
+        base = _Path(config_store.config_dir())
+    except Exception:                                # pragma: no cover - a broken home dir
+        base = _Path(_os.environ.get("APPDATA") or _Path.home()) / "OrderFlowAnalysisPro"
+    return base / "exports"
 
 
 def _paper_state() -> dict[str, Any]:
     """The session's account as the panel reads it: position, marks, orders, fills, closed."""
     account = _paper.get("account")
+    ledger = {"exits": {"stop_loss": None, "take_profit": None},
+              "events": list(_paper.get("events") or [])[-120:],
+              "event_count": int(_paper.get("event_count") or 0)}
     if account is None:
-        return {"running": False, "symbol": "", "position": {"side": "flat", "size": 0},
-                "stats": {}, "orders": [], "fills": [], "closed": [], "last_price": _paper["last_price"]}
-    return {"running": True, "symbol": account.symbol, "position": account.position(),
+        return {"running": False, "symbol": "", "tick_size": 0.0, "position": {"side": "flat", "size": 0},
+                "stats": {}, "orders": [], "fills": [], "closed": [],
+                "last_price": _paper["last_price"], **ledger}
+    return {"running": True, "symbol": account.symbol, "tick_size": account.tick_size,
+            "position": account.position(),
             "mark": account.mark(float(_paper["last_price"] or 0)),
             "stats": account.stats(), "orders": account.open_orders(),
             "fills": list(_paper["fills"]), "closed": account.closed_trades(),
-            "last_price": _paper["last_price"]}
+            "last_price": _paper["last_price"], "exits": account.exits(),
+            "events": ledger["events"], "event_count": ledger["event_count"]}
 
 
 @router.post("/replay/paper/start")
@@ -686,6 +765,10 @@ async def paper_start(payload: dict = Body(default={})) -> dict[str, Any]:
     _paper["account"] = paper_mod.PaperAccount(symbol=symbol, tick_size=max(1e-8, tick_size),
                                                starting_balance=balance)
     _paper["fills"] = []
+    _paper["events"] = []                      # a new session starts a new ledger
+    _paper["event_count"] = 0
+    _paper["last_ts_ms"] = 0
+    _paper_event("start", note=symbol or "session")
     return {"ok": True, "state": _paper_state()}
 
 
@@ -724,7 +807,12 @@ async def paper_order(payload: dict = Body(default={})) -> dict[str, Any]:
                            kind=str(body.get("kind") or "market").lower(), price=price,
                            stop_loss=stop_loss, take_profit=take_profit,
                            ts_ms=int(_time.time() * 1000))
-    return {"ok": order.get("status") != "rejected", "order": order,
+    ok = order.get("status") != "rejected"
+    _paper_event("submit" if ok else "reject", order_id=order.get("id") or "",
+                 side=order.get("side") or "", size=order.get("size"),
+                 price=order.get("price"), order_kind=order.get("kind") or "",
+                 note=str(order.get("reason") or ""))
+    return {"ok": ok, "order": order,
             "error": str(order.get("reason") or ""), "state": _paper_state()}
 
 
@@ -736,8 +824,13 @@ async def paper_cancel(payload: dict = Body(default={})) -> dict[str, Any]:
         return {"ok": False, "error": "no simulated account"}
     order_id = str((payload or {}).get("order_id") or "")
     if order_id:
-        return {"ok": bool(account.cancel(order_id)), "cancelled": [order_id], "state": _paper_state()}
+        done = bool(account.cancel(order_id))
+        if done:
+            _paper_event("cancel", order_id=order_id, note="by id")
+        return {"ok": done, "cancelled": [order_id], "state": _paper_state()}
     cancelled = [order["id"] for order in account.open_orders() if account.cancel(order["id"])]
+    for oid in cancelled:
+        _paper_event("cancel", order_id=oid, note="cancel all")
     return {"ok": True, "cancelled": cancelled, "state": _paper_state()}
 
 
@@ -755,13 +848,87 @@ async def paper_flatten() -> dict[str, Any]:
     fills = account.flatten(price, int(_time.time() * 1000))
     for fill in fills or []:
         _paper["fills"].append(fill)
+        _paper_event("fill", order_id="", side=fill.get("side") or "", size=fill.get("size"),
+                     price=fill.get("price"), order_kind="flatten", note="flatten")
     return {"ok": True, "fills": fills, "state": _paper_state()}
+
+
+@router.post("/replay/paper/exits")
+async def paper_exits(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Move or clear the open position's stop-loss / take-profit — the bracket, edited as a pair.
+
+    Both fields are applied together (a positive price sets a level, an empty value clears it): a
+    bracket is one intent pair, so a caller can never leave the other leg ambiguous by omission.
+    """
+    import time as _time
+
+    account = _paper.get("account")
+    if account is None:
+        return {"ok": False, "error": "no simulated account"}
+    body = payload or {}
+    result = account.set_exits(stop_loss=body.get("stop_loss"), take_profit=body.get("take_profit"),
+                               ts_ms=int(_time.time() * 1000))
+    if result.get("ok"):
+        def _fmt(v: Any) -> str:
+            return ("%g" % float(v)) if v not in (None, "") else "—"
+
+        _paper_event("exits", note="stop %s · target %s" % (_fmt(result.get("stop_loss")),
+                                                               _fmt(result.get("take_profit"))))
+    return {"ok": bool(result.get("ok")), "error": str(result.get("reason") or ""),
+            "changed": bool(result.get("changed")), "state": _paper_state()}
+
+
+@router.post("/replay/paper/export")
+async def paper_export() -> dict[str, Any]:
+    """Write the session's ledger (submits, refusals, fills, exits, cancels) as a CSV file.
+
+    The tape-time column comes first: reviewing a replay session means lining your orders up with
+    the chart they traded on, and that clock is the prints' own, not the wall's.
+    """
+    import csv as _csv
+    import datetime as _dt
+    import io as _io
+
+    events = list(_paper.get("events") or [])
+    account = _paper.get("account")
+    symbol = (account.symbol if account is not None else "") or "paper"
+
+    def _iso(ms: int) -> str:
+        if not ms:
+            return ""
+        try:
+            return _dt.datetime.fromtimestamp(int(ms) / 1000.0).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        except (OverflowError, OSError, ValueError):
+            return ""
+
+    buf = _io.StringIO()
+    writer = _csv.writer(buf)
+    writer.writerow(["n", "event", "tape_time", "action_time", "order", "side", "size",
+                     "price", "order_kind", "note"])
+    for evt in events:
+        writer.writerow([evt.get("n"), evt.get("kind"), _iso(evt.get("at_ms") or 0),
+                         _iso(evt.get("wall_ms") or 0), evt.get("order_id") or "",
+                         evt.get("side") or "",
+                         evt.get("size") if evt.get("size") is not None else "",
+                         evt.get("price") if evt.get("price") is not None else "",
+                         evt.get("order_kind") or "", evt.get("note") or ""])
+    folder = _paper_exports_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    safe = "".join(ch for ch in str(symbol) if ch.isalnum() or ch in "._-")[:24] or "session"
+    target = folder / ("paper-%s-%s.csv" % (safe, stamp))
+    with open(target, "w", encoding="utf-8", newline="") as fh:   # csv owns the line ends
+        fh.write(buf.getvalue())
+    logger.info("[paper] ledger exported: %s (%d rows)", target, len(events))
+    return {"ok": True, "path": str(target), "rows": len(events)}
 
 
 @router.post("/replay/paper/close")
 async def paper_close() -> dict[str, Any]:
     """End the session; its closed trades are written into the journal (the app's own table)."""
     import sqlite3
+
+    from orderflow_system.desktop import journal as journal_mod
 
     account = _paper.get("account")
     if account is None:
@@ -772,21 +939,27 @@ async def paper_close() -> dict[str, Any]:
         conn = sqlite3.connect(str(config_store.db_path()), timeout=15)
         try:
             conn.execute("PRAGMA busy_timeout=15000")
+            # A fresh install has no trade_journal until the data layer first runs; this
+            # endpoint writes the table, so it owns creating it (measured: a clean sandbox
+            # 500ed here with "no such table" the first time a session ended).
+            conn.execute(journal_mod.TRADE_JOURNAL_DDL)
             for row in rows:
                 conn.execute(
                     "INSERT INTO trade_journal (instrument, direction, entry_time_ms, exit_time_ms, "
                     "entry_price, exit_price, stop_loss, take_profit, pnl_ticks, rr_ratio, "
-                    "signals_json, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "signals_json, notes, profile_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (row.get("instrument") or account.symbol, row.get("direction") or "",
                      row.get("entry_time_ms"), row.get("exit_time_ms"), row.get("entry_price"),
                      row.get("exit_price"), row.get("stop_loss"), row.get("take_profit"),
                      row.get("pnl_ticks"), row.get("rr_ratio"), '{"source": "paper"}',
-                     "simulated session"))
+                     "simulated session",
+                     (config_store.load_config().get("profiles") or {}).get("active") or ""))
                 written += 1
             conn.commit()
         finally:
             conn.close()
         logger.info("[paper] session closed: %d trade(s) saved to the journal", written)
+    _paper_event("end", note=(str(written) + " trade(s) saved to the journal"))
     _paper["account"] = None
     _paper["fills"] = []
     return {"ok": True, "saved": written, "trades": [dict(r) for r in rows],
@@ -953,12 +1126,20 @@ async def market_context(
 
     include = [name for name, key in (("positioning", "positioning"), ("fear_greed", "fear_greed"),
                                       ("news", "news")) if bool(cfg.get(key, True))]
+    requested = str(news_url or "").strip()
+    configured = str(cfg.get("news_url") or "").strip()
+    if requested and requested != configured:
+        # SEC-28: GET is a "safe" method, so the origin guard never inspects it — any page in any
+        # browser could point this server-side fetch at an arbitrary host and use the app as a
+        # relay. Only the feed the user configured in Settings is fetchable through the API.
+        return {"ok": False, "symbol": symbol.upper(),
+                "error": "news_url must match the feed configured in Settings"}
     ctx = shared_context()
     out = await ctx.snapshot(
         symbol,
         include=include,
         news_limit=int(news_limit or cfg.get("news_limit") or 8),
-        feed_url=str(news_url or cfg.get("news_url") or ""),
+        feed_url=configured,
     )
     out["stats"] = ctx.stats()
     return out

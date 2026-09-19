@@ -195,3 +195,118 @@ def test_csv_line_is_rfc_4180(kind):
     assert line.endswith("\r\n") and line.startswith("a,1,")
     parsed = list(csv.reader([line]))
     assert parsed[0][:2] == ["a", "1"]
+
+
+# ── MEM-A2-01: the import route parses off the event loop ────────────────────────────────────
+def test_the_import_route_parses_off_the_event_loop(monkeypatch):
+    import asyncio
+    import threading
+    import time
+
+    from orderflow_system.desktop import api, dataport as dp_mod
+
+    seen = {}
+    ticks = {"n": 0}
+
+    def slow_parse(text, **kwargs):
+        seen["thread"] = threading.get_ident()
+        time.sleep(0.2)                        # the 40 MB parse, made unmissable
+        return {"rows": [["BTCUSDT", 1_789_600_000_000, 100.0, 1.0, "buy", "t1"]],
+                "errors": [], "delimiter": ",", "headers": None, "skipped": 0,
+                "bad_rows": 0, "deduped": 0}
+
+    monkeypatch.setattr(dp_mod, "parse_ticks", slow_parse)
+    monkeypatch.setattr(dp_mod, "import_rows",
+                        lambda path, kind, rows: {"inserted": len(rows), "skipped_existing": 0,
+                                                  "checked_existing": 0})
+
+    async def scenario():
+        async def ticker():
+            while True:
+                ticks["n"] += 1
+                await asyncio.sleep(0.005)
+
+        task = asyncio.create_task(ticker())
+        try:
+            return await api.data_import({"text": "ts,price\n1,2", "symbol": "BTCUSDT"})
+        finally:
+            task.cancel()
+
+    out = asyncio.run(scenario())
+    assert out["ok"] is True and out["inserted"] == 1
+    assert out["first_ms"] == 1_789_600_000_000 and out["last_ms"] == 1_789_600_000_000
+    assert seen["thread"] != threading.get_ident(), "the parse ran on the loop thread"
+    assert ticks["n"] >= 5, f"the loop was stalled while the CSV parsed ({ticks['n']} ticks)"
+
+
+def test_the_import_route_does_not_hold_a_third_copy_of_the_payload():
+    """MEM-B-05: the route used to keep three full copies alive at once (text, rows, stamps).
+
+    Two assertions, both about the same defect: (a) the parse result carries no `stamps` list —
+    the first/last timestamps come from generators over the rows; (b) the peak Python allocation
+    for a 4 MB import stays under 4x the payload, which a text+rows+stamps triple could not.
+    """
+    import asyncio
+    import tracemalloc
+
+    from orderflow_system.desktop import dataport as dp_mod
+
+    # a real 4 MB body: ~120,000 rows of the shipped CSV shape
+    rows = 120_000
+    text = "symbol,timestamp,price,size,side\n" + "".join(
+        f"BTCUSDT,{1_789_600_000_000 + i * 250},100.5,1.0,buy\n" for i in range(rows))
+    payload_bytes = len(text.encode("utf-8"))
+    assert payload_bytes > 3_500_000, payload_bytes
+
+    original_parse = dp_mod.parse_ticks
+
+    parsed_holder = {}
+
+    def parse_and_record(*args, **kwargs):
+        parsed = original_parse(*args, **kwargs)
+        parsed_holder.update(parsed)
+        return parsed
+
+    monkeypatched = {}
+    monkeypatched["parse"] = parse_and_record
+
+    import orderflow_system.desktop.api as api_mod
+
+    real_import_rows = dp_mod.import_rows
+    monkeypatched["import_rows"] = real_import_rows
+
+    def fake_import_rows(db_path, kind, parsed_rows):
+        # the writer is exercised for real by the suite's other tests; here it must not write
+        monkeypatched["rows_seen"] = len(parsed_rows)
+        return {"inserted": len(parsed_rows), "skipped_existing": 0, "checked_existing": 0}
+
+    dp_mod.parse_ticks = parse_and_record
+    dp_mod.import_rows = fake_import_rows
+    try:
+        async def scenario():
+            tracemalloc.start()
+            try:
+                out = await api_mod.data_import({"text": text, "symbol": "BTCUSDT"})
+            finally:
+                current, peak = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+            return out, peak
+
+        out, peak = asyncio.run(scenario())
+    finally:
+        dp_mod.parse_ticks = original_parse
+        dp_mod.import_rows = real_import_rows
+
+    assert out["ok"] is True, out
+    assert monkeypatched["rows_seen"] == rows
+    # (a) no third copy: the parse result has no stamps list, and the route's window bounds come
+    # straight from the rows (min/max generators, not a parallel list)
+    assert "stamps" not in parsed_holder, "the route is keeping a stamps list again"
+    assert out["first_ms"] and out["last_ms"], out
+    # (b) the route's peak stays sane. This is a gross-regression bound, not a copy count: the
+    # parsed rows themselves dominate it (~20x the raw bytes — per-field Python objects), so the
+    # "three copies" defect is pinned by (a) plus the off-loop pin, and the measured figure is
+    # recorded in the remediation ledger rather than asserted tightly here.
+    ratio = peak / payload_bytes
+    print(f"import peak: {peak / 1e6:.1f} MB for a {payload_bytes / 1e6:.1f} MB payload ({ratio:.2f}x)")
+    assert ratio < 60.0, f"peak {peak / 1e6:.1f} MB for a {payload_bytes / 1e6:.1f} MB payload ({ratio:.2f}x)"

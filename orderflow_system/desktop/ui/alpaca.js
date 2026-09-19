@@ -278,13 +278,21 @@ function alpacaWire() {
 /* load when the settings view opens (and once at boot if it is already open) */
 (function alpacaBoot() {
     const wrapShow = window.showView;
-    if (typeof wrapShow === 'function') {
-        window.showView = function (name) {
+    if (typeof wrapShow === 'function' && !wrapShow.__ofapWrapped_alpaca) {
+        const wrapped = function (name) {
             const out = wrapShow.apply(this, arguments);
             // the Alpaca view is the card's home; Settings keeps a pointer to it
-            if (name === 'settings' || name === 'alpaca') setTimeout(() => alpacaLoad(true), 700);
+            if (name === 'settings' || name === 'alpaca') {
+                setTimeout(() => {
+                    const section = document.querySelector('.view[data-view="alpaca"]')
+                        || document.querySelector('.view[data-view="settings"]');
+                    if (!section || section.classList.contains('active')) alpacaLoad(true);
+                }, 700);
+            }
             return out;
         };
+        wrapped.__ofapWrapped_alpaca = true;      // C-09/D-14: a second decoration is not chained
+        window.showView = wrapped;
     }
     setTimeout(() => alpacaLoad(true), 9000);
 })();

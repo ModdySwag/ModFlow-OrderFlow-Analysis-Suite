@@ -622,6 +622,50 @@ def test_the_frozen_build_ships_the_mt5_bridge():
         encoding="utf-8", errors="replace")
     assert '"--exclude-module", "MetaTrader5"' not in text, "the bridge must ship in the build"
     assert '"--exclude-module", "numpy"' not in text, "numpy must ship — the bridge needs it"
+    # Not-excluding is not shipping: nothing in the tree imports numpy any more, so PyInstaller's
+    # graph never reaches it — only the explicit collect keeps the promise (2026-09-19: a build
+    # without it carried MetaTrader5 and answered "package not installed" from the frozen app).
+    assert '"--collect-all", "numpy"' in text, (
+        "numpy must be COLLECTED explicitly, or the frozen bridge loses its dependency at load")
+
+
+def test_the_build_collects_the_bundled_licence_texts(tmp_path) -> None:
+    """SEC-32: the payload must carry licence TEXTS, not just a notices table that names them.
+    The collector copies each bundled distribution's licence files plus the repo's own
+    disclosures — and nothing else (a RECORD beside a licence is not a licence)."""
+    import importlib.util
+
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    text = (scripts / "build_exe.py").read_text(encoding="utf-8")
+    assert "def collect_licences" in text and "THIRD_PARTY_LICENCES" in text
+    spec = importlib.util.spec_from_file_location("ofap_build_exe", scripts / "build_exe.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    internal = tmp_path / "dist" / "_internal"
+    (internal / "fakedist").mkdir(parents=True)
+    (internal / "fakedist" / "__init__.py").write_text("", encoding="utf-8")
+    (internal / "empty_pkg").mkdir(parents=True)
+    site = tmp_path / "site"
+    di = site / "fakedist-1.0.dist-info"
+    (di / "licenses").mkdir(parents=True)
+    (di / "licenses" / "LICENSE.txt").write_text("FAKE LICENCE TEXT", encoding="utf-8")
+    (di / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: fakedist\nVersion: 1.0\n", encoding="utf-8")
+    (di / "RECORD").write_text(
+        "fakedist/__init__.py,,\n"
+        "fakedist-1.0.dist-info/licenses/LICENSE.txt,,\n"
+        "fakedist-1.0.dist-info/RECORD,,\n", encoding="utf-8")
+
+    dists, files = mod.collect_licences(tmp_path / "dist", site_packages=site)
+    assert (dists, files) == (1, 1), f"expected one dist / one licence file, got {dists}/{files}"
+    copied = internal / "THIRD_PARTY_LICENCES" / "fakedist" / "fakedist-1.0.dist-info" / "licenses" / "LICENSE.txt"
+    assert copied.read_text(encoding="utf-8") == "FAKE LICENCE TEXT"
+    assert not (internal / "THIRD_PARTY_LICENCES" / "fakedist" / "fakedist-1.0.dist-info" / "RECORD").exists(), (
+        "the collector must copy licence files only")
+    assert (internal / "THIRD_PARTY_LICENCES" / "README.txt").is_file()
+    assert (tmp_path / "dist" / "LICENSE").is_file(), "the repo's own licence rides beside the exe"
+    assert (tmp_path / "dist" / "THIRD_PARTY_NOTICES.md").is_file()
 
 
 def test_the_bridge_compat_is_compared_not_assumed(tmp_path):

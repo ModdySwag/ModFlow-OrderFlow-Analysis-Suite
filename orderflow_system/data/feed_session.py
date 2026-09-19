@@ -185,6 +185,13 @@ class FeedSession:
             error: Optional[BaseException] = None
             try:
                 self._conn = await self._connect()
+                if not self._running:
+                    # MEM-A2-04: stop() arrived while the connect was in flight. The socket
+                    # that just became visible is this session's to close — otherwise it
+                    # survives the stop and keeps delivering frames into a session the
+                    # caller believes has stopped.
+                    await self._close_conn()
+                    break
                 self._last_frame_ms = self._now_ms()
                 if self._on_connected is not None:
                     await self._on_connected(self._conn)

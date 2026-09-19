@@ -37,7 +37,7 @@ class SignalCards {
                             <option value="time">By Time</option>
                             <option value="rr">By R:R</option>
                         </select>
-                        <button id="signalRefresh" class="signals-btn" title="Refresh">⟳</button>
+                        <button id="signalRefresh" class="signals-btn" title="Refresh the signals table now">⟳</button>
                     </div>
                 </div>
                 <div class="signals-body" id="signalsBody">

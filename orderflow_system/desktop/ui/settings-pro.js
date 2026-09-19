@@ -89,17 +89,17 @@
         var staged = state.staged[p.path] !== undefined;
         var now = staged ? state.staged[p.path] : state.applied[p.path];
         var buttons = staged
-            ? '<button class="btn small" data-set-accept="' + esc(p.path) + '" title="write this field now">&#10003;</button>'
-                + '<button class="btn small" data-set-cancel="' + esc(p.path) + '" title="drop this field\'s edit">&#8634;</button>'
+            ? '<button class="btn small" data-set-accept="' + esc(p.path) + '" title="Write this field now">&#10003;</button>'
+                + '<button class="btn small" data-set-cancel="' + esc(p.path) + '" title="Drop this field\'s edit">&#8634;</button>'
             : '<span class="set-ctl-pad"></span>';
         return '<div class="set-row' + (staged ? ' staged' : '') + (changed(p) ? ' is-changed' : '')
             + '" data-set-row="' + esc(p.path) + '">'
             + '<span class="set-name" title="' + esc(p.meaning || '') + '">' + esc(p.label || p.path)
             + (p.unit ? ' <span class="dim">(' + esc(p.unit) + ')</span>' : '') + '</span>'
             + '<span class="set-ctl">' + control(p, now) + '</span>'
-            + '<span class="set-default" title="the factory default">default ' + esc(fmtDefault(p.default)) + '</span>'
+            + '<span class="set-default" title="The factory default, before any change">default ' + esc(fmtDefault(p.default)) + '</span>'
             + buttons
-            + '<span class="set-path" title="' + esc(p.path) + ' · drives the ' + esc(p.view || 'app') + ' panel">'
+            + '<span class="set-path" title="' + esc(p.path) + ' — drives the ' + esc(p.view || 'app') + ' panel">'
             + esc(p.path) + ' · ' + esc(p.view || 'app') + '</span>'
             + '</div>';
     }

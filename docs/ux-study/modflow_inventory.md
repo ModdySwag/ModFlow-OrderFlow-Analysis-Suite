@@ -1,6 +1,6 @@
 # ModFlow OrderFlow Analysis Suite — UX/GUI inventory (the comparison baseline)
 
-**Target:** `C:\Users\Moddy\OrderFlow-Analysis-Pro` (ModFlow OrderFlow Analysis Suite; Python FastAPI + SQLite backend, pywebview/WebView2 shell, vanilla-JS dashboard under `orderflow_system/desktop/ui/`, no bundler).
+**Target:** `C:\Users\<you>\OrderFlow-Analysis-Pro` (ModFlow OrderFlow Analysis Suite; Python FastAPI + SQLite backend, pywebview/WebView2 shell, vanilla-JS dashboard under `orderflow_system/desktop/ui/`, no bundler).
 **Method:** static read-only inspection (grep / find / wc / small Python counts) of the shipped source. **No file was modified, nothing was built, no app was launched.**
 **Every count below is a real grep/wc count unless the line says "not measured".** `file:line` cites are of the form *path:line* within the repo root.
 **Date of extraction:** 2026-09-18. Repo HEAD per `docs/RESUME.md`: `110c568`, 108 dirty entries, nothing committed.

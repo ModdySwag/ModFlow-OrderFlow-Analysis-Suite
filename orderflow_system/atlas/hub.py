@@ -213,6 +213,11 @@ class FeatureHub:
         self._sink: Optional[Sink] = None
         self._feeds: dict[str, feed_extras.BybitExtras] = {}
         self._feed_tasks: list[asyncio.Task] = []
+        #: MEM-A1-06: in-flight fire-and-forget emissions (alerts, webhooks, sink writes).
+        #: They used to be bare `loop.create_task(...)` — unreferenced and uncancellable.
+        self._tasks: set[asyncio.Task] = set()
+        #: MEM-A1-08: symbols the engine actually streams; they are never evicted from the map.
+        self._protected_symbols: set[str] = set()
         self.extras_enabled: bool = bool(cfg.get("extras_enabled", True))
         self.counters: dict[str, int] = {"ticks": 0, "orderbooks": 0, "liquidations": 0, "blocks": 0, "alerts": 0}
         self.started_at: float = 0.0
@@ -245,15 +250,67 @@ class FeatureHub:
         for feats in self.symbols.values():
             feats.apply_config(config)
 
+    #: MEM-A1-08: the REST layer can be asked about any symbol string and every SymbolFeatures
+    #: tree retains ~31 KB; the map is capped so a fuzzed or stale list cannot grow it forever.
+    MAX_REST_SYMBOLS = 64
+
     def ensure(self, symbol: str, tick_size: Optional[float] = None) -> SymbolFeatures:
         feats = self.symbols.get(symbol)
         if feats is None:
             feats = SymbolFeatures(symbol=symbol, tick_size=float(tick_size or 1.0))
             feats.apply_config(self.config)
             self.symbols[symbol] = feats
+            self._evict_rest_symbols()
         elif tick_size:
             feats.tick_size = float(tick_size)
         return feats
+
+    def register(self, symbol: str, tick_size: Optional[float] = None) -> SymbolFeatures:
+        """Ensure + protect: a symbol the engine streams is never evicted (MEM-A1-08)."""
+        feats = self.ensure(symbol, tick_size)
+        self._protected_symbols.add(str(symbol))
+        return feats
+
+    def _evict_rest_symbols(self) -> int:
+        """Drop oldest-first the symbols the engine does not stream (MEM-A1-08)."""
+        if len(self.symbols) <= self.MAX_REST_SYMBOLS:
+            return 0
+        dropped = 0
+        for symbol in list(self.symbols):
+            if len(self.symbols) <= self.MAX_REST_SYMBOLS:
+                break
+            if symbol in self._protected_symbols:
+                continue
+            self.symbols.pop(symbol, None)
+            dropped += 1
+        if dropped:
+            logger.debug("hub evicted %d REST-only symbol(s) from the feature map", dropped)
+        return dropped
+
+    # ── fire-and-forget emissions (MEM-A1-06) ─────────────────
+    def _spawn(self, factory) -> None:
+        """Schedule background work the hub owns: tracked, discarded on done, cancellable.
+
+        The three emission paths used bare ``loop.create_task``: a storm of detections against a
+        stalled sink piled up tasks nothing referenced and nothing could stop. The loop check is
+        kept here so unit tests without a running loop remain no-ops (no un-awaited coroutines).
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return                                   # no loop (unit tests) → skip
+        task = loop.create_task(factory())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def shutdown(self) -> None:
+        """Cancel every in-flight emission this hub spawned (MEM-A1-06)."""
+        tasks = [task for task in self._tasks if not task.done()]
+        self._tasks.clear()
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def clear(self) -> None:
         for feats in self.symbols.values():
@@ -272,6 +329,11 @@ class FeatureHub:
         self.counters = {k: 0 for k in self.counters}
 
     # ── ingest ────────────────────────────────────────────────
+    #: SEC-04: set by the replay route while it plays a loaded tape. Replayed prints still feed
+    #: every view (that is the feature) but must not fire alerts: a rule that fired on last
+    #: week's session is an instruction to act on a price that no longer exists.
+    replaying = False
+
     def on_tick(self, symbol: str, tick: Tick) -> dict[str, Any]:
         feats = self.ensure(symbol)
         if not feats.first_tick_ms:
@@ -508,6 +570,9 @@ class FeatureHub:
                 logger.debug("feed stop failed for %s", symbol, exc_info=True)
         for task in self._feed_tasks:
             task.cancel()
+        if self._feed_tasks:
+            # Cancelled is not finished: return only once they have actually unwound (audit A-06).
+            await asyncio.gather(*self._feed_tasks, return_exceptions=True)
         self._feed_tasks.clear()
         self._feeds.clear()
         return {"ok": True}
@@ -520,6 +585,11 @@ class FeatureHub:
         like a detector's firing: one place decides what "fired" means, so the two cannot drift.
         """
         for alert in fired:
+            if self.replaying:
+                # SEC-04: the print is history — the views already have it, the alert channels
+                # must not. Counted rather than silently dropped, so the suppression is visible.
+                self.counters["alerts_suppressed_replay"] = self.counters.get("alerts_suppressed_replay", 0) + 1
+                continue
             self.counters["alerts"] += 1
             alert_dict = alert.to_dict()
             self._emit("alert", symbol, alert_dict)
@@ -566,11 +636,7 @@ class FeatureHub:
     def _notify(self, alert: dict[str, Any]) -> None:
         if self.notifier is None:
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return                                   # no loop (unit tests) → skip
-        loop.create_task(self._safe_notify(alert))
+        self._spawn(lambda: self._safe_notify(alert))
 
     async def _safe_notify(self, alert: dict[str, Any]) -> None:
         try:
@@ -582,11 +648,7 @@ class FeatureHub:
         """Fire-and-forget POST of newly fired alerts to the configured webhook."""
         if not self.alerts.webhook_url:
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return                                   # no loop (unit tests) → skip
-        loop.create_task(self._safe_webhooks(fired))
+        self._spawn(lambda: self._safe_webhooks(fired))
 
     async def _safe_webhooks(self, fired: list[Any]) -> None:
         try:
@@ -597,11 +659,7 @@ class FeatureHub:
     def _emit(self, channel: str, symbol: str, data: Any) -> None:
         if self._sink is None:
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return                                   # no loop (unit tests) → skip
-        loop.create_task(self._safe_emit(channel, symbol, data))
+        self._spawn(lambda: self._safe_emit(channel, symbol, data))
 
     async def _safe_emit(self, channel: str, symbol: str, data: Any) -> None:
         try:

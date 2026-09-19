@@ -24,3 +24,15 @@ Thumbs.db
 .ruff_cache/
 .mypy_cache/
 mt5_fetched.json
+# Signing material never belongs in the repository (audit SEC-37). The SignPath request file
+# (.signpath/) IS tracked on purpose - CI reads it from the tree.
+*.pfx
+*.p12
+*.pem
+*.key
+*.snk
+*.cer
+.env
+.env.*
+# Fetched at build time by installer/make_installer.ps1, never committed.
+installer/prereq/

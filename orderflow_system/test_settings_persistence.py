@@ -54,6 +54,15 @@ def test_no_block_is_ever_saved_as_a_whole_config():
             if not arg:
                 continue
             var = arg.group(1)
+            if var == "_deep_merge":
+                # merge_config's shape: save_config(_deep_merge(stored, unmask_patch(...))) — the
+                # first argument is the whole config (a plain block merged over defaults would
+                # still be a block, so trace THAT name through the same origin check).
+                first = re.search(r"_deep_merge\(\s*([A-Za-z_][A-Za-z0-9_]*)", line)
+                var = first.group(1) if first else ""
+                if not var:
+                    offenders.append(f"{py.name}:{idx + 1}  {line.strip()[:70]}")
+                    continue
             # the enclosing function: back to the nearest top-level def
             start = 0
             for back in range(idx - 1, -1, -1):

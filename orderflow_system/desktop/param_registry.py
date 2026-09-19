@@ -115,11 +115,11 @@ PARAMS: tuple[Param, ...] = (
               "without colour vision — a property the engine's selftest measures."),
     P("ofx.heat_smooth", "Heat smoothing (Engine)", "Depth heat", "ofx", kind="enum",
       choices=("auto", "manual", "none"),
-      meaning="T10/B3 — vertical smoothing of the Engine's depth heat: 'auto' engages when the "
+      meaning="vertical smoothing of the Engine's depth heat: 'auto' engages when the "
               "drawn rows compress below ~2.5 px (hysteresis releases at 4 px), 'manual' always "
               "draws it, 'none' keeps the raw cells. Display-only."),
     P("atlas.ofx.degrade", "Auto-candles at wide zooms", "Depth heat", "ofx", kind="bool",
-      meaning="T10/B13 — once a column compresses below the text threshold the footprint "
+      meaning="once a column compresses below the text threshold the footprint "
               "switches to plain candles (display-only; off keeps the volume-profile fallback). "
               "The hysteresis band is the text threshold plus half the label-fade ramp."),
     # Level reads (fold-in plan §3): unfinished business + node persistence, both fed from
@@ -206,25 +206,39 @@ PARAMS: tuple[Param, ...] = (
     P("atlas.heatmap.floor_pct", "Heatmap floor (share)", "Depth heat", "heatmap", minimum=0.0,
       maximum=50.0, step=1.0, unit="%",
       meaning="…or: no colour below this bottom share of the map's own sizes (0 = off)."),
+    P("ofx.heat_dim", "Heat dimming", "Depth heat", "ofx", minimum=0.0, maximum=0.8, step=0.05,
+      meaning="Dim the Engine's depth map so drawn levels and figures stand out over it "
+              "(0 = off). Display-only: the colour table is rebuilt with the dial."),
+    P("ofx.heat_highlight", "Large-size highlight", "Depth heat", "ofx", minimum=0.0, maximum=1.0,
+      step=0.05,
+      meaning="Outline the live cells at or above this share of the ceiling \u2014 the map's own "
+              "walls read as walls (0 = off). Fading cells are never outlined: a memory is not "
+              "a wall."),
+    P("atlas.heatmap.dim", "Heatmap dimming", "Depth heat", "heatmap", minimum=0.0,
+      maximum=0.8, step=0.05,
+      meaning="Dim the Heatmap view so overlays stand out over it (0 = off). Display-only."),
+    P("atlas.heatmap.highlight", "Heatmap large-size highlight", "Depth heat", "heatmap",
+      minimum=0.0, maximum=1.0, step=0.05,
+      meaning="Outline the Heatmap's cells at or above this share of the ceiling (0 = off)."),
     P("atlas.heatmap.smooth", "Heat smoothing (Heatmap)", "Depth heat", "heatmap", kind="enum",
       choices=("auto", "manual", "none"),
-      meaning="T10/B3 — vertical smoothing of the Heatmap view's cells: 'auto' engages when the "
+      meaning="vertical smoothing of the Heatmap view's cells: 'auto' engages when the "
               "rows compress below ~2.5 px (hysteresis releases at 4 px), 'manual' always draws "
               "it, 'none' keeps the raw cells. Display-only."),
     P("atlas.columns.metric", "Columns rail metric", "Depth heat", "heatmap", kind="enum",
       choices=("traded", "resting"),
-      meaning="B4 — what each column of the Map's rail accumulates between resets: total traded size, "
+      meaning="what each column of the Map's rail accumulates between resets: total traded size, "
               "or the net change in resting size. Display-only; the accumulation lives in the page."),
     P("atlas.columns.reset", "Columns rail reset", "Depth heat", "heatmap", kind="enum",
       choices=("manual", "scheduled", "conditional"),
-      meaning="B4 — when a column's accumulation zeroes: manual (a button or double-click), scheduled "
+      meaning="when a column's accumulation zeroes: manual (a button or double-click), scheduled "
               "(a fixed period) or conditional (when the row crosses the threshold)."),
     P("atlas.columns.threshold", "Columns rail threshold", "Depth heat", "heatmap", minimum=0.0,
       maximum=1000000000.0, step=50.0,
-      meaning="B4 — the conditional reset threshold, in the accumulation's own units."),
+      meaning="the conditional reset threshold, in the accumulation's own units."),
     P("atlas.columns.reset_s", "Columns rail period", "Depth heat", "heatmap", minimum=5.0,
       maximum=600.0, step=5.0, unit="s",
-      meaning="B4 — the scheduled reset period for the columns rail."),
+      meaning="the scheduled reset period for the columns rail."),
     P("atlas.heatmap.wall_quantile", "Wall threshold", "Depth heat", "heatmap", minimum=0.5,
       maximum=1.0, step=0.01, meaning="Quantile of resting size that counts as a wall."),
     P("atlas.heatmap.stack_pct", "Stack detection", "Depth heat", "heatmap", minimum=1.0,

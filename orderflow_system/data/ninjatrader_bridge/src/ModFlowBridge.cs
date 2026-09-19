@@ -61,25 +61,20 @@ namespace ModFlow.Bridge
         private static TcpClient client;
         private static BlockingCollection<string> sendQueue;
         private static Thread acceptThread;
+        private static Thread heartbeatThread;
         private static readonly ConcurrentDictionary<string, Sub> Subs =
             new ConcurrentDictionary<string, Sub>(StringComparer.OrdinalIgnoreCase);
         private static long depthEventCount;
         private static HashSet<string> futureRoots;   // lazily built: the platform's futures roots
 
-        // A load-time kick: a NinjaScript editor recompile reloads this assembly in place, and the
-        // full AddOn state flow is not guaranteed to re-run for a session that is already up — the
-        // bridge binds regardless, shortly after the assembly loads. StartServerOnce is idempotent.
+        // MEM-E-03: there is deliberately no load-time kick thread. A NinjaScript editor
+        // recompile reloads this assembly in place; the old static kick bound the port from a
+        // *new* copy while the previous copy's statics, threads and subscriptions stayed alive
+        // in the process — two bridges, one port owner, one zombie. The bridge now binds only
+        // through the platform's own AddOn lifecycle (OnStateChange / OnWindowCreated), which
+        // the live instance always receives; a bind failure names the stale-copy case below.
         static ModFlowBridgeAddOn()
         {
-            try
-            {
-                new Thread(() =>
-                {
-                    try { Thread.Sleep(2500); StartServerOnce(); }
-                    catch { /* the probe log carries the diagnostics side */ }
-                }) { IsBackground = true, Name = "ModFlowBridge.LoadKick" }.Start();
-            }
-            catch { /* never take the platform down */ }
         }
 
         // ── AddOn lifecycle ─────────────────────────────────────────────────────────────
@@ -131,7 +126,12 @@ namespace ModFlow.Bridge
                 catch (Exception ex)
                 {
                     serverStarted = false;
-                    Log("SERVER FAILED to bind 127.0.0.1:" + Port + " — " + ex.Message);
+                    // MEM-E-03: name the stale-copy case in the user's words. After an F5
+                    // recompile the previous copy of this add-on can still own the port, so the
+                    // freshly loaded one cannot bind; one bridge build installed at a time.
+                    Log("SERVER FAILED to bind 127.0.0.1:" + Port + " — " + ex.Message +
+                        " (after a NinjaScript recompile an earlier bridge copy can hold the port — " +
+                        "restart NinjaTrader to clear it)");
                 }
             }
         }
@@ -212,6 +212,19 @@ namespace ModFlow.Bridge
             finally
             {
                 try { conn.Close(); } catch { }
+                // MEM-E-01: the session's own teardown. Without it the subscriptions stayed
+                // attached and the writer's queue was neither drained nor completed, so the
+                // platform kept serialising market data into a queue nobody reads (the leak
+                // measured inside NinjaTrader, ~100-120 MB/h per instrument). Identity-guarded:
+                // a client that has already been replaced must not tear down the new session.
+                if (ReferenceEquals(client, conn))
+                {
+                    client = null;
+                    var queue = sendQueue;
+                    sendQueue = null;
+                    try { if (queue != null) queue.CompleteAdding(); } catch { }
+                    SubscribeCleanup();
+                }
                 Log("client disconnected");
             }
         }
@@ -238,8 +251,9 @@ namespace ModFlow.Bridge
 
         private static void Send(string json)
         {
+            // MEM-E-01: a detached session must not be enqueued to either.
             var q = sendQueue;
-            if (q == null || q.IsAddingCompleted) return;
+            if (client == null || q == null || q.IsAddingCompleted) return;
             try { q.Add(json); } catch { }
         }
 
@@ -260,16 +274,28 @@ namespace ModFlow.Bridge
 
         private static void StartHeartbeat()
         {
+            // MEM-E-02: one heartbeat per bridge, not one per accepted connection. The old
+            // loop never exited (it waited on a queue that was never completed), so a session
+            // with 24 reconnects left 24 live threads inside NinjaTrader. The loop now ends
+            // when the client slot is empty, and Shutdown() interrupts the sleep.
+            var existing = heartbeatThread;
+            if (existing != null && existing.IsAlive) return;
             var t = new Thread(() =>
             {
-                while (true)
+                try
                 {
-                    Thread.Sleep(HeartbeatMs);
-                    var q = sendQueue;
-                    if (q == null || q.IsAddingCompleted) return;
-                    SendObj(new { Type = "heartbeat", Ts = NowMs() });
+                    while (client != null)
+                    {
+                        Thread.Sleep(HeartbeatMs);
+                        var q = sendQueue;
+                        if (q == null || q.IsAddingCompleted) return;
+                        SendObj(new { Type = "heartbeat", Ts = NowMs() });
+                    }
                 }
+                catch (ThreadInterruptedException) { /* Shutdown() asked the thread to stop */ }
+                catch { }
             }) { IsBackground = true, Name = "ModFlowBridge.Heartbeat" };
+            heartbeatThread = t;
             t.Start();
         }
 
@@ -971,6 +997,13 @@ namespace ModFlow.Bridge
         {
             try { SubscribeCleanup(); } catch { }
             try { if (client != null) client.Close(); } catch { }
+            client = null;
+            try
+            {
+                var hb = heartbeatThread;
+                if (hb != null && hb.IsAlive) hb.Interrupt();      // MEM-E-02
+            }
+            catch { }
             try { if (listener != null) listener.Stop(); } catch { }
             Log("bridge stopped");
         }

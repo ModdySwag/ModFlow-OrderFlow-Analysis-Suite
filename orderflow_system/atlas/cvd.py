@@ -190,8 +190,14 @@ class CvdTracker:
         prev, cur = rows[-2 * n:-n], rows[-n:]
         prev_high = max(b.price_high for b in prev)
         cur_high = max(b.price_high for b in cur)
-        prev_low = min(b.price_low for b in prev if b.price_low)
-        cur_low = min(b.price_low for b in cur if b.price_low)
+        prev_lows = [b.price_low for b in prev if b.price_low]
+        cur_lows = [b.price_low for b in cur if b.price_low]
+        if not prev_lows or not cur_lows:
+            # A zero or missing price is a malformed reading, not a divergence — every other
+            # implausible input in this module answers None (audit C-06).
+            return None
+        prev_low = min(prev_lows)
+        cur_low = min(cur_lows)
 
         min_move = self.divergence_min_ticks * self.tick_size
         div: Optional[Divergence] = None

@@ -64,6 +64,12 @@ WRITE_TIMEOUT_S = 5.0
 # an old message is worth less than a new one. Everything else must arrive — a dropped signal is a lie.
 DROPPABLE = {Channel.TICK.value, Channel.ORDERBOOK.value, Channel.DELTA.value, Channel.STATS.value}
 
+# MEM-A1-05: how long a must-arrive channel may wait for a stalled client's queue. The old bound
+# was WRITE_TIMEOUT_S * 2 = 10 s *per stalled client, in series* inside the producer — a bubble on
+# the candle-close path repeated every candle. A few hundred milliseconds bounds it; a message that
+# still cannot be placed is counted (client.dropped) rather than stalling the feed that produces it.
+MUST_ARRIVE_WAIT_S = 0.5
+
 
 class _Client:
     """A connected client: its socket, its queue, the task draining it, and what it missed."""
@@ -161,6 +167,15 @@ class WebSocketManager:
             raise
         finally:
             self._forget(client)
+            # MEM-A1-02: close the socket on the writer's own exit paths too (write timeout,
+            # error). `_forget` alone removed the client from the fan-out while the endpoint
+            # coroutine stayed parked in `receive_text()` with a live socket — one leaked task
+            # per event, invisible in client_count. Closing it makes receive_text() raise
+            # WebSocketDisconnect, so the endpoint's finally runs disconnect() normally.
+            try:
+                await client.ws.close()
+            except Exception:                       # already gone, or never accepted
+                logger.debug("closing a dropped client's socket did not complete", exc_info=True)
 
     def _forget(self, client: _Client) -> None:
         """Synchronous removal: safe from a writer's finally block, which cannot await."""
@@ -190,12 +205,12 @@ class WebSocketManager:
             return
         try:
             # the same reason as the writer: a plain deadline, not wait_for (handoff §65)
-            async with asyncio.timeout(WRITE_TIMEOUT_S * 2):
+            async with asyncio.timeout(MUST_ARRIVE_WAIT_S):
                 await client.queue.put(message)
         except asyncio.TimeoutError:
             client.dropped += 1
             logger.warning("WebSocket client queue stayed full for %.1fs, one message was not delivered",
-                           WRITE_TIMEOUT_S * 2)
+                           MUST_ARRIVE_WAIT_S)
 
     def delivery_stats(self) -> dict:
         """What the queues are doing — the numbers a test (or a status line) can hold the design to."""

@@ -1613,7 +1613,17 @@
            callback never fired, so the queue flag stayed set and the chip went stale for good. A channel
            opens or closes a handful of times per view switch — a direct repaint costs nothing and cannot
            get stuck behind a scheduler that is entitled to never run. */
-        document.addEventListener('ofap:bus', function () { paintStatus(); });
+        document.addEventListener('ofap:bus', function () { paintBusChip(); });
+    }
+
+    /* C-10: the bus fires per message; only its own chip changes with it. The full status (frame
+       titles, mode buttons, feed line — a dozen DOM writes) repaints on ofap:shell/relayout. */
+    function paintBusChip() {
+        if (!hasDom) return;
+        const node = document.getElementById('statusBus');
+        if (!node) return;
+        const bus = window.OFAPBUS;
+        node.textContent = bus && typeof bus.summary === 'function' ? bus.summary() : '—';
     }
 
     function paintStatus() {

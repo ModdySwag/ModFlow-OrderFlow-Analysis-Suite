@@ -39,6 +39,9 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pyinstaller>=6.0",
+    # R-03: the churn probe (scripts/churn_probe.py) drives a headless chromium over CDP to
+    # measure per-node listener/timer accumulation; this is the only dev dependency it needs.
+    "playwright>=1.40",
 ]
 
 [project.scripts]

@@ -177,12 +177,14 @@
         const refresh = $('inboxRefresh');
         if (refresh) refresh.onclick = function () { void load(); };
         const wrap = window.showView;
-        if (typeof wrap === 'function') {
-            window.showView = function (name) {
+        if (typeof wrap === 'function' && !wrap.__ofapWrapped_inbox) {
+            const wrapped = function (name) {
                 const out = wrap.apply(this, arguments);
-                if (name === 'inbox') setTimeout(load, 300);
+                if (name === 'inbox') setTimeout(() => { if (onScreen()) load(); }, 300);
                 return out;
             };
+            wrapped.__ofapWrapped_inbox = true;
+            window.showView = wrapped;
         }
         timer = setInterval(function () { if (onScreen()) load(); }, POLL_MS);
         void load();

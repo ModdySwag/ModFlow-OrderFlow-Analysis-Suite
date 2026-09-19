@@ -3,7 +3,7 @@
 **Directive applied:** `Desktop/ai prompt.txt` (HFT footprint/heatmap spec + "expand, scrutinise to
 top-tier, deliver a stepped report, don't break anything") against `Desktop/ingest.txt` — the fresh
 799-line *Release Audit Report v0.1b* (Tiers 0–8, written 17:30 today).
-**Tree:** `C:\Users\Moddy\OrderFlow-Analysis-Pro` · HEAD `fa202d6`, nothing committed.
+**Tree:** `C:\Users\<you>\OrderFlow-Analysis-Pro` · HEAD `fa202d6`, nothing committed.
 **Date:** 2026-09-16, ~18:00 local.
 
 **Rule observed throughout:** every fix is isolated, lands with its own test, and was verified

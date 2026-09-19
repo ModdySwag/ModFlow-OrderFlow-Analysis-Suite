@@ -28,6 +28,7 @@ from fastapi import APIRouter, Body, HTTPException, Query
 from orderflow_system.desktop import config_store, engine as engine_mod, logs
 from orderflow_system.desktop import windows as windows_mod
 from orderflow_system.desktop import deribit as deribit_mod
+from orderflow_system.desktop import profiles as profiles_mod
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ async def bootstrap() -> dict[str, Any]:
     """One call the GUI makes on load: config + capabilities + engine state."""
     cfg = config_store.load_config()
     return {
-        "config": cfg,
+        "config": config_store.mask_secrets(cfg),   # SEC-09: same mask as /config
         "status": engine_mod.engine.status(),
         "capabilities": engine_mod.capabilities(),
         "system": {
@@ -53,13 +54,16 @@ async def bootstrap() -> dict[str, Any]:
             "config_path": str(config_store.config_path()),
             "log_path": str(config_store.log_path()),
             "db_path": str(config_store.db_path()),
+            "config_error": config_store.config_error(),
         },
     }
 
 
 @router.get("/config")
 async def get_config() -> dict[str, Any]:
-    return config_store.load_config()
+    # SEC-09: credentials are write-only — masked here, restored on the way back in by
+    # config_store.unmask_patch(). The UI shows the mask, never the stored value.
+    return config_store.mask_secrets(config_store.load_config())
 
 
 @router.post("/config")
@@ -133,6 +137,33 @@ def artifact_validate(raw: Any) -> tuple[dict[str, Any] | None, str]:
     return raw, ""
 
 
+def artifact_code_modules(artifact: dict[str, Any]) -> list[str]:
+    """Names of the custom studies in an artifact that carry JavaScript SOURCE (audit SEC-02).
+
+    A studies artifact is settings-shaped but can hold whole JS modules. Importing one used to
+    store that source and the shell compiled it with ``new Function`` on the next load — in the
+    app's own origin, where ``GET /config`` hands back the stored credentials. The import asks
+    first; without the explicit consent flag the source is dropped.
+    """
+    studies = (artifact.get("blocks") or {}).get("studies") or {}
+    custom = studies.get("custom") if isinstance(studies, dict) else None
+    return [str(module.get("name") or f"module {index + 1}")
+            for index, module in enumerate(custom or [])
+            if isinstance(module, dict) and str(module.get("source") or "").strip()]
+
+
+def artifact_strip_code(artifact: dict[str, Any]) -> int:
+    """Drop every module source from the artifact in place. Returns how many were dropped."""
+    studies = (artifact.get("blocks") or {}).get("studies") or {}
+    custom = studies.get("custom") if isinstance(studies, dict) else None
+    dropped = 0
+    for module in custom or []:
+        if isinstance(module, dict) and str(module.get("source") or "").strip():
+            module["source"] = ""
+            dropped += 1
+    return dropped
+
+
 @router.get("/config/artifact")
 async def get_config_artifact(kind: str = Query("workspace")) -> dict[str, Any]:
     """T12/B10: the workspace or the studies setup as one portable JSON file."""
@@ -150,6 +181,13 @@ async def post_config_import(payload: dict = Body(default={})) -> dict[str, Any]
     if artifact is None:
         return {"ok": False, "error": why}
     kind = artifact["kind"]
+    with_code = artifact_code_modules(artifact)
+    allow_code = bool((payload or {}).get("allow_code"))
+    dropped = 0
+    if with_code and not allow_code:
+        # SEC-02: no consent, no code. The names still travel back so the UI can say exactly what
+        # was left out, and the user can re-import with the flag after agreeing.
+        dropped = artifact_strip_code(artifact)
     cfg = config_store.load_config()
     applied = []
     for name in _ARTIFACT_BLOCKS[kind]:
@@ -157,7 +195,11 @@ async def post_config_import(payload: dict = Body(default={})) -> dict[str, Any]
             cfg[name] = artifact["blocks"][name]
             applied.append(name)
     config_store.save_config(cfg)          # sanitised on the way in; blocks apply whole
-    return {"ok": True, "kind": kind, "schema": artifact["schema"], "applied": applied}
+    if dropped:
+        logger.info("[config] import: dropped %d custom stud%s source(s) without consent",
+                    dropped, "y" if dropped == 1 else "ies")
+    return {"ok": True, "kind": kind, "schema": artifact["schema"], "applied": applied,
+            "code_modules": with_code, "code_stripped": dropped}
 
 
 @router.get("/config/defaults")
@@ -499,7 +541,7 @@ async def instruments_add(payload: dict = Body(default={})) -> dict[str, Any]:
 #: AlpacaData — disk-cached a day there — behind a short in-process TTL so a keystroke-driven
 #: resolve never waits on the disk. §82-ext: the look-up's Alpaca lane and the resolver both read
 #: the venue's own list, the same way MT5 reads the broker's symbol_info.
-_ALPACA_SYMBOLS_CACHE: dict[str, Any] = {"at": 0.0, "symbols": []}
+_ALPACA_SYMBOLS_CACHE: dict[str, Any] = {"at": 0.0, "symbols": [], "by_norm": {}}
 _ALPACA_SYMBOLS_TTL_S = 600.0
 
 
@@ -517,14 +559,27 @@ def _alpaca_asset_symbols() -> list[str]:
         rows = []
     symbols = [str(r.get("symbol") or "").strip().upper() for r in rows
                if isinstance(r, dict) and str(r.get("symbol") or "").strip()]
-    _ALPACA_SYMBOLS_CACHE["symbols"], _ALPACA_SYMBOLS_CACHE["at"] = symbols, now
+    # MEM-B-09: the normalised index is built once per refresh, with the list — the resolver
+    # used to rebuild it per keystroke.
+    from orderflow_system.desktop.instrument_lookup import normalise as _normalise
+
+    by_norm = {_normalise(s): s for s in symbols if _normalise(s)}
+    _ALPACA_SYMBOLS_CACHE["symbols"], _ALPACA_SYMBOLS_CACHE["by_norm"] = symbols, by_norm
+    _ALPACA_SYMBOLS_CACHE["at"] = now
     return list(symbols)
+
+
+def _alpaca_asset_index() -> dict[str, str]:
+    """The cached {normalise(symbol): symbol} index (MEM-B-09); {} when unlinked."""
+    _alpaca_asset_symbols()                    # refreshes the cache when stale
+    return dict(_ALPACA_SYMBOLS_CACHE.get("by_norm") or {})
 
 
 def _resolve_instrument(symbol: str, cfg: dict[str, Any] | None = None,
                         *, broker_names: Optional[list[str]] = None,
                         nt_names: Optional[list[str]] = None,
-                        alpaca_names: Optional[list[str]] = None) -> dict[str, Any]:
+                        alpaca_names: Optional[list[str]] = None,
+                        alpaca_by_norm: Optional[dict[str, str]] = None) -> dict[str, Any]:
     """One builder for the instrument look-up's answer (§82) — every caller gets the same one.
 
     ``broker_names`` / ``nt_names`` are the venue symbol lists (MT5's broker list, the
@@ -546,6 +601,9 @@ def _resolve_instrument(symbol: str, cfg: dict[str, Any] | None = None,
         mt5_known=list(broker_names or []),
         nt_known=list(nt_names or []),
         alpaca_known=list(alpaca_names or []),
+        # only a *populated* prebuilt index is passed — an empty one must never shadow the
+        # names the caller did supply (MEM-B-09)
+        alpaca_by_norm=alpaca_by_norm or None,
     )
 
 
@@ -568,11 +626,13 @@ async def instruments_resolve(symbol: str = "", broker: bool = True) -> dict[str
         nt_names = [str(row.get("Name") or "") for row in rows
                     if isinstance(row, dict) and row.get("Name")]
     alpaca_names: list[str] = []
+    alpaca_index: dict[str, str] = {}
     alp = dict(cfg.get("alpaca") or {})
     if alp.get("key_id") and alp.get("secret"):
         alpaca_names = await asyncio.to_thread(_alpaca_asset_symbols)
+        alpaca_index = await asyncio.to_thread(_alpaca_asset_index)     # MEM-B-09: prebuilt
     out = _resolve_instrument(symbol, cfg, broker_names=names, nt_names=nt_names,
-                              alpaca_names=alpaca_names)
+                              alpaca_names=alpaca_names, alpaca_by_norm=alpaca_index)
     total = len(nt_names) if source == "ninjatrader" else len(names)
     return {"ok": True, **out, "source": source or "bybit",
             "broker_total": total, "running": bool(engine_mod.engine.status().get("running"))}
@@ -655,7 +715,7 @@ def _study_name_from_source(source: str) -> str:
 
 @router.post("/studies")
 async def studies_save(payload: dict = Body(default={})) -> dict[str, Any]:
-    """Save the active studies, or add/replace a pasted module."""
+    """Save the active studies, add/replace a pasted module, or manage a saved set."""
     cfg = config_store.load_config()
     studies = cfg.setdefault("studies", {})
     if isinstance(payload.get("active"), list):
@@ -672,6 +732,23 @@ async def studies_save(payload: dict = Body(default={})) -> dict[str, Any]:
         target = str(payload["remove_custom"])
         studies["custom"] = [c for c in (studies.get("custom") or [])
                              if not (isinstance(c, dict) and c.get("name") == target)]
+    # §117: saved sets — "save" snapshots the current (or posted) active list under a name,
+    # "apply" swaps the named set into the live list, "delete" forgets it. One write per call.
+    coll = payload.get("collection")
+    if isinstance(coll, dict):
+        action = str(coll.get("action") or "").strip().lower()
+        name = str(coll.get("name") or "").strip()[:32]
+        collections = studies.get("collections") if isinstance(studies.get("collections"), dict) else {}
+        if action == "save" and name:
+            source = coll.get("active") if isinstance(coll.get("active"), list) else (studies.get("active") or [])
+            collections[name] = {"saved": int(time.time() * 1000), "active": source}
+        elif action == "apply" and name in collections:
+            studies["active"] = list(collections[name].get("active") or [])
+        elif action == "delete" and name:
+            collections.pop(name, None)
+        else:
+            return {"ok": False, "error": "unknown collection action: " + (action or "(none)")}
+        studies["collections"] = collections
     saved = config_store.save_config(cfg)
     return {"ok": True, "studies": saved.get("studies") or {},
             "note": "Stored in your config file; modules run in your browser session."}
@@ -1522,7 +1599,12 @@ async def systems() -> dict[str, Any]:
 
 @router.get("/engine/status")
 async def engine_status() -> dict[str, Any]:
-    return engine_mod.engine.status()
+    # `profile_restart_pending` rides this payload because this is the poll the whole shell already
+    # watches: the feed/instruments/atlas/ofx parts a switch cannot apply to a running engine are
+    # reported once, here, instead of every panel asking separately. None when the engine is up to
+    # date (or stopped).
+    return {**engine_mod.engine.status(),
+            "profile_restart_pending": profiles_mod.pending_restart()}
 
 
 @router.get("/live-status")
@@ -1633,10 +1715,12 @@ async def alpaca_test(payload: dict = Body(default={})) -> dict[str, Any]:
     """
     from orderflow_system.desktop import alpaca as alpaca_mod
 
-    cfg = _alpaca_cfg()
+    full = config_store.load_config()
+    cfg = dict(full.get("alpaca") or {})
+    # SEC-09: masked/blank fields test the STORED pair; only a typed value replaces it.
     body = {
-        "key_id": payload.get("key_id") or cfg.get("key_id", ""),
-        "secret": payload.get("secret") or cfg.get("secret", ""),
+        "key_id": config_store.secret_or_stored(full, "alpaca.key_id", payload.get("key_id")),
+        "secret": config_store.secret_or_stored(full, "alpaca.secret", payload.get("secret")),
         "paper": payload.get("paper", cfg.get("paper", True)),
     }
     report = await asyncio.to_thread(alpaca_mod.probe, body)
@@ -1690,7 +1774,11 @@ async def alpaca_clear() -> dict[str, Any]:
 # ──────────────────────────────────────────────────────────────
 
 _SEARCH: dict[str, Any] = {"universe": None, "batcher": None, "pump": None,
-                           "active": [], "view": "", "last_active": 0.0, "data": None}
+                           "active": [], "view": "", "last_active": 0.0, "data": None,
+                           "ctx": None, "ctx_at": 0.0}
+
+#: MEM-B-01/B-02: how long the palette reuses one config/capability read while it is open.
+_SEARCH_CTX_TTL_S = 5.0
 
 
 def _search_data():
@@ -1708,8 +1796,31 @@ def _search_data():
     return data
 
 
-def _search_live_provider(symbol: str) -> dict[str, Any]:
-    """Live fields for one palette row — from the engine, never invented."""
+def _search_live_ctx(caps: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """The constants the row builder needs, read once per search / pump flush (MEM-B-01/B-02).
+
+    The row path used to re-read and re-merge the whole config for *every* row: measured
+    4,055 loads and 7.5 s of event-loop freeze per keystroke on a linked account. The
+    capability block only changes when the config does, so it is read here and handed down.
+    """
+    if caps is not None:
+        return {"caps": caps}
+    now = time.time()
+    held = _SEARCH.get("ctx")
+    if held is not None and (now - float(_SEARCH.get("ctx_at") or 0.0)) < _SEARCH_CTX_TTL_S:
+        return held
+    ctx = {"caps": engine_mod.alpaca_capability_block(config_store.load_config(), None)}
+    _SEARCH["ctx"] = ctx
+    _SEARCH["ctx_at"] = now
+    return ctx
+
+
+def _search_live_provider(symbol: str, ctx: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Live fields for one palette row — from the engine, never invented.
+
+    ``ctx`` is the per-search constant block (:func:`_search_live_ctx`); when it is missing
+    the block is read here — correct, but it costs one config load per row.
+    """
     system = engine_mod.engine.system
     if system is None:
         return {}
@@ -1719,7 +1830,7 @@ def _search_live_provider(symbol: str) -> dict[str, Any]:
     out: dict[str, Any] = {}
     # The palette lists app symbols, but the rows that arrive from Alpaca wear
     # Alpaca's spelling (BTC/USD): map both ways through the capability block.
-    caps = engine_mod.alpaca_capability_block(config_store.load_config(), None)
+    caps = (ctx or {}).get("caps") or engine_mod.alpaca_capability_block(config_store.load_config(), None)
     app_symbol = key
     for app, alp in (caps.get("symbols") or {}).items():
         if key in (str(app).upper(), str(alp).upper()):
@@ -1775,11 +1886,13 @@ def _search_universe() -> Any:
             leg = next((name for name, syms in part.items() if symbol in syms), "")
             if leg:
                 local_feeds[symbol] = leg
+    # MEM-B-01: one read of the capability block per search, not one per row.
+    live_ctx = _search_live_ctx(caps=caps)
     universe = search_service.SymbolUniverse(
         config=cfg,
         assets_provider=(data.assets if data else None),
         clock_provider=(lambda: clock) if clock else None,
-        live_provider=_search_live_provider,
+        live_provider=lambda symbol: _search_live_provider(symbol, live_ctx),
         alpaca_linked=linked,
         alpaca_feed=str(alp.get("feed") or "iex"),
         alpaca_symbols=caps.get("symbols") or {},
@@ -1804,20 +1917,32 @@ async def _search_pump() -> None:
                     _SEARCH["pump"] = None
                     return
                 continue
-            batcher = _SEARCH.get("batcher")
-            if batcher is None:
-                continue
-            for symbol in list(_SEARCH["active"]):
-                patch = _search_live_provider(symbol)
-                if patch:
-                    batcher.offer(symbol, patch)
-            rows = batcher.drain()
+            rows = _search_pump_tick()
             if rows:
                 await ws_manager.broadcast_search_rows(rows)
         except asyncio.CancelledError:
             raise
         except Exception:                       # noqa: BLE001 — the palette must never kill the app
             logger.debug("search pump tick failed", exc_info=True)
+
+
+def _search_pump_tick() -> list[dict[str, Any]]:
+    """One pump pass: read the constants once, offer every active symbol, return due rows.
+
+    MEM-B-02: the config/capability block is read once per flush (5 s TTL) — never per
+    symbol — and a tick whose batch window has not closed costs nothing at all.
+    """
+    batcher = _SEARCH.get("batcher")
+    if batcher is None or not _SEARCH["active"]:
+        return []
+    if not batcher.due():
+        return []
+    ctx = _search_live_ctx()
+    for symbol in list(_SEARCH["active"]):
+        patch = _search_live_provider(symbol, ctx)
+        if patch:
+            batcher.offer(symbol, patch)
+    return batcher.drain()
 
 
 @router.get("/search/symbols")
@@ -1855,21 +1980,26 @@ async def search_active(payload: dict = Body(default={})) -> dict[str, Any]:
     focus = str(payload.get("focus") or "").strip().upper()
     if focus:
         cfg = config_store.load_config()
+        stored = [str(r).upper() for r in (cfg.get("search", {}).get("recents") or [])]
         recents = [r for r in (cfg.get("search", {}).get("recents") or []) if r.upper() != focus]
         recents.insert(0, focus)
-        cfg.setdefault("search", {})["recents"] = recents[:12]
-        try:
-            config_store.save_config(cfg)
-        except Exception:                        # noqa: BLE001 — never fail the palette on a save
-            logger.debug("recents save failed", exc_info=True)
+        # MEM-B-06: only a real change is persisted — re-focusing the same row used to rewrite
+        # the whole config (and its version ring) for a list that did not move.
+        if [str(r).upper() for r in recents[:12]] != stored[:12]:
+            cfg.setdefault("search", {})["recents"] = recents[:12]
+            try:
+                config_store.save_config(cfg)
+            except Exception:                    # noqa: BLE001 — never fail the palette on a save
+                logger.debug("recents save failed", exc_info=True)
 
-    rows = [_search_row_snapshot(s) for s in symbols]
+    snapshot_ctx = _search_live_ctx()
+    rows = [_search_row_snapshot(s, snapshot_ctx) for s in symbols]
     return {"ok": True, "active": len(symbols), "rows": [r for r in rows if r],
             "counters": (_SEARCH["batcher"].counters() if _SEARCH.get("batcher") else {})}
 
 
-def _search_row_snapshot(symbol: str) -> Optional[dict[str, Any]]:
-    patch = _search_live_provider(symbol)
+def _search_row_snapshot(symbol: str, ctx: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
+    patch = _search_live_provider(symbol, ctx)
     if not patch:
         return None
     return {"symbol": symbol, **patch}
@@ -2107,7 +2237,8 @@ async def mt5_test(payload: dict = Body(default={})) -> dict[str, Any]:
 @router.post("/telegram/test")
 async def telegram_test(payload: dict = Body(default={})) -> dict[str, Any]:
     cfg = config_store.load_config()
-    token = str(payload.get("bot_token") or cfg["telegram"].get("bot_token") or "").strip()
+    # SEC-09: an untouched (masked) token field tests the STORED token, never the bullets.
+    token = str(config_store.secret_or_stored(cfg, "telegram.bot_token", payload.get("bot_token")) or "").strip()
     chat_id = str(payload.get("chat_id") or cfg["telegram"].get("chat_id") or "").strip()
     if not token or not chat_id:
         return {"ok": False, "error": "Bot token and chat id are both required"}
@@ -2206,10 +2337,15 @@ async def get_logs(lines: int = Query(default=200, le=1000), level: str = Query(
 #: One job at a time. Two passes would double the archive traffic for no gain, and "is it still
 #: running?" would stop having an answer.
 _backfill_job: dict[str, Any] = {"state": "idle"}
+#: Handles of the fire-and-forget jobs, kept by reference: a discarded task can be collected
+#: mid-flight and nothing could then answer "is it still running?" (audit A-06).
+_backfill_task: Optional[asyncio.Task] = None
+_update_check_task: Optional[asyncio.Task] = None
 
 
 def _backfill_job_public() -> dict[str, Any]:
-    return dict(_backfill_job)
+    # The task handle is internal bookkeeping and must never leak into a JSON response.
+    return {key: value for key, value in _backfill_job.items() if key != "task"}
 
 
 async def _run_backfill(symbol: str, days: list[Any]) -> None:
@@ -2293,7 +2429,8 @@ async def backfill_start(payload: dict = Body(default={})) -> dict[str, Any]:
         "state": "running", "symbol": symbol, "days": [d.isoformat() for d in days],
         "stage": "starting", "ticks": 0, "started_at": time.time(),
     })
-    asyncio.create_task(_run_backfill(symbol, days))
+    global _backfill_task
+    _backfill_task = asyncio.create_task(_run_backfill(symbol, days))
     return {"ok": True, "job": _backfill_job_public()}
 
 
@@ -2379,9 +2516,11 @@ async def get_storage(refresh: int = Query(default=0)) -> dict[str, Any]:
     else:
         # No engine handle: the file itself still answers — a stopped app is exactly when a user
         # opens the Logs panel, and "nothing to see" is not an answer.
-        from orderflow_system.data.database import readonly_snapshot
+        from orderflow_system.data.database import readonly_snapshot  # MEM-A2-11: off the loop below
 
-        snap = readonly_snapshot(str(config_store.db_path()))
+        # MEM-A2-11: a covering-index scan over a stopped engine's store measured 0.76 s —
+        # in a worker thread, never on the loop.
+        snap = await asyncio.to_thread(readonly_snapshot, str(config_store.db_path()))
         snap.setdefault("tables", {})              # counts are the live handle's business
         last_prune = config_store.load_last_prune()
 
@@ -2493,6 +2632,11 @@ async def storage_backup(payload: dict = Body(default={})) -> dict[str, Any]:
     except (TypeError, ValueError):
         keep = int(settings["backup_keep"])
     try:
+        # SEC-30: the target arrives in the request body — check it before anything is written.
+        target = storage_mod.validate_target(target)
+    except storage_mod.StorageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
         manifest = await asyncio.to_thread(storage_mod.run_backup, config_store.db_path(),
                                            target, fmt=fmt, keep=keep)
     except storage_mod.StorageError as exc:
@@ -2509,6 +2653,10 @@ async def storage_backups(target: str = Query(default="")) -> dict[str, Any]:
 
     settings = storage_mod.clamp_storage_settings(config_store.load_config())
     folder = str(target or "").strip() or str(storage_mod.resolved_target(settings, config_store.config_dir()))
+    try:
+        folder = str(storage_mod.validate_target(folder))        # SEC-30: same check on reads
+    except storage_mod.StorageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     sets = await asyncio.to_thread(storage_mod.list_backups, folder)
     return {"ok": True, "target": folder, "sets": sets,
             "total_bytes": sum(int(s.get("bytes") or 0) for s in sets)}
@@ -2603,11 +2751,15 @@ async def _update_auto_download(result: dict[str, Any], settings: dict[str, Any]
     return done
 
 
-async def _run_update_check(settings: dict[str, Any]) -> dict[str, Any]:
-    """One check: off the loop, remembered to disk, stamped into the config. Never raises."""
+async def _run_update_check(settings: dict[str, Any], claimed: bool = False) -> dict[str, Any]:
+    """One check: off the loop, remembered to disk, stamped into the config. Never raises.
+
+    ``claimed`` means the caller already set ``_update_state["checking"]`` — the status route
+    claims it before creating this task so two requests cannot both start a check (audit A-06).
+    """
     from orderflow_system.desktop import updater as updater_mod
 
-    if _update_state["checking"]:
+    if _update_state["checking"] and not claimed:
         return _updates_state()
     _update_state["checking"] = True
     try:
@@ -2646,9 +2798,13 @@ async def update_status(refresh: int = Query(default=0)) -> dict[str, Any]:
     settings = updater_mod.clamp_update_settings(config_store.load_config())
     import time as _time
 
+    global _update_check_task
     if (bool(refresh) or updater_mod.check_due(settings, now_ms=int(_time.time() * 1000))) \
             and not _update_state["checking"]:
-        asyncio.create_task(_run_update_check(settings))    # the panel never waits on the network
+        # Claim the flag HERE, not inside the coroutine: the old order let two requests arriving
+        # before the first task ran each start a check (audit A-06).
+        _update_state["checking"] = True
+        _update_check_task = asyncio.create_task(_run_update_check(settings, claimed=True))
     return _updates_state()
 
 
@@ -2761,9 +2917,14 @@ def _journal_rows(limit: int = 1000) -> list[dict[str, Any]]:
     conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
     try:
         conn.row_factory = sqlite3.Row
+        # A file the engine has not opened since the profiles column shipped still has to render:
+        # fall back to an empty string rather than letting the missing column blank the journal.
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_journal)").fetchall()}
+        profile_col = "profile_id" if "profile_id" in cols else "'' AS profile_id"
         cursor = conn.execute(
             "SELECT id, instrument, direction, entry_time_ms, exit_time_ms, entry_price, "
-            "exit_price, stop_loss, take_profit, pnl_ticks, rr_ratio, signals_json, notes "
+            "exit_price, stop_loss, take_profit, pnl_ticks, rr_ratio, signals_json, notes, "
+            f"{profile_col} "
             "FROM trade_journal ORDER BY COALESCE(exit_time_ms, entry_time_ms, 0) DESC LIMIT ?",
             (int(limit),))
         return [dict(row) for row in cursor]
@@ -2889,15 +3050,27 @@ async def data_import(payload: dict = Body(default={})) -> dict[str, Any]:
     kind = "candles" if str(body.get("kind") or "ticks").lower().startswith("candle") else "ticks"
     symbol = str(body.get("symbol") or "").strip().upper()
     has_header = body.get("has_header")
-    parsed = (dataport.parse_candles if kind == "candles" else dataport.parse_ticks)(
-        text, symbol=symbol, has_header=has_header if isinstance(has_header, bool) else None)
+    try:
+        # MEM-A2-01: the parse of a 40 MB CSV costs ~15 s of CPU and +600 MiB peak — off the
+        # loop (a worker thread), so the app keeps serving while the file is read.
+        parsed = await asyncio.to_thread(
+            dataport.parse_candles if kind == "candles" else dataport.parse_ticks,
+            text, symbol=symbol, has_header=has_header if isinstance(has_header, bool) else None)
+    except Exception as exc:                           # noqa: BLE001
+        # SEC-33: a CSV the sniffer cannot read (the audit's case: a 25 MB single field raises
+        # _csv.Error) used to surface as an unhandled 500. Unreadable input is a 400.
+        raise HTTPException(status_code=400, detail=(
+            f"could not read that CSV — {type(exc).__name__}: {str(exc)[:160]}")) from exc
     if not parsed["rows"]:
         return {"ok": False, "kind": kind, "error": "no readable rows",
                 "errors": parsed["errors"][:10], "delimiter": parsed["delimiter"],
                 "headers": parsed["headers"]}
     result = await asyncio.to_thread(dataport.import_rows, str(config_store.db_path()),
                                      kind, parsed["rows"])
-    stamps = [row[1] for row in parsed["rows"]]
+    # MEM-A2-01: min/max over a generator, not a `stamps` list the size of the file — the
+    # payload used to hold three full copies of itself at once (text, rows, stamps).
+    first_ms = min((row[1] for row in parsed["rows"]), default=0)
+    last_ms = max((row[1] for row in parsed["rows"]), default=0)
     logger.info("[data] imported %d %s row(s) from %s (skipped %d, bad rows %d)",
                 result["inserted"], kind, str(body.get("name") or "a pasted CSV")[:60],
                 result["skipped_existing"], parsed["skipped"])
@@ -2910,7 +3083,7 @@ async def data_import(payload: dict = Body(default={})) -> dict[str, Any]:
             "deduped": parsed.get("deduped", 0), "errors": parsed["errors"][:10],
             "delimiter": parsed["delimiter"], "headers": parsed["headers"],
             "instrument": symbol or (parsed["rows"][0][0] if parsed["rows"] else ""),
-            "first_ms": min(stamps), "last_ms": max(stamps)}
+            "first_ms": first_ms, "last_ms": last_ms}
 
 
 @router.post("/data/export")
@@ -3259,6 +3432,101 @@ async def layouts_post(payload: dict = Body(default={})) -> dict[str, Any]:
     return {"ok": True, "action": actions[-1] if actions else "read", "actions": actions,
             "error": refused, **_layouts_state(block_out),
             "note": "layouts live in your config file; the browser keeps no copy"}
+
+
+# ──────────────────────────────────────────────────────────────
+# Profiles — switchable playbooks (feed, instruments, analysis, layout, theme in one switch)
+# ──────────────────────────────────────────────────────────────
+#
+# A profile carries only the analysis blocks in config_store.PROFILE_BLOCKS — never credentials,
+# machine paths or network settings (that is what makes one safe to export and share). The
+# lifecycle logic lives in `desktop/profiles.py`; these routes are the store's public face, and
+# they always answer with the state the store ACCEPTED, so the UI can never display a profile
+# the sanitiser refused.
+
+def _profile_trade_counts() -> dict[str, int]:
+    """Trades journaled while each profile was the active one — the metric the cards show."""
+    import sqlite3
+
+    path = Path(config_store.db_path())
+    if not path.exists():
+        return {}
+    try:
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                "SELECT profile_id, COUNT(*) FROM trade_journal "
+                "WHERE profile_id IS NOT NULL AND profile_id <> '' GROUP BY profile_id").fetchall()
+            return {str(row[0]): int(row[1]) for row in rows}
+        finally:
+            conn.close()
+    except sqlite3.OperationalError:            # a database from before the column existed
+        return {}
+
+
+@router.get("/profiles")
+async def profiles_get() -> dict[str, Any]:
+    """Every profile with its live state: active, dirty (against the current setup), stats."""
+    out = profiles_mod.state()
+    counts = _profile_trade_counts()
+    for row in out.get("items", []):
+        row["trades"] = counts.get(row["id"], 0)
+    return out
+
+
+@router.post("/profiles")
+async def profiles_post(payload: dict = Body(default={})) -> dict[str, Any]:
+    """One write per call, actions in a fixed order (the layouts' pattern): save · apply · preview ·
+    update · rename · duplicate · delete · restore_version · default · rules · export · import.
+
+    `apply` without `dry_run` is the switch itself; with `dry_run` it is the preview (what would
+    change, and which of it waits for the next engine start) and nothing is written.
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    out: Optional[dict[str, Any]] = None
+
+    if isinstance(payload.get("save"), dict):
+        entry = payload["save"]
+        out = profiles_mod.save(str(entry.get("name") or ""), str(entry.get("description") or ""),
+                                entry.get("tags") if isinstance(entry.get("tags"), list) else None,
+                                entry.get("blocks") if isinstance(entry.get("blocks"), list) else None,
+                                bool(entry.get("from_defaults")))
+    if isinstance(payload.get("apply"), str) and payload["apply"]:
+        out = profiles_mod.apply(payload["apply"], dry_run=bool(payload.get("dry_run")))
+    if isinstance(payload.get("preview"), str) and payload["preview"]:
+        out = profiles_mod.preview(payload["preview"])
+    if isinstance(payload.get("update"), str) and payload["update"]:
+        out = profiles_mod.update(payload["update"])
+    if isinstance(payload.get("rename"), str) and payload.get("to"):
+        out = profiles_mod.rename(payload["rename"], str(payload["to"]))
+    if isinstance(payload.get("duplicate"), str) and payload["duplicate"]:
+        out = profiles_mod.duplicate(payload["duplicate"], str(payload.get("name") or ""))
+    if isinstance(payload.get("delete"), str) and payload["delete"]:
+        out = profiles_mod.delete(payload["delete"])
+    if isinstance(payload.get("restore_version"), dict):
+        rv = payload["restore_version"]
+        out = profiles_mod.restore_version(str(rv.get("id") or ""), int(rv.get("at") or 0))
+    if "default" in payload or payload.get("auto_apply") is not None:
+        out = profiles_mod.set_default(str(payload.get("default") or ""),
+                                       payload.get("auto_apply") if payload.get("auto_apply") is not None else None)
+    if isinstance(payload.get("rules"), dict) or payload.get("rules_enabled") is not None:
+        out = profiles_mod.set_rules(payload.get("rules"), enabled=payload.get("rules_enabled"))
+    if isinstance(payload.get("export"), str) and payload["export"]:
+        filename, text, error = profiles_mod.export_bundle(payload["export"])
+        out = {"action": "export", "filename": filename, "text": text, "error": error,
+               **profiles_mod.state(), "ok": not error}
+    if isinstance(payload.get("import"), dict):
+        out = profiles_mod.import_bundle(payload["import"])
+
+    if out is None:
+        out = {**profiles_mod.state(), "ok": False,
+               "error": "no recognised action — one of: save, apply, preview, update, "
+                        "rename, duplicate, delete, restore_version, default, rules, export, import"}
+    if out.get("ok") and isinstance(out.get("items"), list):
+        counts = _profile_trade_counts()
+        for row in out["items"]:
+            row["trades"] = counts.get(row["id"], 0)
+    return out
 
 
 # ──────────────────────────────────────────────────────────────

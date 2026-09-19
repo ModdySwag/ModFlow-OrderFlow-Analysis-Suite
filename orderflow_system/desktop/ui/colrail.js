@@ -108,7 +108,7 @@
         rows.innerHTML = ordered.map((e) => {
             const v = e.acc;
             const cls = v > 0 ? 'pos' : (v < 0 ? 'neg' : '');
-            return '<div class="hm-rail-row" data-key="' + e.key + '" title="double-click to reset this column\'s accumulation">'
+            return '<div class="hm-rail-row" data-key="' + e.key + '" title="Double-click to reset this column\'s accumulation">'
                 + '<span class="hm-rail-t">' + hhmmss(e.ts) + '</span>'
                 + '<span class="hm-rail-v ' + cls + '">' + (v > 0 ? '+' : '') + fmt(v) + '</span></div>';
         }).join('') || '<div class="dim">waiting for a snapshot…</div>';

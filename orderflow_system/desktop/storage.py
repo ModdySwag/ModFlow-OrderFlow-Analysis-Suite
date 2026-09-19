@@ -32,6 +32,7 @@ import gzip
 import hashlib
 import json
 import logging
+import os
 import shutil
 import sqlite3
 import time
@@ -116,6 +117,38 @@ def resolved_target(settings: dict[str, Any], config_dir: Path | str) -> Path:
     """The configured target as a path (the default when unset). Empty string means unset."""
     raw = str(settings.get("backup_target") or "").strip()
     return Path(raw) if raw else default_backup_dir(config_dir)
+
+
+#: Folders a backup may never be aimed at (audit SEC-30). The API takes the target from the
+#: request body, and rotation deletes `modflow-backup-*` under it — so a drive root or a system
+#: directory must be refused before anything is written or removed.
+_FORBIDDEN_ROOTS = ("c:\\windows", "c:\\program files", "c:\\program files (x86)", "c:\\programdata")
+
+
+def validate_target(target: Path | str) -> Path:
+    """``target`` as a Path, or ``StorageError`` — drive roots and system directories are refused.
+
+    Symlinks are resolved first, so a folder that *leads* to a system directory is refused too.
+    A target outside the user's own tree (a removable drive, a synced folder, a share) is fine:
+    that is the feature. This is only about never aiming a write/delete at the system.
+    """
+    raw = str(target or "").strip()
+    if not raw:
+        raise StorageError("no backup folder given")
+    path = Path(os.path.expandvars(raw)).expanduser()
+    if not path.is_absolute():
+        raise StorageError(f"{raw} is not an absolute path — name a folder or a drive")
+    try:
+        real = path.resolve()
+    except OSError:
+        real = path
+    if real == Path(real.anchor):
+        raise StorageError(f"{real} is a drive root — name a folder inside it")
+    text = str(real).lower().rstrip("\\/")
+    for forbidden in _FORBIDDEN_ROOTS:
+        if text == forbidden or text.startswith(forbidden + "\\"):
+            raise StorageError(f"{real} is a system folder — backups are not written there")
+    return path
 
 
 # ══════════════════════════════════════════════════════════════

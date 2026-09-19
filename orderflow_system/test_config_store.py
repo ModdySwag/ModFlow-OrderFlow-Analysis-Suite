@@ -251,3 +251,25 @@ def test_the_mt5_block_is_clamped():
     assert len(mt5["password"]) == 200 and mt5["server"] == "srv"
 
     assert "mt5" not in _sanitise({}), "a config with no mt5 block must not grow one"
+
+
+# ── MEM-B-06: an unchanged config is not rewritten ───────────────────────────────────────────
+def test_saving_an_unchanged_config_does_not_touch_the_file(monkeypatch, tmp_path):
+    import time as _time
+
+    from orderflow_system.desktop import config_store
+
+    monkeypatch.setattr(config_store, "config_dir", lambda: tmp_path)
+    stored = config_store.save_config(config_store.load_config())
+    path = config_store.config_path()
+    assert path.is_file()
+    first = path.stat().st_mtime_ns
+
+    _time.sleep(0.02)                                    # make a rewrite detectable on the clock
+    assert config_store.save_config(stored) == stored
+    assert path.stat().st_mtime_ns == first, "an unchanged config is not written again"
+
+    changed = dict(stored)
+    changed["search"] = {**(stored.get("search") or {}), "recents": ["ZZZ"]}
+    config_store.save_config(changed)
+    assert path.stat().st_mtime_ns != first, "a real change is written"

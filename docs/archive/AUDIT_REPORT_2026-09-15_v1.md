@@ -2,7 +2,7 @@ ModFlow OrderFlow Analysis Suite — Audit & Enhancement Report
 Combined from: desktop/code.txt (reference advice), desktop/report.txt (prior codebase audit), and a fresh line-level pass over the actual source.
 
 Date: 2026-09-15
-Scope: C:\Users\Moddy\OrderFlow-Analysis-Pro — all app-authored code.
+Scope: C:\Users\<you>\OrderFlow-Analysis-Pro — all app-authored code.
 
 ─────────────────────────────────────────────────────────────────────────────
 1. WHAT YOU ALREADY HAVE THAT IS GOOD (DON'T TOUCH WITHOUT REASON)

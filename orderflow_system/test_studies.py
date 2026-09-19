@@ -25,7 +25,7 @@ from orderflow_system.desktop import config_store                # noqa: E402
 # ── the config contract ────────────────────────────────────────────────────────────
 def test_defaults_ship_an_empty_but_shaped_studies_block():
     studies = config_store.default_config()["studies"]
-    assert studies == {"active": [], "custom": [], "data_box": True}
+    assert studies == {"active": [], "custom": [], "data_box": True, "collections": {}}
 
 
 def test_active_studies_are_validated(monkeypatch, tmp_path):
@@ -88,6 +88,41 @@ def test_library_includes_enabled_custom_modules(monkeypatch, tmp_path):
     payload = _run(control_api.studies_library())
     assert payload["modules"] == []
     assert [c["name"] for c in payload["custom"]] == ["pasted"]
+
+
+def test_collections_clamp_and_survive_a_round_trip(monkeypatch, tmp_path):
+    monkeypatch.setattr(config_store, "config_path", lambda: tmp_path / "config.json")
+    cfg = config_store.default_config()
+    cfg["studies"]["collections"] = {
+        "Scalp reads": {"saved": 5, "active": [
+            {"name": "deltaFlow", "params": {"window": "20"}, "visible": True},
+            {"name": "2 bad name", "params": {}},                      # dropped by the shared clamp
+        ]},
+        "": {"active": []},                                            # unnamed: dropped
+        "nested": {"active": [{"name": "ema", "params": {"period": {"x": 1}}}]},   # nested param dropped
+    }
+    saved = config_store.save_config(cfg)["studies"]
+    assert set(saved["collections"].keys()) == {"Scalp reads", "nested"}
+    assert [e["name"] for e in saved["collections"]["Scalp reads"]["active"]] == ["deltaFlow"]
+    assert saved["collections"]["nested"]["active"][0]["params"] == {}
+
+
+def test_collection_actions_round_trip_through_the_endpoint(monkeypatch, tmp_path):
+    monkeypatch.setattr(config_store, "config_path", lambda: tmp_path / "config.json")
+    active = [{"name": "ema", "params": {"period": 9}, "visible": True}]
+    _run(control_api.studies_save({"active": active}))
+    saved = _run(control_api.studies_save({"collection": {"action": "save", "name": "Trend"}}))
+    assert saved["ok"] is True
+    assert [e["name"] for e in saved["studies"]["collections"]["Trend"]["active"]] == ["ema"]
+    # applying swaps the live list
+    _run(control_api.studies_save({"active": [{"name": "atr", "params": {}, "visible": True}]}))
+    applied = _run(control_api.studies_save({"collection": {"action": "apply", "name": "Trend"}}))
+    assert [e["name"] for e in applied["studies"]["active"]] == ["ema"]
+    # deleting forgets it; a second apply is refused with a reason
+    deleted = _run(control_api.studies_save({"collection": {"action": "delete", "name": "Trend"}}))
+    assert "Trend" not in deleted["studies"]["collections"]
+    refused = _run(control_api.studies_save({"collection": {"action": "apply", "name": "Trend"}}))
+    assert refused["ok"] is False and "unknown collection action" in refused["error"]
 
 
 def _run(coro):

@@ -96,6 +96,14 @@ function searchActions() {
             } },
         { cat: 'Actions', title: 'Open the Guide', desc: 'What the program is, how each view works, and every walkthrough in one place.',
           keywords: 'documentation help manual docs', run: () => window.showView && window.showView('guide') },
+        { cat: 'Actions', title: 'Profiles: switch playbook',
+          desc: 'Your saved setups as named playbooks — the switch previews exactly what changes first.',
+          keywords: 'profiles playbook switch setup playbooks',
+          run: () => { showView('profiles'); if (window.OFAPPROFILES) OFAPPROFILES.refresh(); } },
+        { cat: 'Actions', title: 'Profiles: save the current setup as…',
+          desc: 'Name what you are running now — feed, instruments, analysis, layout and theme — and choose what it carries.',
+          keywords: 'profile playbook save setup snapshot',
+          run: () => { if (window.OFAPPROFILES) OFAPPROFILES.saveAs(); } },
         { cat: 'Actions', title: 'Rebuild the volume profiles', desc: 'Recompute the profiles from the stored candle history instead of waiting for the hourly pass.',
           keywords: 'profile rebuild poc value area', run: () => api('/api/control/profiles/rebuild', { method: 'POST', body: {} }) },
         { cat: 'Actions', title: 'Anchor the VWAP here', desc: 'Start the anchored VWAP at this moment (the blue line on the Chart view).',
@@ -500,9 +508,9 @@ function searchEnsureUI() {
     wrap.style.minWidth = '240px';
     wrap.innerHTML = `<span title="Search everything and every symbol">🔍</span>
         <input id="programSearch" placeholder="Search or type a ticker…  (Ctrl+K)" autocomplete="off" spellcheck="false"
-               title="Views, panels, settings, actions — and live symbols. Operators: Shift+Enter.">
+               title="Views, panels, settings and actions — and live symbols. Enter opens the first match; Ctrl+Enter opens it in a new panel; Ctrl+Shift+Enter chains it; Shift+? lists the operators.">
         <span class="kbd">Ctrl+K</span>
-        <button class="btn small" id="searchClear" title="Clear">✕</button>`;
+        <button class="btn small" id="searchClear" title="Clear the search and its filters">✕</button>`;
     host.insertBefore(wrap, host.firstChild);
     const panel = document.createElement('div');
     panel.className = 'search-panel';

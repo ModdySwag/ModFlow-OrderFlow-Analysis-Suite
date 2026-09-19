@@ -17,9 +17,11 @@
 
     const SCOPED = [
         'ofx.heat_contrast', 'ofx.heat_floor', 'ofx.heat_floor_pct', 'ofx.heat_smooth', 'ofx.ramp',
+        'ofx.heat_dim', 'ofx.heat_highlight',
         'atlas.ofx.degrade',
         'atlas.heatmap.upper_cutoff_pct', 'atlas.heatmap.upper_cutoff_abs', 'atlas.heatmap.contrast',
         'atlas.heatmap.floor', 'atlas.heatmap.floor_pct', 'atlas.heatmap.smooth',
+        'atlas.heatmap.dim', 'atlas.heatmap.highlight',
     ];
     const MAX_INSTRUMENTS = 40;
     const hasDom = typeof document !== 'undefined' && !!document.createElement;

@@ -5,9 +5,15 @@
 [![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](.)
 [![License](https://img.shields.io/badge/license-MIT-informational?style=for-the-badge)](LICENSE)
 [![Instruments](https://img.shields.io/badge/instruments-49-blue?style=for-the-badge)](.)
-[![Code](https://img.shields.io/badge/code-~87k%20lines-brightgreen?style=for-the-badge)](.)
-[![API](https://img.shields.io/badge/API-181%20routes-orange?style=for-the-badge)](.)
-[![Tests](https://img.shields.io/badge/tests-1412%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+[![Code](https://img.shields.io/badge/code-~98k%20lines-brightgreen?style=for-the-badge)](.)
+[![API](https://img.shields.io/badge/API-186%20routes-orange?style=for-the-badge)](.)
+[![Tests](https://img.shields.io/badge/tests-1584%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+
+**Where it sits:** ModFlow is an analytics layer, not a broker terminal — it reads the market in
+depth and sits beside whatever you execute in. No order tickets, no positions, no sign-up; your
+terminal stays your terminal. What it carries is everything *around* the order flow — news,
+calendar, fundamentals, options, journal, alerts — in the same window as the footprint, from the
+same live feed.
 
 ---
 
@@ -76,9 +82,33 @@ give it a star: **<https://github.com/mahmoud20138/OrderFlow-Analysis-Pro>**
 
 ---
 
+## Status, limitations & privacy
+
+**v0.1.0-beta.** The suite runs a live venue feed, a canvas UI and a local API, and it is
+published so it can be read, run and reviewed — not as a finished product. What that means in
+practice:
+
+- **Feed data is only as good as the venue.** The suite does not invent guarantees the exchanges
+  do not provide: there is no trade-level gap detection or replay, Alpaca's free `iex` feed is a
+  single-venue subset, and a venue that goes quiet looks quiet — each feed reports its own
+  staleness in the `data:` chip and the freshness stamps.
+- **Beta scope.** Signals, footprints and profiles are analysis aids, not advice (see the
+  Disclaimer). Windows is the tested platform and the frozen build is Windows-only; the source
+  tree runs anywhere Python 3.11+ does, but CI exercises Windows only.
+- **Your data stays on your machine.** The app binds a loopback-only server on `127.0.0.1`; there
+  is no telemetry and no analytics. The only outbound calls are the market-data feeds you
+  configure, SEC/CoinGecko look-ups the fundamentals panel makes on demand, and the update check
+  (GitHub's release API, on a slow configurable interval — Settings ▸ Updates). Configuration,
+  logs and the SQLite database live in `%APPDATA%\OrderFlowAnalysisPro`; nothing is uploaded.
+- **Credentials are yours.** Keys you enter are stored in that same per-user config; the repo
+  ships no keys, and no `.env` file is read from the repository directory.
+
+---
+
 ## Table of Contents
 
 - [See It Running](#see-it-running)
+- [Status, limitations & privacy](#status-limitations--privacy)
 - [Golden Features](#golden-features)
 - [Credit & Lineage](#credit--lineage)
 - [What Is OrderFlow Analysis?](#what-is-orderflow-analysis)
@@ -164,7 +194,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 │               │                                  │                          │
 │  ┌────────────▼──────────┐  ┌───────────────────▼────────────────────┐     │
 │  │   Telegram Alerts     │  │   FastAPI Dashboard                    │     │
-│  │   Entry/BE/Trail/Exit │  │   181 REST/WS routes + streams         │     │
+│  │   Entry/BE/Trail/Exit │  │   186 REST/WS routes + streams         │     │
 │  │   Daily Bias updates  │  │   Charts, VP, Footprint, Orderbook     │     │
 │  └───────────────────────┘  │   Scanner, Strategy Status, Tape       │     │
 │                              └───────────────────────────────────────┘     │
@@ -185,35 +215,35 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 ```
                      ┌─────────────┐
                      │  MT5 Feed   │──── Tick polling (100ms)
-                     │  (493L)     │──── Market Book (DOM)
+                     │  (613L)     │──── Market Book (DOM)
                      │             │──── Historical download
                      └──────┬──────┘
                             │
      ┌──────────────┐       │       ┌──────────────┐
      │  Bybit Feed  │───────┤       │   Database   │
-     │  (339L)      │       ├──────▶│  (472L)      │
+     │  (394L)      │       ├──────▶│  (669L)      │
      │  WebSocket   │       │       │  SQLite WAL  │
      │  Free, no key│       │       └──────────────┘
      └──────────────┘       │
                             ▼
                    ┌─────────────────┐
                    │ Candle Builder  │ ← Tick → 1m aggregation
-                   │ (132L)          │ ← Footprint per level
+                   │ (168L)          │ ← Footprint per level
                    └────────┬────────┘
                             │
               ┌─────────────┼──────────────┐
               ▼             ▼              ▼
      ┌──────────────┐ ┌──────────┐ ┌──────────────┐
      │ Volume Prof. │ │  Delta   │ │  Footprint   │
-     │ Engine (283L)│ │Engine    │ │  Engine      │
-     │              │ │ (207L)   │ │ (349L)       │
+     │ Engine (343L)│ │Engine    │ │  Engine      │
+     │              │ │ (207L)   │ │ (357L)       │
      │ POC/VAH/VAL  │ │ Vert/Hor│ │ Bid/Ask/Lvl  │
      │ LVN/Shape    │ │ Cumul.   │ │ Imbalance    │
      └──────┬───────┘ └────┬─────┘ └──────┬───────┘
             │              │              │
             ▼              ▼              ▼
      ┌─────────────────────────────────────────┐
-     │        ORDERBOOK TRACKER (208L)          │
+     │        ORDERBOOK TRACKER (212L)          │
      │  L2 depth · Thin levels · Consumptions  │
      │  Path of least resistance               │
      └──────────────────┬──────────────────────┘
@@ -223,19 +253,19 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
    ┌────────┐┌────────┐┌──────┐┌────────┐┌────────┐
    │Absorp- ││Initia- ││Sweep ││Exhaus- ││Diverg- │
    │tion    ││tive    ││      ││tion    ││ence    │
-   │(266L)  ││(136L)  ││(142L)││(237L)  ││(159L)  │
+   │(267L)  ││(137L)  ││(143L)││(238L)  ││(160L)  │
    └───┬────┘└───┬────┘└──┬───┘└───┬────┘└───┬────┘
        │         │        │        │         │
        └─────────┴────┬───┴────────┴─────────┘
                       ▼
             ┌─────────────────────┐
             │  Profile Framing    │ ← P/b/D shape → Daily Bias
-            │  (343L)             │ ← Qualified Levels (VAH/VAL/POC/LVN/Merged)
+            │  (352L)             │ ← Qualified Levels (VAH/VAL/POC/LVN/Merged)
             └─────────┬───────────┘
                       ▼
             ┌─────────────────────┐
             │  Signal Aggregator  │ ← State machine (6 states)
-            │  (516L)             │ ← Composite scoring (0-100)
+            │  (530L)             │ ← Composite scoring (0-100)
             │                     │ ← SL/TP calculation
             └──────┬──────────────┘
                    │
@@ -244,44 +274,44 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
  ┌──────────┐ ┌──────────┐  ┌───────────────┐
  │ Telegram │ │Dashboard │  │  Database     │
  │ Bot      │ │ FastAPI  │  │  Journal      │
- │ (201L)   │ │ (1381L)  │  │  Logging      │
+ │ (205L)   │ │ (1453L)  │  │  Logging      │
  └──────────┘ └──────────┘  └───────────────┘
 ```
 
 ### Module Dependency Graph
 
 ```
-main.py (883L) ─── System orchestrator
+main.py (1341L) ─── System orchestrator
     │
     ├── config/settings.py (842L) ─── 31 instrument configs, 15 config dataclasses
     │
     ├── data/
-    │   ├── models.py (330L) ─── 9 dataclasses: Tick, Candle, Signal, FootprintLevel, TradeState...
-    │   ├── candle_builder.py (132L) ─── Tick → 1m aggregation + footprint
-    │   ├── mt5_feed.py (493L) ─── MT5 terminal: ticks, book, history
-    │   ├── bybit_feed.py (339L) ─── Bybit WebSocket: trades + orderbook
-    │   ├── ninjatrader_feed.py (629L) ─── NinjaTrader 8 via the shipped read-only bridge
-    │   └── database.py (472L) ─── SQLite: 5 tables, WAL mode
+    │   ├── models.py (341L) ─── 9 dataclasses: Tick, Candle, Signal, FootprintLevel, TradeState...
+    │   ├── candle_builder.py (168L) ─── Tick → 1m aggregation + footprint
+    │   ├── mt5_feed.py (613L) ─── MT5 terminal: ticks, book, history
+    │   ├── bybit_feed.py (394L) ─── Bybit WebSocket: trades + orderbook
+    │   ├── ninjatrader_feed.py (646L) ─── NinjaTrader 8 via the shipped read-only bridge
+    │   └── database.py (669L) ─── SQLite: 5 tables, WAL mode
     │
     ├── analytics/
-    │   ├── volume_profile.py (283L) ─── POC/VAH/VAL/LVN/shape
+    │   ├── volume_profile.py (343L) ─── POC/VAH/VAL/LVN/shape
     │   ├── delta.py (207L) ─── Vertical + horizontal + cumulative delta
-    │   ├── footprint.py (349L) ─── Bid/ask per level, imbalance detection
-    │   └── orderbook.py (208L) ─── L2 depth, thin levels, consumption tracking
+    │   ├── footprint.py (357L) ─── Bid/ask per level, imbalance detection
+    │   └── orderbook.py (212L) ─── L2 depth, thin levels, consumption tracking
     │
     ├── patterns/
-    │   ├── absorption.py (266L) ─── Effort >> result detection
-    │   ├── initiative.py (136L) ─── Effort = result (momentum)
-    │   ├── sweep.py (142L) ─── Thin book displacement
-    │   ├── exhaustion.py (237L) ─── Declining volume at extremes
-    │   └── divergence.py (159L) ─── Price vs delta disagreement
+    │   ├── absorption.py (267L) ─── Effort >> result detection
+    │   ├── initiative.py (137L) ─── Effort = result (momentum)
+    │   ├── sweep.py (143L) ─── Thin book displacement
+    │   ├── exhaustion.py (238L) ─── Declining volume at extremes
+    │   └── divergence.py (160L) ─── Price vs delta disagreement
     │
     ├── signals/
-    │   ├── profile_framing.py (343L) ─── Daily bias + qualified levels
-    │   └── aggregator.py (516L) ─── State machine + composite scoring
+    │   ├── profile_framing.py (352L) ─── Daily bias + qualified levels
+    │   └── aggregator.py (530L) ─── State machine + composite scoring
     │
     ├── alerts/
-    │   └── telegram_bot.py (201L) ─── Telegram notifications
+    │   └── telegram_bot.py (205L) ─── Telegram notifications
     │
     └── dashboard/
         ├── app.py ─── FastAPI host: REST + WebSocket (the app mounts its routers here)
@@ -297,7 +327,7 @@ main.py (883L) ─── System orchestrator
     │   ├── launcher.py ─── pywebview window / --headless server
     │   ├── api.py ─── /api/control/* (config, feeds, alerts, exports, layouts)
     │   ├── engine.py ─── the live pipeline host the UI reads from
-    │   └── ui/ ─── vanilla-JS modules (~43,452L across 112 files) + index.html
+    │   └── ui/ ─── vanilla-JS modules (~45,567L across 115 files) + index.html
 ```
 
 ---
@@ -601,7 +631,7 @@ The system auto-discovers instruments across 200+ broker-specific naming variant
 
 ### Frontend Components
 
-The current UI is the desktop suite: **112 vanilla-JS modules** (33 of them selftests) in `orderflow_system/desktop/ui/`
+The current UI is the desktop suite: **115 vanilla-JS modules** (35 of them selftests) in `orderflow_system/desktop/ui/`
 (shell and menus, chart, the order-flow engine, heatmap, tape, alerts, options, fundamentals, news,
 search, watchlist, studies — no build step, no framework). The 8 modules listed below are the legacy
 dashboard page's assets, still served at `/static/`:
@@ -722,34 +752,92 @@ Automated notifications for every trade lifecycle event:
 
 ## Installation
 
-### Quick start — clone, install, run (5 commands)
+### Easiest — the ready-built installer (no Python needed)
+
+Download **`ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe`** from the
+[beta builds lane](https://github.com/ModdySwag/ModFlow-beta-builds/releases/tag/v0.1.0-beta)
+and run it. Per-user install (no admin prompt), Start-menu and desktop shortcuts, plain uninstall
+from Add/Remove Programs. The portable zip and the SBOM sit beside it in the same release; the
+release notes carry the sha256 of every file.
+
+### From source — clone, one command, run
+
+```bash
+git clone https://github.com/ModdySwag/ModFlow-OrderFlow-Analysis-Suite.git
+cd ModFlow-OrderFlow-Analysis-Suite
+install.cmd            # Windows: creates .venv and installs the app + dev tooling
+run.cmd                # ...then starts the desktop app (server + native window)
+```
+
+On Linux/macOS (or if you prefer to type it yourself):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+python -m orderflow_system.desktop
+```
+
+`install.cmd` never needs an "activate" step — it calls the virtual environment's own Python by
+full path, which is exactly the step people get wrong by hand. It is safe to re-run: an existing
+`.venv` is reused. `run.cmd` passes extra arguments straight through, e.g.
+`run.cmd --headless --port 8099`.
+
+<details>
+<summary>Manual step-by-step (every shell), if you want to do it by hand</summary>
 
 ```bash
 # 1. Clone
 git clone https://github.com/ModdySwag/ModFlow-OrderFlow-Analysis-Suite.git
 cd ModFlow-OrderFlow-Analysis-Suite
 
-# 2. Python 3.11+ venv (Windows; `source .venv/bin/activate` on Linux/macOS)
+# 2. A Python 3.11+ virtual environment
 python -m venv .venv
-.venv/Scripts/activate
+```
 
-# UI is served at /desktop; REST API + OpenAPI schema (/docs) are on the same origin.
+**3. Activate it — the command depends on the shell you are in:**
 
-# 3. Install app + dev tooling
+| Shell | Activation |
+|---|---|
+| Command Prompt (`cmd.exe`) | `.venv\Scripts\activate.bat` |
+| PowerShell | `.\.venv\Scripts\Activate.ps1` — if the policy blocks it, run `Set-ExecutionPolicy -Scope Process Bypass` once, then retry |
+| Git Bash / WSL | `source .venv/Scripts/activate` (POSIX systems: `source .venv/bin/activate`) |
+| No activation at all | call the interpreter directly: `.venv\Scripts\python.exe -m orderflow_system.desktop` |
+
+```bash
+# 4. Install app + dev tooling
 pip install -e ".[dev]"
 
-# 4. (Optional) MT5 feed support
+# 5. (Optional) MT5 feed support
 pip install -e ".[mt5]"
 
-# 5a. Run desktop app (native window)
-python -m orderflow_system.desktop
-
-# 5b. Or headless server on port 8099
-python -m orderflow_system.desktop --headless --port 8099
-
-# 5c. Or CLI pipeline (feeds → detectors → Telegram)
-python -m orderflow_system.main
+# 6. Run — any of
+python -m orderflow_system.desktop                            # desktop app (native window)
+python -m orderflow_system.desktop --headless --port 8099     # headless server (UI at /desktop)
+python -m orderflow_system.main                               # CLI pipeline (feeds → detectors → Telegram)
 ```
+
+</details>
+
+#### `'.venv' is not recognized as an internal or external command`
+
+That error is the activation line typed for the wrong shell — almost always **forward slashes in
+`cmd.exe`**. `.venv/Scripts/activate` is a POSIX-style path; `cmd.exe` reads it as the name of a
+program called `.venv` and fails exactly like this. Two fixes, either works:
+
+1. Use your shell's row in the table above — in `cmd.exe` the Windows path uses backslashes:
+   `.venv\Scripts\activate.bat`.
+2. Skip activation entirely: `install.cmd` / `run.cmd` never activate anything, and
+   `.venv\Scripts\python.exe -m orderflow_system.desktop` starts the app from any shell.
+
+The same class of error appears when PowerShell refuses the script
+(`Activate.ps1 cannot be loaded because running scripts is disabled`) — see the PowerShell row.
+
+#### `'python' is not recognized...`
+
+Python is not on your PATH. Install Python 3.11+ from <https://www.python.org/downloads/> and
+tick **Add python.exe to PATH** in the installer — or skip Python entirely and use the ready-built
+installer at the top of this section.
 
 That's the whole path from zero to a running app. The rest of this section covers prerequisites and optional build steps.
 
@@ -891,7 +979,7 @@ curl http://localhost:8080/api/trade/NAS100USDT
 
 ```
 orderflow_system/
-├── main.py                          # System orchestrator (883L)
+├── main.py                          # System orchestrator (1341L)
 ├── __init__.py                      # Package init
 ├── test_integration.py              # Integration tests (309L)
 │
@@ -899,46 +987,46 @@ orderflow_system/
 │   └── settings.py                  # 31 instrument configs, 15 config dataclasses (842L)
 │
 ├── data/
-│   ├── models.py                    # 9 dataclasses: Tick, Candle, Signal, FootprintLevel, TradeState... (330L)
-│   ├── candle_builder.py            # Tick → 1m candle aggregation (132L)
-│   ├── bybit_feed.py                # Bybit WebSocket feed (339L)
-│   ├── mt5_feed.py                  # MT5 terminal feed with auto-discovery (493L)
-│   ├── ninjatrader_feed.py          # NinjaTrader 8 via the shipped read-only bridge (629L)
+│   ├── models.py                    # 9 dataclasses: Tick, Candle, Signal, FootprintLevel, TradeState... (341L)
+│   ├── candle_builder.py            # Tick → 1m candle aggregation (168L)
+│   ├── bybit_feed.py                # Bybit WebSocket feed (394L)
+│   ├── mt5_feed.py                  # MT5 terminal feed with auto-discovery (613L)
+│   ├── ninjatrader_feed.py          # NinjaTrader 8 via the shipped read-only bridge (646L)
 │   ├── ninjatrader_bridge/          # the NT8 add-on: C# source, build.ps1, the built DLL
-│   └── database.py                  # SQLite persistence, 5 tables (472L)
+│   └── database.py                  # SQLite persistence, 5 tables (669L)
 │
 ├── analytics/
-│   ├── volume_profile.py            # POC, VAH, VAL, LVN, shape classification (283L)
+│   ├── volume_profile.py            # POC, VAH, VAL, LVN, shape classification (343L)
 │   ├── delta.py                     # Vertical, horizontal, cumulative delta (207L)
-│   ├── footprint.py                 # Bid/ask per level, imbalance detection (349L)
-│   └── orderbook.py                 # L2 depth, thin levels, consumption tracking (208L)
+│   ├── footprint.py                 # Bid/ask per level, imbalance detection (357L)
+│   └── orderbook.py                 # L2 depth, thin levels, consumption tracking (212L)
 │
 ├── patterns/
-│   ├── absorption.py                # Effort >> result detection (266L)
-│   ├── initiative.py                # Effort = result (momentum) (136L)
-│   ├── sweep.py                     # Thin book displacement (142L)
-│   ├── exhaustion.py                # Declining volume at extremes (237L)
-│   └── divergence.py                # Price vs delta disagreement (159L)
+│   ├── absorption.py                # Effort >> result detection (267L)
+│   ├── initiative.py                # Effort = result (momentum) (137L)
+│   ├── sweep.py                     # Thin book displacement (143L)
+│   ├── exhaustion.py                # Declining volume at extremes (238L)
+│   └── divergence.py                # Price vs delta disagreement (160L)
 │
 ├── signals/
-│   ├── profile_framing.py           # Daily bias + qualified levels (343L)
-│   └── aggregator.py                # State machine + composite scoring (516L)
+│   ├── profile_framing.py           # Daily bias + qualified levels (352L)
+│   └── aggregator.py                # State machine + composite scoring (530L)
 │
 ├── alerts/
-│   └── telegram_bot.py              # Telegram notifications (201L)
+│   └── telegram_bot.py              # Telegram notifications (205L)
 │
 └── dashboard/
-    ├── app.py                       # FastAPI REST + WebSocket (1381L)
-    ├── websocket_manager.py         # 10-channel broadcast manager (293L)
+    ├── app.py                       # FastAPI REST + WebSocket (1453L)
+    ├── websocket_manager.py         # 10-channel broadcast manager (308L)
     ├── demo_data.py                 # Deterministic demo data generator (806L)
     ├── __main__.py                  # Standalone launcher (90L)
     └── static/
         ├── index.html               # Main HTML shell (121L)
-        ├── app.js                   # the chart library charts + WebSocket (939L)
+        ├── app.js                   # the chart library charts + WebSocket (951L)
         ├── style.css                # Dashboard styling (566L)
-        ├── footprint.js             # Canvas footprint chart (700L)
+        ├── footprint.js             # Canvas footprint chart (726L)
         ├── signals.js               # Signal recommendation cards (479L)
-        ├── performance.js           # Performance analytics (599L)
+        ├── performance.js           # Performance analytics (644L)
         ├── orderbook.js             # Orderbook depth ladder (398L)
         ├── microstructure.js        # Microstructure indicators (417L)
         └── tape.js                  # Time & sales (448L)
@@ -951,16 +1039,16 @@ orderflow_system/
 | Area | Files | Python Lines | UI Lines (JS/CSS/HTML) | Total Lines |
 |------|-------|-------------|------------------------|-------------|
 | Config | 2 | 842 | — | 842 |
-| Data feeds + storage | 17 | 6,955 | — | 6,955 |
-| Analytics (delta, footprint, volume profile, patterns, signals, alerts) | 17 | 3,128 | — | 3,128 |
-| Atlas (live analytics + `/api/atlas/*`) | 30 | 9,191 | — | 9,191 |
-| Desktop app (desktop package + packaging scripts) | 34 | 16,694 | — | 16,694 |
-| Desktop UI (vanilla JS + CSS + HTML, no build step) | 122 | — | 46,856 | 46,856 |
-| Legacy dashboard (host + legacy page assets) | 14 | 2,571 | 4,667 | 7,238 |
-| Orchestrator (`main.py` + package init) | 2 | 1,247 | — | 1,247 |
-| **Total (excluding tests)** | **238** | **40,628** | **46,856** | **87,484** |
+| Data feeds + storage | 17 | 7,368 | — | 7,368 |
+| Analytics (delta, footprint, volume profile, patterns, signals, alerts) | 17 | 3,196 | — | 3,196 |
+| Atlas (live analytics + `/api/atlas/*`) | 30 | 9,481 | — | 9,481 |
+| Desktop app (desktop package + packaging scripts) | 39 | 19,460 | — | 19,460 |
+| Desktop UI (vanilla JS + CSS + HTML, no build step) | 125 | — | 49,112 | 49,112 |
+| Legacy dashboard (host + legacy page assets) | 14 | 2,658 | 4,859 | 7,517 |
+| Orchestrator (`main.py` + package init) | 2 | 1,350 | — | 1,350 |
+| **Total (excluding tests)** | **246** | **44,355** | **53,971** | **98,326** |
 
-Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 123 files / 23,481 lines. The NinjaTrader bridge add-on ships as C# (`orderflow_system/data/ninjatrader_bridge/` — 1,126 lines of source + build script, plus the built DLL) and is not counted in the columns above; the desktop UI count also excludes its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the nine Help Centre screenshots (`orderflow_system/desktop/ui/help/`).
+Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 146 files / 27,729 lines. The NinjaTrader bridge add-on ships as C# (`orderflow_system/data/ninjatrader_bridge/` — 1,126 lines of source + build script, plus the built DLL) and is not counted in the columns above; the desktop UI count also excludes its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the eleven Help Centre screenshots (`orderflow_system/desktop/ui/help/`).
 
 ---
 

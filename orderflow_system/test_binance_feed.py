@@ -350,3 +350,44 @@ def test_validate_symbols_reads_the_venue_listing(monkeypatch):
     monkeypatch.setattr(mod.urllib.request, "urlopen", boom)
     assert BinanceFeed.validate_symbols(["BTCUSDT"]) == {"BTCUSDT": False}
     assert BinanceFeed.validate_symbols([]) == {}
+
+
+# ── MEM-A2-07: every stale symbol keeps its own deferred snapshot handle ─────────────────────
+def test_stop_cancels_every_deferred_snapshot_handle(monkeypatch):
+    async def scenario():
+        feed = BinanceFeed(["BTCUSDT", "ETHUSDT"], on_tick=None, on_orderbook=None)
+        # a one-sided payload cannot be installed (audit D-09), so each refresh stays stale and
+        # schedules a follow-up — with one slot, the second symbol lost the first's handle
+        monkeypatch.setattr(feed, "_fetch_snapshot", lambda symbol: {
+            "lastUpdateId": 1, "bids": [[200.0, 1]], "asks": [], "E": 0})
+
+        # keep the armed handles observable: a real call_later(0.0) fires before the gather
+        # resumes, so the pins below swap in recording stand-ins
+        class _Handle:
+            def __init__(self):
+                self._cancelled = False
+
+            def cancel(self):
+                self._cancelled = True
+
+            @property
+            def cancelled(self):
+                return self._cancelled
+
+        armed: list = []
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(loop, "call_later",
+                            lambda delay, callback, *args: (armed.append(_Handle()), armed[-1])[1])
+
+        for symbol in ("BTCUSDT", "ETHUSDT"):
+            feed._schedule_snapshot(symbol, force=True)
+        await asyncio.gather(*list(feed._snapshot_tasks.values()), return_exceptions=True)
+
+        assert len(armed) == 2, f"{len(armed)} handle(s) armed — one per stale symbol"
+
+        await feed.stop()
+        assert feed._snapshot_later == set()
+        assert all(handle.cancelled for handle in armed), \
+            "stop() cancels every armed handle, not just the newest"
+
+    asyncio.run(scenario())

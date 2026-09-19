@@ -442,14 +442,16 @@ if (typeof ALPACA !== 'undefined') {
     alpCardStyles();
     // wrap showView so opening either view renders immediately (ui.js calls ensurePanel too)
     const wrap = window.showView;
-    if (typeof wrap === 'function') {
-        window.showView = function (name) {
+    if (typeof wrap === 'function' && !wrap.__ofapWrapped_alpacaCard) {
+        const wrapped = function (name) {
             const out = wrap.apply(this, arguments);
             if (name === 'overview') setTimeout(() => { alpBannerRender(); alpOvRender(); }, 120);
             if (name === 'alpaca') setTimeout(alpViewRender, 120);
             setTimeout(() => alpGateApply(name), 320);      // depth gating for Alpaca symbols
             return out;
         };
+        wrapped.__ofapWrapped_alpacaCard = true;
+        window.showView = wrapped;
     }
     setTimeout(async () => {
         try { await alpBannerResetIfDismissed(); } catch (e) { /* ignore */ }

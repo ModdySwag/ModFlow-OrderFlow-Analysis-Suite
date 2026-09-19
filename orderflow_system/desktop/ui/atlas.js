@@ -23,7 +23,9 @@ const A = {
 function prepCanvas(el, height) {
     if (!el) return null;
     const dpr = window.devicePixelRatio || 1;
-    const w = Math.max(320, el.clientWidth || (el.parentElement ? el.parentElement.clientWidth : 800) || 800);
+    /* C-05: no 320 px floor — a narrow stage sizes its backing store to the box it actually has
+       (the floor broke box == backing/dpr and desynced the heatmap-pro overlay). */
+    const w = Math.max(1, el.clientWidth || (el.parentElement ? el.parentElement.clientWidth : 800) || 800);
     const h = height || 520;
     el.width = Math.round(w * dpr);
     el.height = Math.round(h * dpr);
@@ -64,8 +66,6 @@ function ageTintOn() {
 
 function drawHeatmap(data) {
     const el = document.getElementById('heatmapCanvas');
-    /* T4/A7: frozen under the pointer — the payload is kept, the paint is not. */
-    if (window.OFAPFREEZE && OFAPFREEZE.holds(el)) return;
     const c = prepCanvas(el, 520);
     if (!c) return;
     const ctx = c.ctx, w = c.w, h = c.h;
@@ -85,19 +85,38 @@ function drawHeatmap(data) {
     const plotW = w - axisR, plotH = h - axisB;
     const cw = plotW / cols, chh = plotH / rows;
 
-    const flat = [];
-    for (const row of data.values) for (const v of row) if (v > 0) flat.push(v);
-    flat.sort((a, b) => a - b);
     // the reference layout "Upper Cut-off %": the server reports the scale max, so the top share
-    // of resting size saturates instead of one outlier whitening the whole map.
-    const ref = (data.scale_max > 0) ? data.scale_max
-        : (flat.length ? flat[Math.floor(flat.length * 0.99)] : 1);
+    // of resting size saturates instead of one outlier whitening the whole map. The local 99th
+    // percentile is only the fallback — the full-matrix build+sort cost 6.17 ms per paint at the
+    // default grid (audit PF-02), so the positive sizes are built on demand, when something reads
+    // them: the fallback below, or a bottom-share floor dial that is actually set.
+    let ref = data.scale_max > 0 ? data.scale_max : 0;
+    let flat = null;
+    const sizes = () => {
+        if (flat) return flat;
+        flat = [];
+        for (const row of data.values) for (const v of row) if (v > 0) flat.push(v);
+        flat.sort((a, b) => a - b);
+        return flat;
+    };
+    if (!ref) {
+        const f = sizes();
+        if (f.length) ref = f[Math.floor(f.length * 0.99)];
+    }
+    if (!ref) ref = 1;
 
     /* B2: the view's own dials, read at paint time so a change is one repaint away (pure canvas). */
     const RP = window.OFAPRAMP;
     const hmDials = ((S.config && S.config.atlas && S.config.atlas.heatmap) || {});
     const heatGamma = RP ? RP.clampContrast(hmDials.contrast) : 1;
-    const heatFloor = RP ? RP.floorValue(flat, hmDials.floor, hmDials.floor_pct) : 0;
+    /* B5: dimming and the large-size highlight, read at paint time like every other dial. */
+    const heatDim = RP ? RP.clampDim(hmDials.dim) : 0;
+    const heatHlShare = RP ? RP.clampHighlight(hmDials.highlight) : 0;
+    const heatHl = heatHlShare > 0 ? heatHlShare * Number(ref || 1) : 0;
+    /* The sorted list is only what the bottom-share dial reads: with floor and floor-% both off,
+       floorValue ignores it and the build is skipped. */
+    const floorNeedsSizes = (Number(hmDials.floor) || 0) > 0 || (Number(hmDials.floor_pct) || 0) > 0;
+    const heatFloor = RP ? RP.floorValue(floorNeedsSizes ? sizes() : null, hmDials.floor, hmDials.floor_pct) : 0;
     /* T10/B3: vertical smoothing — the same shared verdict the Engine's heat uses: 'auto'
        engages when the map's rows compress below ~2.5 px, hysteresis holds until 4 px. The
        smoothed columns are computed once per paint so both loops below read one array. */
@@ -115,6 +134,9 @@ function drawHeatmap(data) {
         }
     }
 
+    /* B5: dimming is one alpha over the whole heat pass — the cells fade together, so the
+       overlays and values drawn after them carry the eye. */
+    if (heatDim > 0) ctx.globalAlpha = 1 - heatDim;
     for (let r = 0; r < rows; r++) {
         const y = plotH - (r + 1) * chh;
         const row = data.values[r];
@@ -124,8 +146,15 @@ function drawHeatmap(data) {
             const sv = smoothCols ? Math.max(0, smoothCols[ci][r]) : v;
             ctx.fillStyle = heatColour(RP ? RP.contrastT(sv / ref, heatGamma) : v / ref);
             ctx.fillRect(ci * cw, y, Math.max(1, cw + 0.4), Math.max(1, chh + 0.4));
+            /* B5: a cell at/above the threshold share of the ceiling gets an outline. */
+            if (heatHl > 0 && sv >= heatHl) {
+                ctx.strokeStyle = 'rgba(232,238,248,0.55)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(ci * cw + 0.5, y + 0.5, Math.max(1, cw + 0.4) - 1, Math.max(1, chh + 0.4) - 1);
+            }
         }
     }
+    ctx.globalAlpha = 1;
 
     /* T5/A20: the values divider — draw each cell's own size once a cell is wide enough to
        read it (atlas.heatmap.values_min_px; 0 = off). The map stays the primary read; these
@@ -243,7 +272,6 @@ function drawHeatmap(data) {
 }
 
 function drawSeries(canvas, series, opts) {
-    if (window.OFAPFREEZE && OFAPFREEZE.holds(canvas)) return;   // T4/A7
     const c = prepCanvas(canvas, (opts && opts.height) || 300);
     if (!c) return;
     const ctx = c.ctx, w = c.w, h = c.h;
@@ -292,6 +320,10 @@ function drawSeries(canvas, series, opts) {
 /* ── loaders ────────────────────────────────────────────────────── */
 
 async function loadHeatmap() {
+    if (window.OFAPINTENT && OFAPINTENT.held('heatmap')) {
+        OFAPINTENT.deferKeyed('heatmap', 'snap', () => loadHeatmap());
+        return;
+    }
     if (!S.symbol) return;
     const cols = parseInt(document.getElementById('hmColumns').value, 10);
     const rows = parseInt(document.getElementById('hmRows').value, 10);
@@ -434,6 +466,12 @@ function paintCvd(d) {
    the channel is the asker, so the call only guarantees it is live; `force` is for a caller that
    has just changed the data under it (the re-anchor button) and must not wait for the next tick. */
 async function loadCvd(options) {
+    /* A parked panel defers its repaint; a resume snaps it current once (the arbiter's
+       rule — updates queue, ingest never stops). `force` is the re-anchor's own path. */
+    if (!(options && options.force) && window.OFAPINTENT && OFAPINTENT.held('cvd')) {
+        OFAPINTENT.deferKeyed('cvd', 'snap', () => loadCvd({ force: true }));
+        return false;
+    }
     if (!S.symbol) return false;
     if (!(options && options.force) && atlasShareLive('cvd')) return true;
     try {
@@ -463,6 +501,10 @@ function applyTpoCursor() {
 }
 
 async function loadMarketProfile() {
+    if (window.OFAPINTENT && OFAPINTENT.held('profile')) {
+        OFAPINTENT.deferKeyed('profile', 'snap', () => loadMarketProfile());
+        return;
+    }
     if (!S.symbol) return;
     try {
         const d = await api('/api/atlas/profile/' + encodeURIComponent(S.symbol) + '?levels=200');
@@ -510,11 +552,21 @@ async function loadMarketProfile() {
             (virgins.length ? virgins.map((v) => v.session + ' @ ' + Number(v.poc).toFixed(2)).join('<br>') : 'none') + '</div></div>' +
             '<div class="field"><label>Profile shape</label><div class="mono">' +
             (d.shape && d.shape.label ? esc(d.shape.label) + ' — ' + esc(d.shape.story) : '—') + '</div></div>' +
+            (Number(d.derived_candles) > 0
+                ? '<div class="field"><label>Profile basis</label><div class="mono">' +
+                  '<span class="tag warn" title="Candles with no footprint — their volume was spread evenly, not measured">derived</span> ' +
+                  Number(d.derived_candles) + ' footprint-less candle' + (Number(d.derived_candles) === 1 ? '' : 's') +
+                  ', volume spread evenly, not a measured distribution</div></div>'
+                : '') +
             '<div class="field"><label>Single prints</label><div class="mono">' + ((d.single_prints || []).length) + ' levels</div></div>';
     } catch (e) { console.error(e); }
 }
 
 async function loadFrames() {
+    if (window.OFAPINTENT && OFAPINTENT.held('frames')) {
+        OFAPINTENT.deferKeyed('frames', 'snap', () => loadFrames());
+        return;
+    }
     if (!S.symbol) return;
     const frame = document.getElementById('frameSelect').value;
     try {
@@ -597,6 +649,16 @@ document.getElementById('rpPlay').onclick = async () => {
 };
 document.getElementById('rpPause').onclick = async () => { await api('/api/atlas/replay/pause', { method: 'POST' }); rpStatus(); };
 document.getElementById('rpStop').onclick = async () => { await api('/api/atlas/replay/stop', { method: 'POST' }); rpStatus(); };
+/* A1-11: the panel had no way to release a loaded tape — the route exists (/replay/reset, which
+   resets the replay head and drops the depth history); this is the control that calls it. */
+document.getElementById('rpReset').onclick = async () => {
+    try {
+        const d = await api('/api/atlas/replay/reset', { method: 'POST' });
+        document.getElementById('rpLoadResult').textContent = d.ok ? 'tape released' : (d.error || 'nothing to release');
+        toast(document.getElementById('rpBanner'), d.ok ? 'Replay tape released; depth history cleared.' : (d.error || 'nothing loaded'), d.ok ? 'ok' : 'warn');
+        rpStatus();
+    } catch (e) { document.getElementById('rpLoadResult').textContent = String(e); }
+};
 document.getElementById('rpSpeed').oninput = async (e) => {
     document.getElementById('rpSpeedLabel').textContent = e.target.value + '×';
     if (A.replay.loaded) await api('/api/atlas/replay/speed', { method: 'POST', body: { speed: parseFloat(e.target.value) } });
@@ -809,7 +871,7 @@ function openEditor(id, swap) {
             (f.min !== undefined ? ' min="' + esc(String(f.min)) + '"' : '') +
             (f.max !== undefined ? ' max="' + esc(String(f.max)) + '"' : '') +
             ' value="' + (value === null || value === undefined ? '' : esc(String(value))) + '"' +
-            ' title="' + esc(f.hint || 'leave empty to leave this out of the rule — the kind\u2019s own detection is then the only gate') + '">');
+            ' title="' + esc(f.hint || 'Leave empty to leave this out of the rule — the kind\u2019s own detection is then the only gate') + '">');
     }).join('');
     tr.outerHTML = '<tr data-rule="' + esc(rule.id) + '" data-editing="1"><td colspan="4">' +
         '<div class="al-edit">' +
@@ -820,11 +882,11 @@ function openEditor(id, swap) {
         inputs +
         field('Cooldown', 's', '<input type="number" data-role="cooldown" min="0" step="1" value="' +
             esc(String(rule.cooldown_s === null || rule.cooldown_s === undefined ? 0 : rule.cooldown_s)) +
-            '" title="seconds before this rule may fire again">') +
+            '" title="Seconds before this rule may fire again">') +
         field('State', '', '<label class="switch"><input type="checkbox" data-role="enabled"' +
             (rule.enabled ? ' checked' : '') + '> enabled</label>') +
         '<div class="field wide"><label>Channels</label><div>' + F.CHANNELS.map(([key, label]) =>
-            '<label class="switch" title="' + esc(key === 'ui' ? 'the alert log on this screen' : 'send this rule\u2019s alerts to ' + label) + '">' +
+            '<label class="switch" title="' + esc(key === 'ui' ? 'The alert log on this screen' : 'Send this rule\u2019s alerts to ' + label) + '">' +
             '<input type="checkbox" data-channel="' + esc(key) + '"' +
             (((rule.channels || []).indexOf(key) >= 0) ? ' checked' : '') + '> ' + esc(label) + '</label>').join(' ') + '</div></div>' +
         '<div class="wide al-edit-actions"><button class="btn small" data-role="save">save</button>' +
@@ -1011,7 +1073,14 @@ function atlasShareSync(name) {
     if (!share.off) {
         share.key = url;
         share.off = bus.subscribe({ url: url, intervalMs: ATLAS_SHARE_MS },
-            (payload) => atlasShareApply(share, payload));
+            (payload) => {
+                /* §117: a parked panel's paint is deferred, not dropped — the freshest payload
+                   applies the moment the hold ends (the channel itself never stops). */
+                if (window.OFAPINTENT && OFAPINTENT.held(share.view)) {
+                    return OFAPINTENT.deferKeyed(share.view, 'shared', () => atlasShareApply(share, payload));
+                }
+                atlasShareApply(share, payload);
+            });
     }
     return true;
 }
@@ -1059,6 +1128,8 @@ document.getElementById('hmAuto').onclick = () => {
     const sel = document.getElementById('hmHeatScheme');
     const contrast = document.getElementById('hmHeatContrast');
     const floorBox = document.getElementById('hmHeatFloor');
+    const dimBox = document.getElementById('hmHeatDim');
+    const hlBox = document.getElementById('hmHeatHighlight');
     const smoothBox = document.getElementById('hmHeatSmooth');
     const globalBtn = document.getElementById('hmHeatGlobal');
 
@@ -1071,6 +1142,8 @@ document.getElementById('hmAuto').onclick = () => {
             floor: Number(cfg.floor) || 0,
             floor_pct: Number(cfg.floor_pct) || 0,
             contrast: Number(cfg.contrast) || 1,
+            dim: Number(cfg.dim) || 0,
+            highlight: Number(cfg.highlight) || 0,
             smooth: String(cfg.smooth || 'auto'),
         };
         d.scheme = RP ? RP.matchScheme(d) : 'custom';
@@ -1087,6 +1160,8 @@ document.getElementById('hmAuto').onclick = () => {
         if (sel) sel.value = d.scheme;
         if (contrast) contrast.value = String(d.contrast);
         if (floorBox) floorBox.value = String(d.floor);
+        if (dimBox) dimBox.value = String(d.dim);
+        if (hlBox) hlBox.value = String(d.highlight);
         if (smoothBox) smoothBox.value = d.smooth;
     }
 
@@ -1126,6 +1201,12 @@ document.getElementById('hmAuto').onclick = () => {
     if (floorBox) floorBox.addEventListener('change', () => {
         void write('atlas.heatmap.floor', Number(floorBox.value)).then(() => { sync(); repaint(); });
     });
+    if (dimBox) dimBox.addEventListener('change', () => {
+        void write('atlas.heatmap.dim', Number(dimBox.value)).then(() => { sync(); repaint(); });
+    });
+    if (hlBox) hlBox.addEventListener('change', () => {
+        void write('atlas.heatmap.highlight', Number(hlBox.value)).then(() => { sync(); repaint(); });
+    });
     if (smoothBox) smoothBox.addEventListener('change', () => {
         void write('atlas.heatmap.smooth', smoothBox.value).then(() => { sync(); repaint(); });
     });
@@ -1135,6 +1216,8 @@ document.getElementById('hmAuto').onclick = () => {
             await write('ofx.heat_contrast', d.contrast);
             await write('ofx.heat_floor', d.floor);
             await write('ofx.heat_floor_pct', d.floor_pct);
+            await write('ofx.heat_dim', d.dim);
+            await write('ofx.heat_highlight', d.highlight);
             note('heat scheme written to the Engine and the Heatmap view');
             document.dispatchEvent(new CustomEvent('ofap:heat-scheme', { detail: { from: 'heatmap' } }));
         })();

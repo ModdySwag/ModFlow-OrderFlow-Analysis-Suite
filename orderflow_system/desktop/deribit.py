@@ -198,10 +198,31 @@ class TtlCache:
             self.hits += 1
             return value
 
+    #: MEM-B-04: reads expire by access, so a key nobody asks for again stayed resident forever —
+    #: and the ticker keys are per option contract (hundreds per expiry). Past this bound, a put
+    #: sweeps the expired keys first and then the oldest, so the map cannot grow without limit.
+    MAX_ENTRIES = 512
+
     def put(self, key: str, value: Any) -> Any:
         with self._lock:
             self._items[key] = (self._clock(), value)
+            if len(self._items) > self.MAX_ENTRIES:
+                self._sweep_locked()
         return value
+
+    def _sweep_locked(self) -> int:
+        """Drop expired keys, then the oldest — the caller holds the lock (MEM-B-04)."""
+        now = self._clock()
+        dropped = 0
+        for key in [k for k, (at, _v) in self._items.items()
+                    if (now - at) * 1000.0 >= self.ttl_ms]:
+            del self._items[key]
+            dropped += 1
+        while len(self._items) > self.MAX_ENTRIES:
+            oldest = min(self._items.items(), key=lambda item: item[1][0])[0]
+            del self._items[oldest]
+            dropped += 1
+        return dropped
 
     def clear(self) -> int:
         with self._lock:

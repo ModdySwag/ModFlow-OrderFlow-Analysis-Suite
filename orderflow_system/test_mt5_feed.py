@@ -197,3 +197,23 @@ def test_a_print_with_no_volume_is_carried_as_one_lot_and_counted() -> None:
 
     assert [t.size for t in got] == [1.0]
     assert feed._volume_defaulted == 1
+
+
+def test_a_non_finite_price_is_refused_like_every_other_feed() -> None:
+    """SEC-06: MT5 was the only live feed that let a NaN/negative price into the bar, the DB and
+    the routes — the other feeds gate at the door."""
+    now_ms = int(time.time() * 1000)
+    rows = [_row(now_ms - 900, last=float("nan")),
+            _row(now_ms - 800, last=-1.0),
+            _row(now_ms - 700, last=1.0)]
+    got = []
+
+    async def on_tick(symbol, tick):
+        got.append(tick)
+
+    feed = _make_feed(_FakeMT5(rows=rows))
+    feed.on_tick = on_tick
+    asyncio.run(feed._poll_ticks("NAS100USDT", "USTEC"))
+
+    assert [t.price for t in got] == [1.0]
+    assert feed._rejected_ticks == 2

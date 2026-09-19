@@ -314,17 +314,16 @@ textarea.mb-input { min-width: 300px; resize: vertical; }
   border-radius: 5px; font-size: 12px; line-height: 1; cursor: pointer; }
 .chrome-toggle:hover { color: var(--of-ink-hi); border-color: rgba(var(--of-steel-rgb),.55); }
 .chrome-toggle.on { color: var(--of-ink-hi); background: rgba(var(--of-steel-rgb),.3); }
-/* §93: the menu-bar toggle now stands with the top-right status controls and wears its name —
-   beside Instrument a bare caret read as decoration, and the way back must be plain once the bar
-   is gone. Chip face in the pause control's family; the pressed state says the bar is hidden. */
+/* §93/§94: the menu-bar toggle stands with the top-right status controls and its LABEL is its
+   face — "menu hide" up, "menu show" down, no glyph (the caret read as decoration). Chip face in
+   the pause control's family; the pressed state says the bar is hidden. */
 .chrome-toggle.mb-toggle { width: auto; height: 24px; padding: 0 11px; margin-left: 8px;
-  display: inline-flex; align-items: center; gap: 6px; border-radius: 999px;
+  display: inline-flex; align-items: center; white-space: nowrap; border-radius: 999px;
   font: 600 11px ui-monospace, monospace; letter-spacing: .02em;
   border: 1px solid rgba(var(--of-steel-rgb),.45); background: rgba(var(--of-steel-rgb),.12); color: var(--of-ink-2); }
 .chrome-toggle.mb-toggle:hover { border-color: rgba(var(--of-steel-hi-rgb),.7); color: var(--of-ink-hi); }
 .chrome-toggle.mb-toggle.on { border-color: rgba(var(--of-steel-hi-rgb),.6); background: rgba(var(--of-steel-rgb),.32);
   color: var(--of-ink-bright); }
-.chrome-toggle.mb-toggle .ct-face { font-size: 12px; line-height: 1; }
 .rail-reveal { display: none; position: fixed; left: 0; top: 50%; transform: translateY(-50%);
   z-index: 60; width: 22px; height: 84px; align-items: center; justify-content: center;
   background: rgba(var(--of-float-rgb),.92); color: var(--of-ink-2); border: 1px solid rgba(var(--of-steel-rgb),.5);
@@ -477,10 +476,7 @@ textarea.mb-input { min-width: 300px; resize: vertical; }
 .status-delay { color: var(--of-warn); border: 1px solid rgba(var(--of-warn-rgb), .55);
     border-radius: 3px; padding: 0 6px; }
 
-/* ── T4/A7+A9: freeze-on-hover and the canvas watermark ──────────────────── */
-.view.ofap-frozen canvas { outline: 1px solid rgba(var(--of-warn-rgb), .45); outline-offset: -1px; }
-.ofap-freeze-chip { color: var(--of-warn); border: 1px solid rgba(var(--of-warn-rgb), .55);
-    border-radius: 3px; padding: 0 6px; font-size: 11px; }
+/* ── T4/A9: the canvas watermark ──────────────────── */
 .ofap-watermark { position: absolute; right: 10px; bottom: 8px; opacity: .30; font-size: 11px;
     letter-spacing: .04em; pointer-events: none; user-select: none; }
 

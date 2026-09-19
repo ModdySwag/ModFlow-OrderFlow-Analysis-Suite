@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 BYBIT_WS_URL = "wss://stream.bybit.com/v5/public/linear"
 
+#: MEM-A2-02: the local book is capped per side, mirroring binance_feed.MAX_LEVELS. The venue's
+#: incremental stream can carry prices far outside the visible depth; uncapped, the local book
+#: grew with every distinct price quoted and each delta re-sorted the whole side.
+MAX_LEVELS = 1000
+
 #: ±fraction applied to a reconnect sleep (see data/feed_session.py — the shared rule).
 _BACKOFF_JITTER = 0.25
 
@@ -90,6 +95,7 @@ class BybitFeed:
         # Venue values refused as unusable (NaN/Infinity/negative — json carries the bare
         # tokens and comparisons cannot catch them). Counted so a bad socket is visible.
         self._junk_values = 0
+        self._book_evictions = 0          # MEM-A2-02: levels trimmed from an over-deep book
         # One warning per connection when a trade arrives without the venue's own T stamp
         self._ts_fallback_warned = False
 
@@ -232,10 +238,16 @@ class BybitFeed:
             bids = [lv for lv in map(_level, raw_bids) if lv is not None]
             asks = [lv for lv in map(_level, raw_asks) if lv is not None]
             self._junk_values += (len(raw_bids) - len(bids)) + (len(raw_asks) - len(asks))
+            if not bids or not asks:
+                # One-sided snapshots are halted-market noise, not a book (audit D-09): refuse it,
+                # keep the previous book and the stale mark — a wrong book is worse than no book.
+                self._junk_values += 1
+                self._book_stale.add(symbol)
+                return
             self._orderbooks[symbol] = OrderbookSnapshot(
                 timestamp_ms=ts,
-                bids=sorted(bids, key=lambda x: -x.price),
-                asks=sorted(asks, key=lambda x: x.price),
+                bids=sorted(bids, key=lambda x: -x.price)[:MAX_LEVELS],
+                asks=sorted(asks, key=lambda x: x.price)[:MAX_LEVELS],
             )
             # A snapshot is the only thing that makes the book trustworthy again, so it is what
             # clears the stale mark and re-seeds the sequence.
@@ -267,14 +279,15 @@ class BybitFeed:
                     "fresh snapshot", symbol, seq, u)
                 await self._resubscribe_book(symbol)
                 if self.on_orderbook:
-                    await self.on_orderbook(symbol, book)
+                    # MEM-A2-08: publish a copy — the venue loop keeps mutating `book`
+                    await self.on_orderbook(symbol, self._copy(book))
                 return
             self._apply_delta(book, data)
             self._book_seq[symbol] = u
             book.timestamp_ms = ts
 
         if symbol in self._orderbooks and self.on_orderbook:
-            await self.on_orderbook(symbol, self._orderbooks[symbol])
+            await self.on_orderbook(symbol, self._copy(self._orderbooks[symbol]))
 
     async def _resubscribe_book(self, symbol: str) -> bool:
         """Ask the venue for a fresh snapshot for one book.
@@ -301,11 +314,17 @@ class BybitFeed:
             "gaps": self._book_gaps,
             "dropped_deltas": self._deltas_dropped,
             "junk_values": self._junk_values,
+            "evictions": self._book_evictions,
             "seq": dict(self._book_seq),
         }
 
     def _apply_delta(self, book: OrderbookSnapshot, data: dict):
-        """Apply incremental orderbook updates (non-finite or negative values are refused)."""
+        """Apply incremental orderbook updates (non-finite or negative values are refused).
+
+        MEM-A2-02: one sort per side per delta frame (the old code re-sorted the whole side for
+        every level), and the book is trimmed to MAX_LEVELS per side like Binance's — an
+        uncapped local book grew with every distinct price the venue ever quoted.
+        """
         # Update bids
         for b in data.get("b") or []:
             lv = _level(b)
@@ -314,17 +333,16 @@ class BybitFeed:
                 continue
             price, qty = lv.price, lv.quantity
             if qty == 0:
-                book.bids = [lv for lv in book.bids if lv.price != price]
+                book.bids = [level for level in book.bids if level.price != price]
             else:
                 found = False
-                for lv in book.bids:
-                    if lv.price == price:
-                        lv.quantity = qty
+                for level in book.bids:
+                    if level.price == price:
+                        level.quantity = qty
                         found = True
                         break
                 if not found:
                     book.bids.append(OrderbookLevel(price=price, quantity=qty))
-                book.bids.sort(key=lambda x: -x.price)
 
         # Update asks
         for a in data.get("a") or []:
@@ -334,17 +352,43 @@ class BybitFeed:
                 continue
             price, qty = lv.price, lv.quantity
             if qty == 0:
-                book.asks = [lv for lv in book.asks if lv.price != price]
+                book.asks = [level for level in book.asks if level.price != price]
             else:
                 found = False
-                for lv in book.asks:
-                    if lv.price == price:
-                        lv.quantity = qty
+                for level in book.asks:
+                    if level.price == price:
+                        level.quantity = qty
                         found = True
                         break
                 if not found:
                     book.asks.append(OrderbookLevel(price=price, quantity=qty))
-                book.asks.sort(key=lambda x: x.price)
+
+        book.bids.sort(key=lambda x: -x.price)
+        book.asks.sort(key=lambda x: x.price)
+        self._trim(book)
+
+    def _trim(self, book: OrderbookSnapshot) -> None:
+        """Keep the local book at MAX_LEVELS per side (MEM-A2-02); count the evictions.
+
+        Sorted first, so the levels dropped are the far ones the panels never read.
+        """
+        for side in ("bids", "asks"):
+            levels = getattr(book, side)
+            if len(levels) > MAX_LEVELS:
+                self._book_evictions += len(levels) - MAX_LEVELS
+                setattr(book, side, levels[:MAX_LEVELS])
+
+    @staticmethod
+    def _copy(book: Optional[OrderbookSnapshot]) -> Optional[OrderbookSnapshot]:
+        """A snapshot the caller owns (MEM-A2-08) — never the live mutable book object."""
+        if book is None:
+            return None
+        return OrderbookSnapshot(
+            timestamp_ms=book.timestamp_ms,
+            bids=[OrderbookLevel(price=level.price, quantity=level.quantity) for level in book.bids],
+            asks=[OrderbookLevel(price=level.price, quantity=level.quantity) for level in book.asks],
+            stale=book.stale,
+        )
 
     def get_orderbook(self, symbol: str) -> Optional[OrderbookSnapshot]:
-        return self._orderbooks.get(symbol)
+        return self._copy(self._orderbooks.get(symbol))

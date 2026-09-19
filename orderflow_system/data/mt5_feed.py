@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Callable, Optional
@@ -101,6 +102,8 @@ class MT5Feed:
         #: Prints that carried no volume at all and were recorded as 1 lot (order flow cannot use a
         #: zero-size fill). Counted so the substitution is visible, and warned about once.
         self._volume_defaulted = 0
+        #: SEC-06: prints refused for a non-finite / non-positive price (the other feeds gate too).
+        self._rejected_ticks = 0
         self._volume_defaulted_warned = False
 
     def connect(self) -> bool:
@@ -403,8 +406,15 @@ class MT5Feed:
             if last_price == 0:
                 last_price = (float(t['bid']) + float(t['ask'])) / 2.0
 
+            # SEC-06: this feed was the only live one that let a NaN/zero/negative price through
+            # — the others refuse non-finite values at the door. A NaN price poisoned the live
+            # bar (and 500'd the routes) after the fact.
+            if not (math.isfinite(last_price) and last_price > 0):
+                self._rejected_ticks += 1
+                continue
+
             volume = float(t['volume_real']) if t['volume_real'] > 0 else float(t['volume'])
-            if volume <= 0:
+            if not (math.isfinite(volume) and volume > 0):
                 # Neither real volume nor tick volume: a zero-size fill is unusable for order
                 # flow, so the print is carried as 1 lot — and COUNTED, because an invented 1 is
                 # otherwise indistinguishable from a real one on the tape.
@@ -510,8 +520,14 @@ class MT5Feed:
             if last_price == 0:
                 last_price = (float(t['bid']) + float(t['ask'])) / 2.0
 
+            # SEC-06: the same gate as the live path — a NaN/zero/negative price out of history
+            # must not become a stored tick either.
+            if not (math.isfinite(last_price) and last_price > 0):
+                self._rejected_ticks += 1
+                continue
+
             volume = float(t['volume_real']) if t['volume_real'] > 0 else float(t['volume'])
-            if volume <= 0:
+            if not (math.isfinite(volume) and volume > 0):
                 volume = 1.0                          # see _poll_ticks: carried as 1 lot
                 self._volume_defaulted += 1
 

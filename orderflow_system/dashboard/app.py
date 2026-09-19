@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+import sys
+from typing import Any, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Request
 from fastapi.staticfiles import StaticFiles
@@ -37,10 +38,31 @@ logger = logging.getLogger(__name__)
 # FastAPI app — created here, system ref set at startup
 # ──────────────────────────────────────────────
 
+
+def endpoint_policy() -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """(docs_url, redoc_url, openapi_url) for the app.
+
+    The interactive docs describe the entire control surface and are useless to the app itself:
+    they stay on in a source checkout (they are the quickest way to probe a route) and off in the
+    packaged build, where a loopback-open /docs is an invitation rather than a feature.
+    ``OFAP_OPENAPI=1`` re-enables them; ``OFAP_FORCE_FROZEN=1`` lets tests exercise the packaged
+    branch from a source tree (audit F-11).
+    """
+    frozen = bool(getattr(sys, "frozen", False)) or bool(os.environ.get("OFAP_FORCE_FROZEN"))
+    if frozen and not os.environ.get("OFAP_OPENAPI"):
+        return None, None, None
+    return "/docs", "/redoc", "/openapi.json"
+
+
+_DOCS_URL, _REDOC_URL, _OPENAPI_URL = endpoint_policy()
+
 app = FastAPI(
     title="Orderflow Trading Dashboard",
     description="Real-time orderflow analysis terminal",
     version="1.0.0",
+    docs_url=_DOCS_URL,
+    redoc_url=_REDOC_URL,
+    openapi_url=_OPENAPI_URL,
 )
 
 # WebSocket manager — shared with main.py
@@ -105,44 +127,94 @@ _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 def local_hostname(value: str) -> str:
     """A Host header or an Origin URL → its bare, lowercased hostname ("" when absent).
 
-    Handles `host:port`, `http://host:port`, IPv6 literals (`[::1]:8099`) and a trailing path;
-    anything it cannot parse keeps its text, so an unknown value fails the allowlist closed.
+    Handles `host:port`, `http://host:port`, IPv6 literals (`[::1]:8099`), a trailing path and
+    the userinfo form — for `http://a@evil.com/` the authority a browser would use is the LAST
+    `@` segment (`evil.com`), so that is what is returned; the guard then fails closed on it
+    (audit SEC-35). Anything it cannot parse keeps its text, which also fails the allowlist.
     """
     text = str(value or "").strip().lower()
     if "://" in text:
         text = text.split("://", 1)[1]
     text = text.split("/", 1)[0]
+    if "@" in text:                                # userinfo: the host is what follows the last @
+        text = text.rsplit("@", 1)[1]
     if text.startswith("["):                       # [::1]:8099
         return text.split("]", 1)[0][1:]
     return text.rsplit(":", 1)[0] if ":" in text else text
+
+
+def origin_port(value: str) -> str:
+    """The port an Origin or Host names ("" when it carries none — the scheme default)."""
+    text = str(value or "").strip().lower()
+    if "://" in text:
+        text = text.split("://", 1)[1]
+    text = text.split("/", 1)[0]
+    if "@" in text:
+        text = text.rsplit("@", 1)[1]
+    if text.startswith("["):                       # [::1]:8099
+        rest = text.split("]", 1)[1]
+        return rest[1:] if rest.startswith(":") else ""
+    return text.rsplit(":", 1)[1] if ":" in text else ""
+
+
+def names_this_server(value: str, own_port: str) -> bool:
+    """True when an Origin/Host names THIS server: a loopback name **and** our own port.
+
+    History (audit SEC-24): the guard used to trust any loopback origin, but the port is part
+    of an origin — a page served by any other local process lives on `http://127.0.0.1:<other
+    port>`, browsers classify cross-port loopback as `same-site` (not `cross-site`), so both
+    arms passed and a local page could fire body-less mutating POSTs (config reset, engine
+    stop, storage prune) and open the live WebSocket. Comparing the port closes it.
+    `own_port == ""` means this server cannot state its port (the test client) — then the
+    loopback-name answer stands, which keeps native/test clients working.
+    """
+    if local_hostname(value) not in LOCAL_HOSTS:
+        return False
+    if not own_port:
+        return True
+    return origin_port(value) == own_port
 
 
 def is_trusted_ws_handshake(headers) -> bool:
     """True when a websocket handshake looks first-party.
 
     An absent Origin passes (native clients and the test client send none); a present one must
-    be loopback; `Sec-Fetch-Site: cross-site` always fails.
+    name THIS server — loopback and our own port (audit SEC-24, the same rule as the HTTP
+    middleware); `Sec-Fetch-Site: cross-site` always fails.
     """
     if (headers.get("sec-fetch-site") or "").strip().lower() == "cross-site":
         return False
-    origin = local_hostname(headers.get("origin") or "")
-    return not origin or origin in LOCAL_HOSTS
+    origin = headers.get("origin") or ""
+    if not str(origin).strip():
+        return True
+    return names_this_server(origin, origin_port(headers.get("host") or ""))
 
 
 class LocalRequestGuard(BaseHTTPMiddleware):
     """Refuse non-loopback Hosts outright, and cross-site mutations on top of that."""
 
     async def dispatch(self, request: Request, call_next):
-        host = local_hostname(request.headers.get("host") or "")
+        host_header = request.headers.get("host") or ""
+        host = local_hostname(host_header)
         if host and host not in LOCAL_HOSTS:
             return PlainTextResponse("forbidden: non-loopback Host", status_code=403)
         if request.method not in _SAFE_METHODS:
-            origin = local_hostname(request.headers.get("origin") or "")
-            if origin and origin not in LOCAL_HOSTS:
+            origin = request.headers.get("origin") or ""
+            # A loopback origin on another port is a DIFFERENT origin (audit SEC-24): the page
+            # belongs to some other local process, not to this app.
+            if str(origin).strip() and not names_this_server(origin, origin_port(host_header)):
                 return PlainTextResponse("forbidden: cross-origin request", status_code=403)
             if (request.headers.get("sec-fetch-site") or "").strip().lower() == "cross-site":
                 return PlainTextResponse("forbidden: cross-site request", status_code=403)
-        return await call_next(request)
+        response = await call_next(request)
+        # SEC-29: the page's CSP is a meta tag, which cannot carry frame-ancestors, and no header
+        # said X-Frame-Options — so the UI could be framed and its buttons clicked through. The
+        # header applies as an ADDITIONAL policy next to the meta one (directives intersect,
+        # nothing in the meta CSP is weakened).
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        return response
 
 
 app.add_middleware(LocalRequestGuard)

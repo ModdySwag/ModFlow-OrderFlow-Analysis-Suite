@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import threading
 import time
 import urllib.error
@@ -67,6 +68,22 @@ TEST_STREAM_SYMBOL = "FAKEPACA"
 #: Client-side budget, below the Basic plan's 200/min (see the module docstring).
 REST_PER_MIN = 150
 AUTH_DEADLINE_S = 10.0
+
+#: One ordered tick consumer per feed. Deep enough for a live burst; a full queue drops its
+#: oldest entry and counts it (see _deliver).
+TICK_QUEUE_MAX = 4096
+
+#: Close an open-but-silent socket after this long (audit D-05). The feed enables it only for
+#: markets that should be printing (crypto always; equities while the clock says open) — a stock
+#: stream is legitimately quiet overnight.
+SILENCE_BUDGET_S = 90.0
+
+
+def _print_key(tick: Any) -> tuple:
+    """Identity of one print — shared by the stream and the snapshot poll so neither re-counts
+    what the other delivered (audit D-04)."""
+    return (int(getattr(tick, "timestamp_ms", 0) or 0), float(getattr(tick, "price", 0) or 0),
+            float(getattr(tick, "size", 0) or 0), str(getattr(tick, "trade_id", "") or ""))
 
 Transport = Callable[[str, str, dict[str, str], Optional[dict[str, str]], float],
                      "tuple[int, dict[str, str], str]"]
@@ -466,6 +483,21 @@ class AlpacaStream:
         self.reconnects = 0
         self.messages = 0
         self.authenticated = False
+        #: Market frames actually parsed — the backoff ladder resets on this, not on the socket
+        #: opening (a venue that accepts the connection and then says nothing kept the ladder at
+        #: 1 s forever; audit D-05).
+        self.parsed_frames = 0
+        #: Prints dropped for an unusable timestamp/price — counted, never invented (audit D-06).
+        self.junk_prints = 0
+        #: MEM-A2-05: the reference mid cache belongs to THIS stream. As class state it was
+        #: shared by both streams (stocks + crypto) and survived every stop()/start() cycle.
+        self._mid_cache: dict[str, float] = {}
+        #: Wall-clock deadline for the auth response of the CURRENT connection; 0 = not waiting.
+        #: Enforced by the watchdog, never by blocking the read loop (the response arrives
+        #: through that loop — waiting for it before reading could never see it).
+        self._auth_deadline_at = 0.0
+        #: 0 = watchdog off. The feed raises it for markets that should be printing (D-05).
+        self.silence_budget_s = 0.0
         self._stop = False
         self._task: Optional[asyncio.Task] = None
         self._socket = None
@@ -478,6 +510,8 @@ class AlpacaStream:
             "messages": self.messages, "last_message_age_s": (
                 round(time.time() - self.last_message_ms / 1000.0, 1) if self.last_message_ms else None),
             "last_error": self.last_error,
+            "junk_prints": self.junk_prints,
+            "parsed_frames": self.parsed_frames,
             "subscriptions": self.subscriptions.as_dict(),
         }
 
@@ -549,18 +583,29 @@ class AlpacaStream:
             try:
                 self._set_state("connecting")
                 self.authenticated = False
+                self._mid_cache.clear()      # MEM-A2-05: no reference price survives a reconnect
                 sock = await self._enter()
                 self._socket = sock
                 if self.require_auth:
                     self._set_state("authenticating")
+                    self._auth_deadline_at = time.time() + self.auth_deadline_s
                     await self._send(self.auth_frame())
                 else:
                     self.authenticated = True
+                    self._auth_deadline_at = 0.0
                 if self.subscriptions.trades or self.subscriptions.quotes or self.subscriptions.bars:
                     await self._send(self.subscribe_frame())
-                backoff = 1.0
-                async for raw in self._messages(sock):
-                    self._handle_message(raw)
+                # An open-but-silent socket looks healthy (authenticated, no exception, no
+                # reconnect) while nothing updates: the watchdog closes it so the loop reconnects.
+                watchdog = asyncio.ensure_future(self._silence_watchdog())
+                try:
+                    async for raw in self._messages(sock):
+                        parsed = self.parsed_frames
+                        self._handle_message(raw)
+                        if self.parsed_frames > parsed:
+                            backoff = 1.0                   # the ladder resets on DATA (D-05)
+                finally:
+                    watchdog.cancel()
                 if self._stop:
                     break
                 raise AlpacaError(0, "the stream closed")
@@ -573,13 +618,38 @@ class AlpacaStream:
                     return
                 self._set_state("reconnecting")
                 self.reconnects += 1
+                # Jittered: a venue-side reset must not bring every client back in lockstep (D-05).
+                delay = backoff * random.uniform(0.75, 1.25)
                 logger.warning("alpaca %s stream dropped (%s) — reconnecting in %.1fs",
-                               self.label, err, backoff)
+                               self.label, err, delay)
                 await self._close_socket()
-                await asyncio.sleep(backoff)
+                await asyncio.sleep(delay)
                 backoff = min(backoff * 2, 30.0)
         await self._close_socket()
         self._set_state("idle")
+
+    async def _silence_watchdog(self) -> None:
+        """Close the socket once the venue has been silent past the budget (audit D-05).
+
+        Budget 0 disables it — the feed raises it only for markets that should be printing.
+        """
+        while True:
+            await asyncio.sleep(1.0)
+            now = time.time()
+            if self._auth_deadline_at and not self.authenticated and now > self._auth_deadline_at:
+                self.last_error = f"no authentication response within {self.auth_deadline_s:.0f}s"
+                logger.warning("alpaca %s stream: %s", self.label, self.last_error)
+                self._auth_deadline_at = 0.0
+                await self._close_socket()
+                return
+            if self.silence_budget_s <= 0 or not self.last_message_ms:
+                continue
+            idle = now - self.last_message_ms / 1000.0
+            if idle > self.silence_budget_s:
+                self.last_error = f"silent for {idle:.0f}s — reconnecting"
+                logger.warning("alpaca %s stream: %s", self.label, self.last_error)
+                await self._close_socket()
+                return
 
     async def _enter(self):
         """Open the socket, tolerating factories that return a context manager."""
@@ -649,6 +719,7 @@ class AlpacaStream:
                     self.authenticated = "authenticated" in msg or not self.require_auth
                     if self.authenticated:
                         self._set_state("live")
+                        self._auth_deadline_at = 0.0    # the deadline was met (D-05)
                 continue
             if kind == "subscription":
                 continue
@@ -663,20 +734,22 @@ class AlpacaStream:
                 symbol = str(frame.get("S") or "")
                 tick = (normalize_crypto_trade(frame, mid=self._last_mid(symbol), symbol=symbol)
                         if "/" in symbol else normalize_stock_trade(frame, mid=self._last_mid(symbol), symbol=symbol))
-                if tick is not None and self.on_tick:
+                if tick is None:
+                    self.junk_prints += 1               # no usable price or timestamp (D-06)
+                elif self.on_tick:
+                    self.parsed_frames += 1
                     self.on_tick(symbol, tick)
                 continue
             if kind == "q":
                 quote = normalize_quote(frame)
                 if quote is not None:
+                    self.parsed_frames += 1
                     self._mid_cache[quote.symbol or str(frame.get("S") or "")] = quote.mid
                     if self.on_quote:
                         self.on_quote(quote.symbol or str(frame.get("S") or ""), quote)
 
-    # a tiny mid cache so trade classification has a reference price
-    _mid_cache: dict[str, float] = {}
-
     def _last_mid(self, symbol: str) -> Optional[float]:
+        """The stream's own mid cache (MEM-A2-05: per instance, not shared class state)."""
         return self._mid_cache.get(symbol)
 
     async def start(self) -> None:
@@ -716,9 +789,12 @@ class AlpacaFeed:
                  snapshot_seconds: float = 5.0, history_minutes: int = 240,
                  stock_cap: int = 30, option_cap: int = 200,
                  on_warn: Optional[Callable[[str], None]] = None,
+                 on_bar: Optional[Callable[[str, Any], None]] = None,
                  clock: Callable[[], float] = time.time) -> None:
         self.symbols = {str(k): str(v) for k, v in (symbols or {}).items() if v}
         self.on_tick = on_tick
+        #: Seeded REST bars go to the chart through this sink — never through on_tick (audit D-07).
+        self.on_bar = on_bar
         self.paper = bool(paper)
         self.feed = feed
         self.data = data or AlpacaData(key_id, secret, feed=feed)
@@ -729,16 +805,22 @@ class AlpacaFeed:
         self.streams: list[AlpacaStream] = []
         self.state = "idle"
         self.market_open: Optional[bool] = None
-        #: (stamp, price, size, trade id) of the last trade each snapshot delivered — a REST
-        #: snapshot repeats its `latestTrade` until a new print exists, and re-delivering it as a
-        #: fresh tick counted phantom volume and delta into every aggregate panel.
-        self._last_snapshot_print: dict[str, tuple] = {}
+        #: (stamp, price, size, trade id) of the last DELIVERED print per app symbol — written by
+        #: BOTH transports, so a print the trade stream already delivered is not re-counted by the
+        #: 5 s snapshot poll, and a repeated snapshot print is still suppressed (audit D-04).
+        self._last_print_key: dict[str, tuple] = {}
+        #: Seeded bars with no chart sink wired — counted so a miswired engine is visible.
+        self.seeded_bars_skipped = 0
+        self._stock_stream: Optional[AlpacaStream] = None
         self.last_clock: Optional[dict[str, Any]] = None   # cached for the palette
         self.needs_keys = False
         self.errors: list[str] = []
         self.started_ms = 0
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._tasks: list[asyncio.Task] = []
+        #: Ticks reach the system through ONE ordered consumer (see _deliver): the stream callbacks
+        #: are synchronous, and scheduling a task per tick let closes and analytics race each other.
+        self._tick_queue: asyncio.Queue = asyncio.Queue(maxsize=TICK_QUEUE_MAX)
+        self.ticks_dropped = 0
 
     # ── helpers ──
     @property
@@ -759,7 +841,6 @@ class AlpacaFeed:
         """Start the streams + the polling task. Never blocks the caller."""
         self.state = "starting"
         self.started_ms = int(time.time() * 1000)
-        self._loop = asyncio.get_running_loop()
         if not self.symbols:
             self.state = "no-symbols"
             return
@@ -772,6 +853,10 @@ class AlpacaFeed:
             stock_stream.subscriptions.add("trades", self.equity_symbols)
             stock_stream.subscriptions.add("quotes", self.equity_symbols)
             self.streams.append(stock_stream)
+            # A stock stream is legitimately quiet when the session is closed: the silence
+            # watchdog follows the market clock (poll_once raises and lowers it; audit D-05).
+            stock_stream.silence_budget_s = SILENCE_BUDGET_S if self.market_open else 0.0
+            self._stock_stream = stock_stream
 
         if self.crypto_symbols:
             crypto_stream = AlpacaStream(
@@ -779,32 +864,56 @@ class AlpacaFeed:
                 connect_factory=self.connect_factory, on_tick=self._on_stream_tick, label="crypto")
             crypto_stream.subscriptions.add("trades", self.crypto_symbols)
             self.streams.append(crypto_stream)
+            crypto_stream.silence_budget_s = SILENCE_BUDGET_S     # crypto trades around the clock
 
         for stream in self.streams:
             await stream.start()
         self._tasks.append(asyncio.ensure_future(self._poll_loop()))
+        self._tasks.append(asyncio.ensure_future(self._drain_ticks()))
         self.state = "running"
         logger.info("Alpaca feed: %d symbol(s) mapped (%d equity, %d crypto), feed=%s",
                     len(self.symbols), len(self.equity_symbols), len(self.crypto_symbols), self.feed)
 
     async def stop(self) -> None:
         self.state = "stopping"
-        for task in self._tasks:
+        tasks = list(self._tasks)
+        for task in tasks:
             task.cancel()
         for stream in self.streams:
             await stream.stop()
+        if tasks:
+            # Cancelled is not finished: return only once they have actually unwound (audit A-06).
+            await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
+        # MEM-A2-06: a restart rebuilds the streams list, so the stopped sessions (and their
+        # sockets) used to be retained by the old list forever; the queue also held the stopped
+        # session's un-drained thunks. Both are released here.
+        self.streams.clear()
+        while not self._tick_queue.empty():
+            try:
+                self._tick_queue.get_nowait()
+                self.ticks_dropped += 1
+            except asyncio.QueueEmpty:                  # pragma: no cover - raced
+                break
         self.state = "stopped"
 
     def _deliver(self, app_symbol: str, tick: Any) -> None:
-        """Hand a tick to the system.
+        """Hand a tick to the system through the feed's single ordered consumer.
 
-        ``OrderflowSystem._on_tick`` is a coroutine (both other feeds ``await`` it), so
-        calling it from this synchronous callback and dropping the coroutine silently
-        loses every tick — the first live smoke test showed "720 bars seeded" and zero
-        ticks in the pipelines because of exactly that. Schedule it on the loop instead.
+        ``OrderflowSystem._on_tick`` is a coroutine (both other feeds ``await`` it), so this
+        synchronous stream callback cannot call it directly — dropping the coroutine silently
+        loses every tick (the first live smoke test showed "720 bars seeded" and zero ticks in
+        the pipelines). Scheduling one task per tick fixed the loss and created a race: N
+        overlapping ``on_tick`` coroutines closed the same candle N times and wrote N rows
+        (audit D-01). Now the coroutine callbacks go through one bounded queue drained by
+        ``_drain_ticks`` — arrival order, one at a time. A synchronous consumer (a plain
+        recorder, a CLI sink) is still called inline, exactly as it always was; only a coroutine
+        *result* is handed to the consumer.
         """
         if not self.on_tick or not app_symbol or tick is None:
+            return
+        if asyncio.iscoroutinefunction(self.on_tick):
+            self._offer(lambda: self.on_tick(app_symbol, tick))
             return
         try:
             result = self.on_tick(app_symbol, tick)
@@ -812,22 +921,44 @@ class AlpacaFeed:
             self._error(f"tick delivery failed for {app_symbol}: {exc}")
             return
         if asyncio.iscoroutine(result):
+            self._offer(lambda: result)
+
+    def _offer(self, thunk: Callable[[], Any]) -> None:
+        """Offer one delivery to the bounded queue; a full queue drops its OLDEST and counts it.
+
+        A stale print is worth less than a fresh one — the same policy ``websocket_manager``
+        documents for its UI streams. ``ticks_dropped`` is surfaced in ``status()``.
+        """
+        try:
+            self._tick_queue.put_nowait(thunk)
+        except asyncio.QueueFull:
             try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = self._loop
-            if loop is None or loop.is_closed():
-                result.close()
-                return
+                self._tick_queue.get_nowait()               # drop the oldest, keep the newest
+                self.ticks_dropped += 1
+            except asyncio.QueueEmpty:                      # pragma: no cover - consumer won the race
+                pass
             try:
-                asyncio.ensure_future(result, loop=loop)
-            except RuntimeError as exc:
-                result.close()
-                self._error(f"tick scheduling failed for {app_symbol}: {exc}")
+                self._tick_queue.put_nowait(thunk)
+            except asyncio.QueueFull:                       # pragma: no cover - consumer is stuck
+                self.ticks_dropped += 1
+
+    async def _drain_ticks(self) -> None:
+        """The feed's single tick consumer — arrival order, one at a time, never overlapping."""
+        while True:
+            thunk = await self._tick_queue.get()
+            try:
+                result = thunk()
+                if asyncio.iscoroutine(result):
+                    await result
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:                        # noqa: BLE001 - one bad tick must not kill the feed
+                self._error(f"tick delivery failed: {exc}")
 
     def _on_stream_tick(self, alpaca_symbol: str, tick) -> None:
         app = self._app_for(alpaca_symbol)
         if app:
+            self._last_print_key[app] = _print_key(tick)    # the snapshot poll must see this (D-04)
             self._deliver(app, tick)
 
     # ── REST top-up ──
@@ -869,17 +1000,25 @@ class AlpacaFeed:
         return total
 
     def _emit_bar(self, row: dict[str, Any], app_symbol: str) -> None:
-        """A historical bar becomes three synthetic ticks (H, L, C) — enough for the
-        tape-driven panels to have a shape, while the candle builder never sees a
-        bar it did not build itself."""
-        from orderflow_system.data.models import Side, Tick
+        """A historical REST bar becomes a Candle for the chart — never a synthetic tick.
 
-        for price, size_hint in ((row["open"], 0.0), (row["high"], row["volume"] / 3 or 0.0),
-                                 (row["low"], row["volume"] / 3 or 0.0), (row["close"], row["volume"] / 3 or 0.0)):
-            if not price:
-                continue
-            tick = Tick(timestamp_ms=row["timestamp_ms"], price=price, size=size_hint, side=Side.BUY)
-            self._deliver(app_symbol, tick)
+        Four invented prints per bar (volume/3, hardcoded BUY) used to be delivered through
+        ``on_tick``: they landed in the tick store, the delta/footprint aggregates and the tape,
+        inventing flow, size and side for bars that only ever carried OHLCV (audit D-07). The bar
+        itself is what the chart needs; ``load_historical_candles`` is the sink the MT5 seeder
+        has always used.
+        """
+        if self.on_bar is None:
+            self.seeded_bars_skipped += 1
+            return
+        from orderflow_system.data.models import Candle
+
+        self.on_bar(app_symbol, Candle(
+            timestamp_ms=int(row["timestamp_ms"]),
+            open=float(row["open"] or 0.0), high=float(row["high"] or 0.0),
+            low=float(row["low"] or 0.0), close=float(row["close"] or 0.0),
+            volume=float(row.get("volume") or 0.0),
+        ))
 
     async def poll_once(self) -> dict[str, Any]:
         """One REST pass: market clock + batched snapshots. Returns a small report."""
@@ -893,6 +1032,8 @@ class AlpacaFeed:
         if clk is not None:
             self.last_clock = clk                 # cached: the palette must not poll
         self.market_open = None if clk is None else bool(clk.get("is_open"))
+        if self._stock_stream is not None:               # the silence budget follows the session (D-05)
+            self._stock_stream.silence_budget_s = SILENCE_BUDGET_S if self.market_open else 0.0
         report: dict[str, Any] = {"market_open": self.market_open, "equities": 0, "crypto": 0,
                                   "unchanged": 0}
         equities = self.equity_symbols
@@ -906,11 +1047,11 @@ class AlpacaFeed:
                 tick = normalize_snapshot_trade(snap, symbol=alpaca_symbol)
                 quote = normalize_snapshot_quote(snap, symbol=alpaca_symbol)
                 if tick is not None:
-                    key = (tick.timestamp_ms, tick.price, tick.size, tick.trade_id)
-                    if self._last_snapshot_print.get(app) == key:
-                        report["unchanged"] += 1        # the same print as the last poll
+                    key = _print_key(tick)
+                    if self._last_print_key.get(app) == key:
+                        report["unchanged"] += 1        # already delivered (stream or last poll)
                         continue
-                    self._last_snapshot_print[app] = key
+                    self._last_print_key[app] = key
                     if quote is not None and quote.is_valid():
                         tick.side = Side.BUY if tick.price >= quote.mid else Side.SELL
                     self._deliver(app, tick)
@@ -957,6 +1098,9 @@ class AlpacaFeed:
             "budget": self.data.budget.snapshot(),
             "needs_keys": self.needs_keys,
             "errors": list(self.errors[-5:]),
+            "ticks_dropped": self.ticks_dropped,
+            "tick_queue_depth": self._tick_queue.qsize(),
+            "seeded_bars_skipped": self.seeded_bars_skipped,
             "uptime_s": round((time.time() - self.started_ms / 1000.0), 1) if self.started_ms else 0.0,
             "depth": False,
             "depth_reason": "Alpaca publishes trades, quotes and bars — no order book.",

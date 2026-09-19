@@ -3,7 +3,7 @@
 **Trigger:** owner's question — will the app support every monitor/display scenario, can widget
 stacks be dragged across monitors, and what needs adjusting for full break-apart windows/widgets
 (resize · drag · move · monitor swap · pinning).
-**Tree:** `C:\Users\Moddy\OrderFlow-Analysis-Pro` · HEAD `fa202d6`, nothing committed or changed in
+**Tree:** `C:\Users\<you>\OrderFlow-Analysis-Pro` · HEAD `fa202d6`, nothing committed or changed in
 this pass — this is an audit with actionables.
 **Method:** code read + a live probe matrix driven over CDP against a sandboxed server
 (`APPDATA=$LOCALAPPDATA/Temp/ofap_display_sandbox`, port 8092): 16 viewport/DPI scenarios, real

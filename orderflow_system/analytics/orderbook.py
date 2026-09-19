@@ -178,9 +178,13 @@ class OrderbookTracker:
         """
         Get recent level consumptions within a time window.
         Used by sweep detector to count how many levels were eaten recently.
+
+        The window is cut against the newest snapshot's own stamp, never the host clock: a venue
+        (or a replay) whose clock trails ours would otherwise put every consumption "in the past",
+        empty this list and leave the sweep detector silently dead while it still looks alive.
         """
-        now = int(time.time() * 1000)
-        cutoff = now - time_window_ms
+        latest = self._prev_snapshot.timestamp_ms if self._prev_snapshot else int(time.time() * 1000)
+        cutoff = latest - time_window_ms
         result = [
             c for c in self._consumption_history
             if c.timestamp_ms >= cutoff

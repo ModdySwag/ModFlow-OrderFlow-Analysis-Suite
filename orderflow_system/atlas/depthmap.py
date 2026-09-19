@@ -98,6 +98,8 @@ class DepthHeatmap:
         price_span_ticks: int = 600,
     ) -> None:
         self.symbol = symbol
+        #: SEC-07: snapshots the feed had flagged stale and this map therefore refused to fold.
+        self._stale_skipped = 0
         self.tick_size = max(float(tick_size), 1e-9)
         self.bucket_ms = int(bucket_ms)
         self.max_columns = int(max_columns)
@@ -147,6 +149,13 @@ class DepthHeatmap:
         heatmap's own alert buttons create — could not fire at all. The hub dispatches what this
         returns (hub.on_orderbook), which is what makes those kinds live.
         """
+        if bool(getattr(snapshot, "stale", False)):
+            # SEC-07: the feeds mark a snapshot stale when sequence continuity broke — and then
+            # dispatched it anyway, so the heatmap drew, and wall alerts fired on, a book the feed
+            # had just called untrustworthy. `engine.book_state()` was the only reader of the flag.
+            # A stale snapshot is now not folded at all; the refusals are counted and surfaced.
+            self._stale_skipped += 1
+            return []
         ts = as_epoch_ms(ts_ms or snapshot.timestamp_ms)
         recorded: list[LevelEvent] = []
         self._version += 1
@@ -342,9 +351,13 @@ class DepthHeatmap:
             "columns": len(self._columns),
             "span_ms": (self._columns[-1].ts_ms - self._columns[0].ts_ms) if len(self._columns) > 1 else 0,
             "walls": len(self._walls),
+            # R-01: the measured retention (sum of levels across columns) — the number the audit's
+            # 15-minute fill curve was about, now visible in the diagnostics instead of inferred.
+            "retained_levels": sum(len(c.levels) for c in self._columns),
             "events": counts,
             "version": self._version,
             "snapshot_builds": self.snapshot_builds,
+            "stale_skipped": self._stale_skipped,     # SEC-07
         }
 
     def events(self, kind: str = "", limit: int = 100) -> list[dict]:

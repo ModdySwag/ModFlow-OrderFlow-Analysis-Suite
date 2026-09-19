@@ -120,5 +120,19 @@ def test_the_sheet_renders_from_the_map_and_the_old_list_is_gone():
 
 
 def test_the_migrated_modules_no_longer_dispatch_their_globals():
-    offenders = [name for name in MIGRATED if "document.addEventListener('keydown'" in _text(name)]
+    """Bubble-phase keydown listeners are the old dispatch pattern these modules migrated away
+    from, and none may come back. One CAPTURE-phase listener is allowed and required, not
+    ignored: §117's rebind capture in menu.js exists to stop a combination reaching the
+    dispatcher while the user is choosing it, and it is inert unless armed."""
+    offenders = []
+    capture_ok = False
+    for name in MIGRATED:
+        for line in _text(name).splitlines():
+            if "document.addEventListener('keydown'" not in line:
+                continue
+            if name == "menu.js" and ", captureKeys, true" in line:
+                capture_ok = True
+                continue
+            offenders.append(f"{name}: {line.strip()}")
     assert not offenders, f"these still bind global keys outside the map: {offenders}"
+    assert capture_ok, "menu.js lost its armed capture listener — rebinding would type into the page"

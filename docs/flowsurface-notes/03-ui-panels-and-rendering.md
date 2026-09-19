@@ -6,10 +6,10 @@
 
 # flowsurface `src/` UI-layer briefing — ideas for porting into ModFlow OrderFlow Analysis Suite
 
-Source read: `C:\Users\Moddy\AppData\Local\Temp\flowsurface_ref` (Rust iced 0.14 + wgpu, GPL-3.0-or-later, v0.8.9, ~39k LOC in `src/`).
+Source read: `C:\Users\<you>\AppData\Local\Temp\flowsurface_ref` (Rust iced 0.14 + wgpu, GPL-3.0-or-later, v0.8.9, ~39k LOC in `src/`).
 **Ideas only — no code copying.** Every claim below is `file:line`-anchored so the target work can re-derive the idea without lifting GPL text.
 
-Target: `C:\Users\Moddy\OrderFlow-Analysis-Pro` — FastAPI + pywebview (WebView2), vanilla JS/canvas, no build step, ~69 Python test modules + `*.selftest.js` JS self-tests, 11-view shell, terminal mode, aux windows, per-screen layout persistence.
+Target: `C:\Users\<you>\OrderFlow-Analysis-Pro` — FastAPI + pywebview (WebView2), vanilla JS/canvas, no build step, ~69 Python test modules + `*.selftest.js` JS self-tests, 11-view shell, terminal mode, aux windows, per-screen layout persistence.
 
 ---
 
