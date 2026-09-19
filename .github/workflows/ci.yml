@@ -167,13 +167,13 @@ jobs:
 
       - name: Upload the signing input
         id: upload-sign
-        uses: actions/upload-artifact@ea165f8d65e6e75b540449e92b4886f43607fa02   # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
         with:
           name: dist-sign
           path: dist-sign/
           retention-days: 14
 
-      - uses: actions/upload-artifact@ea165f8d65e6e75b540449e92b4886f43607fa02   # v4.6.2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
         with:
           name: frozen-exe-windows
           path: |
@@ -229,7 +229,7 @@ jobs:
           }
           if ($good -eq 0) { throw "no valid signature in the signed artifact" }
 
-      - uses: actions/upload-artifact@ea165f8d65e6e75b540449e92b4886f43607fa02   # v4.6.2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
         with:
           name: signed-binaries
           path: dist-signed/
@@ -258,7 +258,7 @@ jobs:
           python -m pip install -e . --no-deps
       - name: Soak (30 minutes; slope gate 0.5 MB/min after warm-up)
         run: python scripts/soak.py --minutes 30 --csv soak.csv
-      - uses: actions/upload-artifact@ea165f8d65e6e75b540449e92b4886f43607fa02   # v4.6.2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
         if: always()
         with:
           name: soak-csv
@@ -303,7 +303,7 @@ jobs:
           python scripts/churn_probe.py --port 8099 --cycles 5 --dwell 0.4
           python scripts/hover_audit.py --port 8099 --csv hover_audit.json
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-      - uses: actions/upload-artifact@ea165f8d65e6e75b540449e92b4886f43607fa02   # v4.6.2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4.6.2
         if: always()
         with:
           name: churn-receipt
