@@ -41,5 +41,5 @@ A one-file tour of the highlights:
 | ![Fundamentals](screenshots/fundamentals.png) | **Fundamentals** — the per-instrument reference card. |
 | ![Options](screenshots/options.png) | **Options** — the chain view for options-capable venues. |
 | ![Help Centre — search](screenshots/help-search.png) | **Help Centre** — 81 topics, searchable from the dock, screenshots included. |
-| ![Level radar](screenshots/level-radar.png) | **Level radar** — the Scanner's Radar column: every tracked level's lifecycle (armed · approaching · held · spent) across instruments, from real replayed tape. |
+| ![Level radar](screenshots/level-radar.png) | **Level radar** — the Scanner's Radar column: every tracked level's lifecycle (armed · approaching · held · spent) across instruments, from the live tape. |
 | ![Area volume profile](screenshots/area-volume-profile.png) | **Area volume profile** — box any region on the Engine: volume-at-price, POC / VAH / VAL drawn, and a one-click watch on the point of control. |
