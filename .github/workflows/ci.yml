@@ -144,11 +144,22 @@ jobs:
       - name: Install Inno Setup 6 (the installer engine)
         shell: pwsh
         run: |
-          choco install innosetup --version=6.4.3 --no-progress -y
-          if (-not (Test-Path "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") -and
-              -not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
-            throw "ISCC.exe not found after installing Inno Setup"
+          # The runner image ships Inno Setup (6.7.x at this writing). Only fetch it when the
+          # machine has none: a pinned choco install fails on an image that already carries a
+          # newer version, and its exit code would kill the job before the installer is built.
+          # installer/make_installer.ps1 locates ISCC itself across the same candidates.
+          $candidates = @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
+            'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+            'C:\Program Files\Inno Setup 6\ISCC.exe'
+          )
+          $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            choco install innosetup --no-progress -y
+            $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           }
+          if (-not $iscc) { throw "ISCC.exe not found after installing Inno Setup" }
+          Write-Host "ISCC: $iscc"
 
       - name: Build the installer (Inno Setup - no licensing caveat, WebView2 chained)
         shell: pwsh
