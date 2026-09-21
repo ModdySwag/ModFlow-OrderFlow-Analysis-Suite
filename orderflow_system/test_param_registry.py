@@ -106,7 +106,7 @@ def test_dump_shape_and_live_values():
     assert out["ok"] is True and out["count"] == len(reg.PARAMS)
     assert "Footprint" in out["groups"]
     engine_r = next(p for p in out["groups"]["Footprint"] if p["path"] == "ofx.R")
-    assert engine_r["value"] == CONFIG["ofx"]["R"] and engine_r["min"] == 1.0 and engine_r["max"] == 20.0
+    assert engine_r["value"] == CONFIG["ofx"]["R"] and engine_r["min"] == 1.5 and engine_r["max"] == 20.0
     assert json.loads(json.dumps(out))["count"] == out["count"]        # JSON-safe for the API
 
 
@@ -115,6 +115,92 @@ def test_applies_flags_are_known():
     assert bad == [], f"unknown applies flag: {bad}"
     restart = [p.path for p in reg.PARAMS if p.applies == "restart"]
     assert "atlas.extras_enabled" in restart, "the streams switch needs an engine restart"
+
+
+# ── the control-surface pass (2026-09-19): the markup, the registry and the store agree ─────────
+# The audit found the same bound hand-written in up to three places, disagreeing; the registry is
+# the display authority, so the markup is pinned to it (and the store was aligned in the same pass).
+# A choice the registry offers must also be a choice the store keeps — the `imbalance_mode: "both"`
+# lie is what these two tests exist to keep closed.
+
+import re as _re
+from pathlib import Path as _Path
+
+_UI_HTML = _Path(__file__).resolve().parent / "desktop" / "ui" / "index.html"
+
+MARKUP_BOUNDS = {
+    "ofx.lambda_ms": "ofxLambda",
+    "ofx.min_block": "ofxMinBlock",
+    "atlas.footprint.imbalance_threshold": "ofImbThresh",
+}
+
+
+def test_markup_bounds_match_the_registry():
+    html = _UI_HTML.read_text(encoding="utf-8")
+    for path, input_id in MARKUP_BOUNDS.items():
+        param = reg.BY_PATH[path]
+        tag = _re.search(r'<input[^>]*id="%s"[^>]*>' % _re.escape(input_id), html)
+        assert tag, f"no input #{input_id} in index.html"
+        attrs = dict(_re.findall(r'(\w+)="([^"]*)"', tag.group(0)))
+        assert float(attrs["min"]) == float(param.minimum), f"{path}: min {attrs.get('min')} vs {param.minimum}"
+        assert float(attrs["max"]) == float(param.maximum), f"{path}: max {attrs.get('max')} vs {param.maximum}"
+        assert float(attrs["step"]) == float(param.step), f"{path}: step {attrs.get('step')} vs {param.step}"
+
+
+@pytest.fixture()
+def store(tmp_path, monkeypatch):
+    """A store whose config directory is a temp dir (never the user's real one)."""
+    from orderflow_system.desktop import config_store
+
+    monkeypatch.setattr(config_store, "config_dir", lambda: tmp_path)
+    return config_store
+
+
+def test_every_registry_enum_choice_survives_the_store(store):
+    """Every choice an enum control offers must be what the store keeps after a round-trip."""
+    for param in reg.PARAMS:
+        if param.kind != "enum" or not param.choices:
+            continue
+        for choice in param.choices:
+            parts = param.path.split(".")
+            body: dict = {}
+            node = body
+            for part in parts[:-1]:
+                node[part] = {}
+                node = node[part]
+            node[parts[-1]] = choice
+            saved = store.save_config(body)
+            node = saved
+            for part in parts:
+                assert isinstance(node, dict) and part in node, f"{param.path} vanished in the store"
+                node = node[part]
+            assert node == choice, f"{param.path}: choice {choice!r} came back as {node!r}"
+
+
+def test_every_registry_bound_survives_the_store(store):
+    """A bound a Chart menu prints must be a bound the store keeps — numbers as well as choices.
+
+    Seven variables disagreed when this was written (R 1.0/1.5, stack 12/8, text px 8/20, sweep 5/4,
+    lambda ms 50/100, imbalance threshold 0/1, equal tolerance 10/1): the menu offered a value the
+    store silently rewrote. The registry states the store's bounds now, and this keeps them equal.
+    """
+    for param in reg.PARAMS:
+        if param.kind != "number" or param.minimum is None or param.maximum is None:
+            continue
+        for bound in (param.minimum, param.maximum):
+            parts = param.path.split(".")
+            body: dict = {}
+            node = body
+            for part in parts[:-1]:
+                node[part] = {}
+                node = node[part]
+            node[parts[-1]] = bound
+            saved = store.save_config(body)
+            node = saved
+            for part in parts:
+                assert isinstance(node, dict) and part in node, f"{param.path} vanished in the store"
+                node = node[part]
+            assert node == bound, f"{param.path}: bound {bound!r} came back as {node!r}"
 
 
 if __name__ == "__main__":       # pragma: no cover - convenience only

@@ -21,7 +21,7 @@ so nothing before the anchor is invented. Defaults: 24-hour window (crypto has n
 resolution, ±1σ drawn as dashed bands. A `vwap_cross` alert fires when price closes through the line
 with a 60-second cooldown.
 
-**Depth executions** (Overview, under Participants' intent) — prints that took a large share of the
+**Depth executions** (Trackers, under Participants' intent) — prints that took a large share of the
 size resting at their price, i.e. someone ate a wall instead of picking off the inside. A print must
 take ≥25% of a level that is itself ≥8× the median print, so ordinary trading does not fill the
 panel. When the level refills within seconds without price leaving, it is tagged "refilled" — the

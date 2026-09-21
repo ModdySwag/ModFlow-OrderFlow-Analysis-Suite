@@ -144,7 +144,9 @@ async function vwapRefresh() {
 /* ── trade detector panel (mounted under the intent card) ──────── */
 function detectorEnsureCard() {
     if (document.getElementById('ddCard')) return;
-    const target = document.getElementById('inCard');
+    /* §148 T5-F-17: the mount anchor is the trackers view's Participants'-intent card, which now
+       carries this id — `inCard` never existed in this build, so this card never mounted. */
+    const target = document.getElementById('tkIntentCard');
     if (!target || !target.parentElement) return;
     vwapStyles();
     const card = document.createElement('div');
@@ -208,7 +210,7 @@ async function detectorRefresh() {
             const onChart = document.querySelector('.view[data-view="chart"]')?.classList.contains('active')
                 || (document.querySelector('.view[data-view="chart"]') || {}).style?.display === 'flex';
             if (onChart || (vwapState() || {}).view === 'chart') vwapRefresh();
-            if (document.getElementById('inCard')) detectorRefresh();
+            if (document.getElementById('tkIntentCard')) detectorRefresh();
         } catch (e) { /* never let an overlay break the app */ }
     }, 5000);
     setTimeout(() => { vwapRefresh(); detectorRefresh(); }, 4000);

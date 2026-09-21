@@ -78,6 +78,10 @@
         const levelsByTime = new Map();
         for (const bar of fp || []) levelsByTime.set(bar.time, OFX.indexLevels(bar));
         const barSec = bars.length > 1 ? Math.max(1, bars[bars.length - 1].time - bars[bars.length - 2].time) : 60;
+        /* §141: the instrument's own tick, straight from the payload that states it. Price decimals
+           and the drawing layer's snap grid both read it; a payload that doesn't state one leaves the
+           last known value alone (0 = never known, and nothing is guessed from it). */
+        OFX.state.data.tick = Number(heat && heat.tick) || OFX.state.data.tick || 0;
         const adapted = OFX.math.adaptHeat(heat, bars.map((b) => b.time), barSec);
         /* P2-2: the server's matrix version rides along — an unchanged version (the cached
            snapshot) is not repainted again. */
@@ -147,7 +151,11 @@
                 ramp: p.ramp || OFX.state.params.ramp,
             });
         } catch (err) { /* defaults stand; the engine is usable without saved params */ }
+        /* A params re-read (boot, a heat-scheme or scopes event) rewrites the field from the
+           store: the quick picker must follow, or the two controls disagree — a mismatch the
+           drop-down cannot even undo, since re-picking its own value fires no change event. */
         if (el('ofxSymbol')) el('ofxSymbol').value = sym();
+        void refreshPicker();
         if (el('ofxR')) el('ofxR').value = String(OFX.state.params.R);
         if (el('ofxStack')) el('ofxStack').value = String(OFX.state.params.stack);
         if (el('ofxLambda')) el('ofxLambda').value = String(OFX.state.params.lambda);
@@ -155,6 +163,9 @@
         if (el('ofxVaPct')) el('ofxVaPct').value = String(OFX.state.params.vaPct);
         if (el('ofxRamp')) el('ofxRamp').value = String(OFX.state.params.ramp);
         syncHeatControls();
+        /* The re-read rewrote every dial programmatically — re-pair each field with its preset
+           chip, or the combobox beside it keeps naming the value the field no longer holds. */
+        if (window.OFAPPRESETS && OFAPPRESETS.refresh) OFAPPRESETS.refresh();
     }
 
     /* ── P1-8: the bar expression, read and written through the config ───────────────────────
@@ -219,8 +230,34 @@
         };
         OFX.setParams({ R: body.R, stack: body.stack, lambda: body.lambda_ms,
             minBlock: body.min_block, vaPct: body.va_pct });
-        try { await apiGet('/api/control/ofx', { method: 'POST', body }); } catch (err) { /* params already applied */ }
+        try {
+            const res = await apiGet('/api/control/ofx', { method: 'POST', body });
+            adoptSavedOfx(res && res.ofx);
+        } catch (err) { /* params already applied locally */ }
         await load();
+    }
+
+    /* config_store clamps the engine's dials on write (R max 20, stack max 8, lambda 100–5000…):
+       a value the store did not accept must not sit on the control — the next params re-read would
+       snap it back, reading as the box "changing itself". Adopt the accepted block wherever it
+       differs, and re-pair the preset chips while we are at it. */
+    function adoptSavedOfx(saved) {
+        if (!saved) return;
+        const next = {};
+        if (saved.R != null) next.R = saved.R;
+        if (saved.stack != null) next.stack = saved.stack;
+        if (saved.lambda_ms != null) next.lambda = saved.lambda_ms;
+        if (saved.min_block != null) next.minBlock = saved.min_block;
+        if (saved.va_pct != null) next.vaPct = saved.va_pct;
+        if (saved.ramp != null) next.ramp = saved.ramp;
+        OFX.setParams(next);
+        if (el('ofxR')) el('ofxR').value = String(OFX.state.params.R);
+        if (el('ofxStack')) el('ofxStack').value = String(OFX.state.params.stack);
+        if (el('ofxLambda')) el('ofxLambda').value = String(OFX.state.params.lambda);
+        if (el('ofxMinBlock')) el('ofxMinBlock').value = String(OFX.state.params.minBlock);
+        if (el('ofxVaPct')) el('ofxVaPct').value = String(OFX.state.params.vaPct);
+        if (el('ofxRamp')) el('ofxRamp').value = String(OFX.state.params.ramp);
+        if (window.OFAPPRESETS && OFAPPRESETS.refresh) OFAPPRESETS.refresh();
     }
 
     /* ── B2: the heat scheme, one write path for both surfaces ──────────────────────────────────
@@ -354,7 +391,9 @@
         OFAPDRAW.attach(stage, {
             symbol: (window.OFX && OFX.state.symbol) || 'BTCUSDT',
             view: 'ofx',
-            tickSize: 0.5,
+            /* §141: the wire's instrument tick. This was a literal 0.5 — right by luck for one
+               instrument and a wrong snap grid for every other (0.5 only if the payload never said). */
+            tickSize: Number(OFX.state.data.tick) || 0.5,
             width: () => OFX.state.view.width,
             height: () => OFX.state.view.height,
             priceToY: (p) => OFX.priceToY(p),
@@ -408,9 +447,9 @@
         }
         if (spec.type === 'outline') return `<i class="ofx-sw ofx-sw-out" style="border-color:${rgb}"></i>`;
         if (spec.type === 'line') return `<i class="ofx-sw ofx-sw-line" style="background:${rgb}"></i>`;
-        if (spec.type === 'glyph') return `<i class="ofx-sw ofx-sw-glyph" style="color:${rgb}">${spec.glyph}</i>`;
+        if (spec.type === 'glyph') return `<i class="ofx-sw ofx-sw-glyph" style="color:${rgb}">${esc(spec.glyph)}</i>`;
         if (spec.type === 'text') {
-            return `<i class="ofx-sw ofx-sw-text" style="color:${rgb}">${spec.sample || 'abc'}</i>`;
+            return `<i class="ofx-sw ofx-sw-text" style="color:${rgb}">${esc(spec.sample || 'abc')}</i>`;
         }
         return `<i class="ofx-sw ofx-sw-solid" style="background:${rgb}"></i>`;
     }
@@ -422,13 +461,15 @@
         const sel = window.getSelection && window.getSelection();
         if (sel && String(sel).length) return;
         const L = OFX.legend();
+        /* RA-01b: `live` carries the instrument symbol (OFX.legend builds it) — every field
+           goes through esc() at the sink, same rule as the readout. */
         const entries = L.entries.map((e) => `<div class="ofx-leg-row">${legendSwatch(e.swatch)}`
-            + `<div class="ofx-leg-text"><b>${e.name}</b><span>${e.meaning}</span>`
-            + `<em>${e.live}</em></div></div>`).join('');
+            + `<div class="ofx-leg-text"><b>${esc(e.name)}</b><span>${esc(e.meaning)}</span>`
+            + `<em>${esc(e.live)}</em></div></div>`).join('');
         const data = L.data.map((d) => `<div class="ofx-leg-row ofx-leg-data">`
-            + `<div class="ofx-leg-text"><b>${d.field}</b><span>${d.meaning}</span><em>${d.from}</em></div></div>`).join('');
-        const keys = L.interactions.map((i) => `<div class="ofx-leg-key"><kbd>${i.keys}</kbd><span>${i.action}</span></div>`).join('');
-        const layout = L.layout.map((l) => `<li>${l}</li>`).join('');
+            + `<div class="ofx-leg-text"><b>${esc(d.field)}</b><span>${esc(d.meaning)}</span><em>${esc(d.from)}</em></div></div>`).join('');
+        const keys = L.interactions.map((i) => `<div class="ofx-leg-key"><kbd>${esc(i.keys)}</kbd><span>${esc(i.action)}</span></div>`).join('');
+        const layout = L.layout.map((l) => `<li>${esc(l)}</li>`).join('');
         body.innerHTML = `<div class="ofx-leg-cols">
             <div class="ofx-leg-col">
                 <h4>Layout, top to bottom</h4>
@@ -577,6 +618,16 @@
         return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
             + ':' + String(d.getSeconds()).padStart(2, '0');
     };
+    /* §141: price decimals follow the instrument's own tick — the payload's statement of precision,
+       kept in `OFX.state.data.tick` — and the magnitude rule stands in only while no tick is known.
+       One implementation, because the hover readout, the selection readout and every band line must
+       not disagree about how a price is written. */
+    function pr(v) {
+        if (v == null) return '—';
+        const dp = OFX.math.dpFromTick(OFX.state.data.tick);
+        return fmtP(v, dp == null ? (v >= 1000 ? 2 : v >= 1 ? 3 : 5) : dp);
+    }
+
     const row2 = (label, value, cls) => `<div class="ofx-ro-row"><span class="ofx-ro-k">${label}</span><span class="ofx-ro-v ${cls || ''}">${value}</span></div>`;
 
     let readoutKey = '';
@@ -594,11 +645,11 @@
         if (!h || !h.bar) {
             const s = OFX.stats();
             const lim = OFX.viewBounds ? OFX.viewBounds() : {};
-            box.innerHTML = `<div class="ofx-ro-title">${sym} · engine</div>`
+            box.innerHTML = `<div class="ofx-ro-title">${esc(sym)} · engine</div>`
                 + row2('bars', String(OFX.state.data.bars.length))
                 + row2('in view', String(s.barsOnScreen != null ? s.barsOnScreen : s.visibleBars || '—'))
                 + row2('LOD', s.lod + (s.groupK > 1 ? ` · ${s.groupK} ticks/row` : ''))
-                + row2('price band', lim.lo != null ? `${fmtP(lim.lo, 2)} – ${fmtP(lim.hi, 2)}` : '—')
+                + row2('price band', lim.lo != null ? `${pr(lim.lo)} – ${pr(lim.hi)}` : '—')
                 + row2('depth cells', String(s.heatCells))
                 + row2('flow marks', `${s.flowBubbles || 0} vol · ${s.flowEvents || 0} events`)
                 + row2('recovered', String(s.recovered || 0))
@@ -611,7 +662,7 @@
         const lim = OFX.viewBounds ? OFX.viewBounds() : {};
         const cls = (v) => (Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : '');
         const imbalance = c.imbalances && c.imbalances.length ? c.imbalances.length : null;
-        box.innerHTML = `<div class="ofx-ro-title">${sym} · ${fmtT(h.barTime)}</div>`
+        box.innerHTML = `<div class="ofx-ro-title">${esc(sym)} · ${fmtT(h.barTime)}</div>`
             + row2('O / H', `${fmtP(bar.open, 2)} / ${fmtP(bar.high, 2)}`)
             + row2('L / C', `${fmtP(bar.low, 2)} / ${fmtP(bar.close, 2)}`)
             + row2('volume', fmtV(c.volume != null ? c.volume : bar.volume))
@@ -626,7 +677,7 @@
                 + (imbalance ? ` · ${imbalance} imb` : ''))
             + `<div class="ofx-ro-sep"></div>`
             + row2('cursor', fmtP(h.price, 2))
-            + row2('level', h.level ? `${fmtP(h.level.price, 2)}` : '—')
+            + row2('level', h.level ? pr(h.level.price) : '—')
             + row2('bid / ask', h.level ? `${fmtV(h.level.bid)} / ${fmtV(h.level.ask)}` : '—')
             + row2('imbalance', h.imbalance && h.imbalance.side
                 ? `${h.imbalance.side} ${h.imbalance.ratio === Infinity ? '∞' : fmtP(h.imbalance.ratio, 1)}x`
@@ -639,7 +690,7 @@
                 : '—')
             + `<div class="ofx-ro-sep"></div>`
             + row2('in view', `${s.barsOnScreen != null ? s.barsOnScreen : '—'} bars`)
-            + row2('price band', lim.lo != null ? `${fmtP(lim.lo, 2)} – ${fmtP(lim.hi, 2)}` : '—')
+            + row2('price band', lim.lo != null ? `${pr(lim.lo)} – ${pr(lim.hi)}` : '—')
             + row2('recovered', String(s.recovered || 0));
     }
 
@@ -663,7 +714,7 @@
         line.style.top = Math.round(y) + 'px';
         /* 77586.03620136363 is not a price anyone reads: show the instrument's granularity. */
         line.textContent = h.price != null
-            ? (h.price >= 1000 ? h.price.toFixed(2) : h.price >= 1 ? h.price.toFixed(3) : h.price.toFixed(5))
+            ? pr(h.price)
             : '';
         OFAPCURSOR.move(h.price, h.time != null ? h.time : null, 'ofx');
     }
@@ -836,7 +887,8 @@
             ? 'tape buffer ' + fmtT(buffer[0]) + '–' + fmtT(buffer[1]) + ' is outside the selected window '
               + '(closed bars only) — no prints to measure here'
             : '';
-        const pr = (v) => (v == null ? '—' : v >= 1000 ? fmtP(v, 2) : v >= 1 ? fmtP(v, 3) : fmtP(v, 5));
+        /* §141: prices format through the module's own tick-aware `pr` — one implementation for the
+           hover readout, this readout and every band line. */
         const vv = (v) => (v == null ? '—' : fmtV(v));
         const cls = (v) => (Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : '');
         /* A3: the area profile's block — read from the same cache the stage's lines are drawn
@@ -1119,19 +1171,103 @@
         sel.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
+    /* Rapid switching: a second pick can start before the first settles (arrow-keying the
+       drop-down fires a change per step) — the ring must stay up until the LAST settle, so
+       the count of picks in flight owns the class, not any single pick. */
+    let picksInFlight = 0;
+
+    /* The blue notifier's engine half, one implementation for every path that re-points the
+       view: the two symbol controls ring for as long as THAT path's own settling takes
+       (config save, symbol resolution, an enable / start / add the engine has to answer,
+       then the picker refresh that lands the selection). The returned clear() decrements
+       the shared count, so rapid picks keep the ring up until the LAST settle; a hung
+       fetch cannot leave the rings on (30 s force-clear — a stuck ring is worse than one
+       that ends early). */
+    function markSymbolSwitching() {
+        const marked = [el('ofxSymbol'), el('ofxSymPick')].filter(Boolean);
+        picksInFlight += 1;
+        marked.forEach((node) => node.classList.add('switching'));
+        let cleared = false;
+        let safety = 0;
+        const clear = () => {
+            if (cleared) return;
+            cleared = true;
+            clearTimeout(safety);
+            picksInFlight = Math.max(0, picksInFlight - 1);
+            if (!picksInFlight) marked.forEach((node) => node.classList.remove('switching'));
+        };
+        safety = setTimeout(() => { picksInFlight = 0; clear(); }, 30000);
+        return clear;
+    }
+
+    /* The symbol is a deliberate pick, not a half-typed number: the params write rides the
+       intent arbiter, whose gesture / freeze leases DEFER it — and a deferred write can be
+       replaced by a later pick or lost with the page, leaving the STORE on an older symbol
+       that the next params re-read then puts back on screen. Confirm the store holds the
+       pick and write it straight if it does not; the switch never waits on the answer. */
+    async function persistSymbolNow(target) {
+        try {
+            const stored = await apiGet('/api/control/ofx');
+            const held = stored && stored.ofx ? String(stored.ofx.symbol || '').toUpperCase() : '';
+            if (held === target) return;
+            console.warn('[ofx] the store still held', held || '(none)', '- writing', target, 'directly');
+            await _saveParamsNow();
+        } catch (err) { /* the queued write may still land; the switch must not wait on this */ }
+    }
+
+    /* Every path that re-points the view away from pickSymbol (symbol-panel rows, the
+       panel's Use action, an add's follow-up) does what pickSymbol does to the CONTROLS:
+       field, view, top bar and quick picker must always tell one story. Measured: a panel
+       row click left the field on BTCUSDT while the picker still showed XRPUSDT — and
+       re-picking XRPUSDT fires no change event, so the mismatch could never be undone
+       from the drop-down. */
+    async function adoptSymbol(name, opts) {
+        const target = String(name || '').toUpperCase();
+        if (!target) return;
+        if (el('ofxSymbol')) el('ofxSymbol').value = target;
+        view.symbol = target;
+        syncTopBar(target);
+        void refreshPicker();
+        const clearMarks = markSymbolSwitching();
+        try {
+            await saveParams();
+            await persistSymbolNow(target);
+            await resolveSymbol(target, opts);
+        } catch (err) {
+            console.warn('[ofx] adoptSymbol failed:', err);
+        }
+        void refreshPicker();
+        clearMarks();
+    }
+
     async function pickSymbol(symbol) {
         const name = String(symbol || '').toUpperCase();
         if (!name) return;
+        /* Update the UI synchronously so the stage reflects the pick the moment the
+           drop-down closes — before the config save, symbol resolution and picker refresh
+           land. The settings writes below still run to completion; failures are logged, not
+           surfaced as a blocked UI. */
         if (el('ofxSymbol')) el('ofxSymbol').value = name;
         view.symbol = name;
         syncTopBar(name);
-        await saveParams();
-        const payload = await resolveSymbol(name);
-        const state = payload ? String(payload.state || '') : '';
-        if (state === 'disabled') await runInstrumentAction('enable', payload);
-        else if (state === 'ready') await runInstrumentAction('start_engine', payload);
-        else if (state === 'available') await runInstrumentAction('add', payload);
-        await refreshPicker();
+        paintSymbolPanel();
+        /* The rings span exactly this pick's own settling — see markSymbolSwitching. */
+        const clearMarks = markSymbolSwitching();
+        try {
+            await saveParams();
+            await persistSymbolNow(name);
+            const payload = await resolveSymbol(name);
+            const state = payload ? String(payload.state || '') : '';
+            if (state === 'disabled') await runInstrumentAction('enable', payload);
+            else if (state === 'ready') await runInstrumentAction('start_engine', payload);
+            else if (state === 'available') await runInstrumentAction('add', payload);
+        } catch (err) {
+            console.warn('[ofx] pickSymbol background work failed:', err);
+        }
+        /* Always refresh the picker so the drop-down matches the SYMBOL box, even if
+           the preceding steps failed or were skipped. */
+        try { await refreshPicker(); } catch (err) { console.warn('[ofx] refreshPicker failed:', err); }
+        clearMarks();
     }
 
     function paintSymbolPanel() {
@@ -1161,9 +1297,7 @@
                     + `<span class="meta">${esc(row.meta)}</span>`
                     + `<span class="go">${row.streaming ? '● streaming' : (row.enabled ? 'enabled' : 'off')} ›</span>`;
                 item.addEventListener('click', () => {
-                    if (el('ofxSymbol')) el('ofxSymbol').value = row.symbol;
-                    view.symbol = row.symbol;
-                    void saveParams().then(() => resolveSymbol(row.symbol, { openWhenStuck: true }));
+                    void adoptSymbol(row.symbol, { openWhenStuck: true });
                 });
                 rowsEl.appendChild(item);
             });
@@ -1176,15 +1310,13 @@
         const symbol = String(p.symbol || p.query || '').trim().toUpperCase();
         if (!instrument || !action) return;
         if (action === 'use') {
-            if (el('ofxSymbol')) el('ofxSymbol').value = symbol;
-            view.symbol = symbol;
             closeSymbolPanel();
-            await saveParams();
-            await resolveSymbol(symbol);
+            await adoptSymbol(symbol);
             return;
         }
         if (action === 'open_instruments' || action === 'map_broker') {
-            if (typeof window.showView === 'function') window.showView('instruments');
+            if (window.OFAPNAV) window.OFAPNAV.jump('instruments', 'Engine');
+            else if (typeof window.showView === 'function') window.showView('instruments');
             return;
         }
         if (action === 'start_engine') {
@@ -1238,9 +1370,7 @@
                    so the stage would keep asking for a symbol nothing streams (measured: the
                    footprint 404 note stayed on screen after a successful add). Follow the row. */
                 if (symbol && symbol !== view.symbol) {
-                    if (el('ofxSymbol')) el('ofxSymbol').value = symbol;
-                    view.symbol = symbol;
-                    await saveParams();
+                    await adoptSymbol(symbol);
                 }
                 await resolveSymbol(symbol);
                 await load();
@@ -1257,6 +1387,26 @@
         view.booted = true;
 
         await loadParams();
+        /* The top bar's instrument is the app's current selection, and the announcement listener
+           further down only hears changes made AFTER this boot. A switch made before the Engine
+           view was first opened was therefore dropped (measured: the top bar on XRPUSDT, the
+           stage opening on its own stored BTCUSDT while XRP streamed). Adopt the selection the
+           app already holds, once; if the shell is still booting (a deep link straight here),
+           take the first selection it lands on. */
+        const adopt = (name) => {
+            const wanted = String(name || '').toUpperCase();
+            if (wanted && wanted !== view.symbol) void pickSymbol(wanted);
+        };
+        if (typeof S !== 'undefined' && S && S.symbol) adopt(S.symbol);
+        else {
+            const t0 = Date.now();
+            const wait = () => {
+                const now = (typeof S !== 'undefined' && S && S.symbol) || '';
+                if (now) { adopt(now); return; }
+                if (Date.now() - t0 < 12000) setTimeout(wait, 500);
+            };
+            setTimeout(wait, 500);
+        }
         const size = stageSize();
         OFX.attach(el('ofxBase'));
         /* Hand over the engine's other three canvases. The depth heatmap, the execution
@@ -1395,8 +1545,12 @@
         });
         if (el('ofxSymbol')) el('ofxSymbol').addEventListener('change', () => {
             view.symbol = (el('ofxSymbol').value || SYM_FALLBACK).toUpperCase();
+            /* §85: keep the quick-picker in sync with the text box — refreshPicker reads
+               ofxSymbol.value and selects the matching option, so a typed symbol that's in the
+               list gets reflected in the drop-down immediately. */
+            if (el('ofxSymPick')) void refreshPicker();
             /* §82: the change is answered, not just saved — a symbol nothing streams opens the
-               look-up with the reason and the action instead of leaving a blank stage. */
+                look-up with the reason and the action instead of leaving a blank stage. */
             void saveParams().then(() => resolveSymbol(view.symbol, { openWhenStuck: true }));
         });
         if (el('ofxSnapLive')) el('ofxSnapLive').addEventListener('click', () => { OFX.snapToLive(); paintChip(); });

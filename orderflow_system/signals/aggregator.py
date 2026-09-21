@@ -47,6 +47,10 @@ class AggregatedSignal:
     suggested_sl: float = 0.0
     suggested_tp: float = 0.0
     notes: str = ""
+    #: The instrument this aggregate was raised for. `symbol` is the name on the wire (the UI
+    #: reads it, the demo rows and the WebSocket envelope use it) and GET /api/signals/<symbol>
+    #: filters on it — without the field every instrument was served one merged history.
+    symbol: str = ""
 
 
 class SignalAggregator:
@@ -231,6 +235,7 @@ class SignalAggregator:
 
         agg = AggregatedSignal(
             timestamp_ms=now_ms,
+            symbol=instrument,
             direction=signal.direction,
             composite_score=score,
             qualified_level=nearest,
@@ -292,6 +297,7 @@ class SignalAggregator:
 
         agg = AggregatedSignal(
             timestamp_ms=now_ms,
+            symbol=instrument,
             direction=signal.direction,
             composite_score=score,
             qualified_level=nearest_level,
@@ -323,6 +329,7 @@ class SignalAggregator:
 
         agg = AggregatedSignal(
             timestamp_ms=now_ms,
+            symbol=instrument,
             direction=trade.direction,
             composite_score=signal.strength,
             signals=[signal],
@@ -362,6 +369,7 @@ class SignalAggregator:
 
         agg = AggregatedSignal(
             timestamp_ms=now_ms,
+            symbol=instrument,
             direction=trade.direction,
             composite_score=signal.strength,
             signals=[signal],
@@ -395,6 +403,7 @@ class SignalAggregator:
 
         agg = AggregatedSignal(
             timestamp_ms=now_ms,
+            symbol=instrument,
             direction=signal.direction,
             composite_score=signal.strength,
             signals=[signal],
@@ -421,6 +430,7 @@ class SignalAggregator:
         """Handle sweep signal while watching a level — alert only, adds context."""
         agg = AggregatedSignal(
             timestamp_ms=now_ms,
+            symbol=instrument,
             direction=signal.direction,
             composite_score=signal.strength,
             signals=[signal],

@@ -328,6 +328,22 @@
         if (next) next.click();
     }
 
+    /* §128 — multi-monitor by keyboard. The menu key opens the same window menu the widget's ⧉
+       button opens (send to a monitor, snap, pin, close); the two arrow keys are the platform's
+       own Win+Shift+Arrow move, spelled with Alt so it cannot collide with the OS shortcut — and
+       they work in BOTH modes: Terminal sends the focused widget, Classic the panel you are
+       looking at. With no window open yet the send key opens one on the next monitor instead of
+       doing nothing. */
+    bind({ id: 'win-menu', keys: ['ctrl+alt+w'], scope: 'Terminal',
+        label: 'the focused widget’s window menu (send · snap · pin)',
+        run: function () { if (window.OFAPWINDOWS && OFAPWINDOWS.openFor) OFAPWINDOWS.openFor('', null); } });
+    bind({ id: 'win-send-next', keys: ['ctrl+alt+shift+arrowright'], scope: 'Global',
+        label: 'send the focused panel’s window to the next monitor',
+        run: function () { if (window.OFAPWINDOWS && OFAPWINDOWS.sendFocused) void OFAPWINDOWS.sendFocused(1); } });
+    bind({ id: 'win-send-prev', keys: ['ctrl+alt+shift+arrowleft'], scope: 'Global',
+        label: 'send the focused panel’s window to the previous monitor',
+        run: function () { if (window.OFAPWINDOWS && OFAPWINDOWS.sendFocused) void OFAPWINDOWS.sendFocused(-1); } });
+
     /* ── the shortcut prompts (§92) ────────────────────────────────────────── */
 
     /* Where a control has a shortcut, the control says so — on its tooltip (title), for screen
@@ -380,7 +396,7 @@
         }
         [['#ofapPause', 'freeze'], ['#menuBtn', 'palette'], ['#btnStart', 'engine-start'],
          ['#btnStop', 'engine-stop'], ['#railTerminal', 'terminal-toggle'],
-         ['#menubarToggle', 'chrome-menubar'], ['#mbHide', 'chrome-menubar'],
+         ['#menubarToggle', 'chrome-menubar'],
          ['#railToggle', 'chrome-rail'], ['#railHide', 'chrome-rail'],
          ['#railReveal', 'chrome-rail']].forEach(function (r) {
             document.querySelectorAll(r[0]).forEach(function (el) { put(el, accelOf(r[1])); });

@@ -705,15 +705,23 @@ async def get_bias(symbol: str):
 @app.get("/api/signals/{symbol}")
 async def get_signals(symbol: str, limit: int = Query(default=50, le=200)):
     """Get signal history."""
+    wanted = (symbol or "").strip().upper()
     system = get_system()
     if not system:
-        return demo_data.demo_signals()
+        # The demo generator models a handful of symbols, and its rows carry their own `symbol`:
+        # serve the requested instrument's rows or nothing — never another instrument's.
+        return [s for s in demo_data.demo_signals()
+                if str((s or {}).get("symbol", "")).upper() == wanted][:limit]
 
+    # ONE instrument's history. This returned the whole shared history for every symbol (all
+    # four instruments answered with the byte-identical merged list), so the Signals board, the
+    # Overview's cards and the nav badge showed other instruments' signals under whatever the
+    # selector said. Aggregates carry the symbol they were raised for; filter on it.
     history = system.aggregator.signal_history
-    # Filter by symbol if the signal has instrument info
     filtered = []
     for sig in reversed(history):
-        # AggregatedSignal doesn't have instrument, but we can check direction
+        if (getattr(sig, "symbol", "") or "").upper() != wanted:
+            continue
         filtered.append(_serialize(sig))
         if len(filtered) >= limit:
             break

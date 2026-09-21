@@ -11,7 +11,8 @@ from __future__ import annotations
 import time
 
 from orderflow_system.atlas.cvd import CvdTracker
-from orderflow_system.data.models import Candle, Side, Tick
+from orderflow_system.analytics.footprint import FootprintBar
+from orderflow_system.data.models import Candle, FootprintLevel, Side, Tick
 from orderflow_system.config.settings import VolumeProfileConfig
 from orderflow_system.analytics.volume_profile import VolumeProfileEngine
 
@@ -36,6 +37,20 @@ def test_a_normal_series_does_not_raise():
         price += 0.5 if i % 2 else -0.25
         tracker.on_tick(_tick(2_000_000 + i * 1000, price, 3.0))
     tracker.detect_divergence()          # may be None for this series; it must not raise
+
+
+def test_a_half_step_price_keys_onto_the_upper_row_in_the_diagonal_reading():
+    """T6-F06 (§148): the engine's diagonal reading keys prices half a step up onto the same row the
+    panel's `Math.round` keys — Python's `round` is half-to-even and would key 100.25 onto 200,
+    dropping the row above from the comparison and inventing a sell the chart never draws.
+    """
+    bar = FootprintBar(timestamp_ms=0)
+    for price, bid, ask in ((100.25, 20.0, 5.0), (100.75, 5.0, 30.0), (101.25, 30.0, 5.0)):
+        bar.levels[price] = FootprintLevel(price=price, bid_volume=bid, ask_volume=ask)
+    sides = dict(bar.imbalance_levels(3.0, "diagonal", tick_size=0.5))
+    assert 100.25 not in sides, \
+        "100.25's bid (20) is compared against 100.75's ask (30) — no diagonal sell"
+    assert sides.get(101.25) == "sell", "101.25's bid (30) against its own ask (5): no row above it"
 
 
 def test_the_volume_profile_fallback_loop_is_capped():

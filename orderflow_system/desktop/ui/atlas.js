@@ -56,8 +56,19 @@ function ageTint01(heldMs, floorMs) {
     return 0.10 + 0.12 * t;
 }
 
+/* The scale cap in the map's own legend, in the same shape the cell annotations use. */
+function heatScaleNum(v) {
+    const n = Number(v) || 0;
+    if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    if (Math.abs(n) >= 100) return String(Math.round(n));
+    return String(Math.round(n * 100) / 100);
+}
+
 /* T10/B3: the heatmap's own hysteresis state for 'auto' smoothing (flips only across the band). */
 let hmSmoothOn = false;
+/* §140: the legend is written once per (ramp, cap) change — this paint is on the governed budget. */
+let hmLegendKey = null;
 
 function ageTintOn() {
     const box = document.getElementById('hmAgeTint');
@@ -117,6 +128,26 @@ function drawHeatmap(data) {
        floorValue ignores it and the build is skipped. */
     const floorNeedsSizes = (Number(hmDials.floor) || 0) > 0 || (Number(hmDials.floor_pct) || 0) > 0;
     const heatFloor = RP ? RP.floorValue(floorNeedsSizes ? sizes() : null, hmDials.floor, hmDials.floor_pct) : 0;
+    /* §140: the colour scale, stated on screen. Brightness against a cap nobody can see is a map a
+       stranger cannot read; the bar is the map's own ramp and the text the cap actually in force. */
+    const legendBar = document.getElementById('hmScaleBar');
+    const legendText = document.getElementById('hmScaleText');
+    if (legendBar || legendText) {
+        const ramp = (t) => heatColour(RP ? RP.contrastT(t, heatGamma) : t);
+        const legendKey = [!!RP, heatGamma, ref, Number(data.upper_cutoff_pct) || 0].join('|');
+        if (legendKey !== hmLegendKey) {
+            hmLegendKey = legendKey;
+            if (legendBar) {
+                legendBar.style.background = 'linear-gradient(90deg,'
+                    + [0, 0.25, 0.5, 0.75, 1].map(ramp).join(',') + ')';
+            }
+            if (legendText) {
+                const cut = Number(data.upper_cutoff_pct);
+                legendText.textContent = 'cap ' + heatScaleNum(ref)
+                    + (isFinite(cut) && cut > 0 ? ' · top ' + cut + '% saturates' : '');
+            }
+        }
+    }
     /* T10/B3: vertical smoothing — the same shared verdict the Engine's heat uses: 'auto'
        engages when the map's rows compress below ~2.5 px, hysteresis holds until 4 px. The
        smoothed columns are computed once per paint so both loops below read one array. */
@@ -319,17 +350,31 @@ function drawSeries(canvas, series, opts) {
 
 /* ── loaders ────────────────────────────────────────────────────── */
 
-async function loadHeatmap() {
-    if (window.OFAPINTENT && OFAPINTENT.held('heatmap')) {
+async function loadHeatmap(force) {
+    /* §121: `force` is the deliberate path — a wheel, a pan, a dropdown change IS the user's
+       command and must repaint NOW. The deferral below only exists to keep the FEED's pollers
+       from fighting a gesture; the wheel's own 900 ms lease used to defer the zoom's repaint
+       away for the whole of it, which is exactly what "the zoom does nothing" was. */
+    if (!force && window.OFAPINTENT && OFAPINTENT.held('heatmap')) {
         OFAPINTENT.deferKeyed('heatmap', 'snap', () => loadHeatmap());
         return;
     }
     if (!S.symbol) return;
     const cols = parseInt(document.getElementById('hmColumns').value, 10);
     const rows = parseInt(document.getElementById('hmRows').value, 10);
+    /* §121: the selects are the readout of the view state heatview.js owns. */
+    if (window.OFAPHEATVIEW) { OFAPHEATVIEW.state.cols = cols; OFAPHEATVIEW.state.rows = rows; }
+    /* §120: overlapping loads must not land out of order — a slow earlier answer used to
+       overwrite a newer one and paint the wrong window under a fast scroll. */
+    const seq = (A.heatSeq = (A.heatSeq || 0) + 1);
+    /* §121: the pan anchor rides every load, so the window can end anywhere in the history. */
+    const until = (window.OFAPHEATVIEW && OFAPHEATVIEW.state.until != null)
+        ? '&until=' + Math.round(OFAPHEATVIEW.state.until) : '';
     try {
-        const d = await api('/api/atlas/heatmap/' + encodeURIComponent(S.symbol) + '?columns=' + cols + '&rows=' + rows);
+        const d = await api('/api/atlas/heatmap/' + encodeURIComponent(S.symbol) + '?columns=' + cols + '&rows=' + rows + until);
+        if (seq !== A.heatSeq) return;   // a newer load is in flight: its answer wins
         A.heat.last = d;
+        if (window.OFAPHEATVIEW) OFAPHEATVIEW.absorb(OFAPHEATVIEW.state, d);
         if (window.OFAPFRESH) {
             const hb = (d && d.buckets) || [];
             OFAPFRESH.stamp('heatmap', { lastMs: hb.length ? Number(hb[hb.length - 1]) : 0, kind: 'depth' });
@@ -337,15 +382,18 @@ async function loadHeatmap() {
         drawHeatmap(d);
         /* T14/B4: the columns rail sees every fresh snapshot (it owns its own accumulators). */
         if (window.OFAPCOLRAIL) OFAPCOLRAIL.observe(d);
+        /* §120: the interactive overlay adopts THIS payload instead of re-fetching the same
+           endpoint — one fetch per repaint, and the overlay can never disagree with the pixels. */
+        document.dispatchEvent(new CustomEvent('ofap:heat-offer', { detail: { data: d, source: 'load' } }));
         const walls = (d.walls || []).slice(0, 12);
         const heldLabel = (ms) => (ms >= 60000 ? (ms / 60000).toFixed(1) + ' min' : Math.max(0, Math.round(ms / 1000)) + ' s');
         const w0 = document.getElementById('hmWalls');
-        w0.querySelector('.kpi-value').textContent = walls.length ? walls[0].size.toFixed(2) : '--';
+        w0.querySelector('.kpi-value').textContent = walls.length ? walls[0].size.toFixed(2) : '—';
         w0.querySelector('.kpi-sub').textContent = walls.length ? '@ ' + walls[0].price : '';
         document.getElementById('hmWallTable').querySelector('tbody').innerHTML =
             walls.map((w) => '<tr><td>' + w.price + '</td><td>' + w.size.toFixed(3) + '</td><td>'
                 + (w.held_ms ? heldLabel(w.held_ms) : '&mdash;') + '</td><td>'
-                + (S.lastPrice ? ((w.price - S.lastPrice) / S.lastPrice * 100).toFixed(3) + '%' : '--') + '</td></tr>').join('')
+                + (S.lastPrice ? ((w.price - S.lastPrice) / S.lastPrice * 100).toFixed(3) + '%' : '—') + '</td></tr>').join('')
             || '<tr><td colspan="4" class="dim">no walls recorded yet</td></tr>';
         const evs = (d.events || []).filter((e) => e.kind === 'pull' || e.kind === 'stack').slice(-25).reverse();
         document.getElementById('hmEventTable').querySelector('tbody').innerHTML =
@@ -354,12 +402,19 @@ async function loadHeatmap() {
                 '<td>' + e.price + '</td><td>' + e.size.toFixed(3) + '</td><td class="name">' + esc(e.detail) + '</td></tr>').join('')
             || '<tr><td colspan="5" class="dim">no stacking/pull events yet</td></tr>';
         const st = d.stats || {};
-        document.getElementById('hmStatus').textContent = cols + ' buckets · ' + rows + ' rows · step ' + d.step +
-            ' · ' + ((st.book_updates || 0)).toLocaleString() + ' book updates';
+        /* §140: an empty payload is a state, not a number. Before the first book updates land the
+           panel printed 'step undefined' — the wire's own note says why the map is empty, so that is
+           what it shows, and a step the payload did not state reads as a dash. */
+        const hmEmpty = !(d.buckets || []).length && !(st.book_updates || 0);
+        document.getElementById('hmStatus').textContent = hmEmpty
+            ? (d.note || 'waiting for the first book updates…')
+            : cols + ' buckets · ' + rows + ' rows · step ' + (d.step == null ? '—' : d.step) +
+              ' · ' + ((st.book_updates || 0)).toLocaleString() + ' book updates';
         const span = d.prices.length ? (d.prices[d.prices.length - 1] - d.prices[0]) : 0;
         const hs = document.getElementById('hmSpan');
-        hs.querySelector('.kpi-value').textContent = String(d.step);
-        hs.querySelector('.kpi-sub').textContent = span.toFixed(2) + ' price range';
+        hs.querySelector('.kpi-value').textContent = d.step == null ? '—' : String(d.step);
+        hs.querySelector('.kpi-sub').textContent = (d.prices || []).length
+            ? span.toFixed(2) + ' price range' : 'no book yet';
         document.getElementById('hmStack').querySelector('.kpi-value').textContent = ((st.events || {}).stack || 0);
         document.getElementById('hmPull').querySelector('.kpi-value').textContent = ((st.events || {}).pull || 0);
     } catch (e) { document.getElementById('hmStatus').textContent = String(e); }
@@ -377,7 +432,7 @@ function paintTrackers(d) {
     const w5 = (st.speed && st.speed.windows && st.speed.windows['5s']) || { trades: 0, volume: 0 };
     document.getElementById('tkSpeed').querySelector('.kpi-value').textContent = (w5.trades || 0) + ' / 5s';
     document.getElementById('tkSpeed').querySelector('.kpi-sub').textContent =
-        'z=' + ((st.speed || {}).zscore === undefined ? '--' : st.speed.zscore) + ' · ' + compact(w5.volume || 0) + ' size';
+        'z=' + ((st.speed || {}).zscore === undefined ? '—' : st.speed.zscore) + ' · ' + compact(w5.volume || 0) + ' size';
     document.getElementById('tkThreshold').textContent = 'threshold: ' + (st.big_threshold || 0).toFixed(3);
 
     document.getElementById('tkIcebergTable').querySelector('tbody').innerHTML =
@@ -511,12 +566,12 @@ async function loadMarketProfile() {
         /* P1-10: the profile payload carries no comparable sample clock, so the fetch time is the
            honest one — this chip measures the panel's own update flow (10 s = two slow beats). */
         if (window.OFAPFRESH) OFAPFRESH.stamp('profile', { ageMs: 0, windowMs: 10000 });
-        document.getElementById('mpPoc').querySelector('.kpi-value').textContent = d.poc ? d.poc.toFixed(2) : '--';
-        document.getElementById('mpVa').querySelector('.kpi-value').textContent = d.vah ? d.vah.toFixed(2) : '--';
+        document.getElementById('mpPoc').querySelector('.kpi-value').textContent = d.poc ? d.poc.toFixed(2) : '—';
+        document.getElementById('mpVa').querySelector('.kpi-value').textContent = d.vah ? d.vah.toFixed(2) : '—';
         document.getElementById('mpVa').querySelector('.kpi-sub').textContent = d.val ? 'VAL ' + d.val.toFixed(2) : '';
         const ib = d.ib || {};
         document.getElementById('mpIb').querySelector('.kpi-value').textContent =
-            ib.ib_high ? ib.ib_high.toFixed(0) + '/' + ib.ib_low.toFixed(0) : '--';
+            ib.ib_high ? ib.ib_high.toFixed(0) + '/' + ib.ib_low.toFixed(0) : '—';
         document.getElementById('mpIb').querySelector('.kpi-sub').textContent = 'IB high/low (first 2 brackets)';
         const ext = d.range_extension || {};
         document.getElementById('mpExt').querySelector('.kpi-value').textContent = ext.extended ? 'yes' : 'no';
@@ -545,7 +600,7 @@ async function loadMarketProfile() {
             '<div class="field"><label>Session</label><div class="mono">open ' + (sess.open || 0).toFixed(2) +
             ' · high ' + (sess.high || 0).toFixed(2) + ' · low ' + (sess.low || 0).toFixed(2) +
             ' · ' + (sess.ticks || 0).toLocaleString() + ' prints</div></div>' +
-            '<div class="field"><label>Developing value area</label><div class="mono">' + (dva.trend || '--') +
+            '<div class="field"><label>Developing value area</label><div class="mono">' + (dva.trend || '—') +
             (dva.drift === undefined ? '' : ' (' + Number(dva.drift).toFixed(2) + ')') +
             ' over ' + ((dva.sessions || []).length) + ' sessions</div></div>' +
             '<div class="field"><label>Virgin POCs (untested magnets)</label><div class="mono">' +
@@ -600,12 +655,12 @@ async function rpStatus() {
         pill.className = 'pill ' + (st.state === 'playing' ? 'running' : st.state === 'error' ? 'error' : '');
         document.getElementById('rpStateText').textContent = st.state || 'idle';
         document.getElementById('rpTotal').querySelector('.kpi-value').textContent = st.total || 0;
-        document.getElementById('rpTotal').querySelector('.kpi-sub').textContent = st.symbol ? st.symbol + ' · ' + (st.mode || '--') : '--';
+        document.getElementById('rpTotal').querySelector('.kpi-sub').textContent = st.symbol ? st.symbol + ' · ' + (st.mode || '—') : '—';
         document.getElementById('rpIndex').querySelector('.kpi-value').textContent = st.index || 0;
         document.getElementById('rpIndex').querySelector('.kpi-sub').textContent = (st.progress_pct || 0) + '% · ' + (st.remaining || 0) + ' left';
         document.getElementById('rpClock').querySelector('.kpi-value').textContent =
-            st.current_ms ? new Date(st.current_ms).toLocaleTimeString() : '--';
-        document.getElementById('rpMode').querySelector('.kpi-value').textContent = st.mode || '--';
+            st.current_ms ? new Date(st.current_ms).toLocaleTimeString() : '—';
+        document.getElementById('rpMode').querySelector('.kpi-value').textContent = st.mode || '—';
         document.getElementById('rpMode').querySelector('.kpi-sub').textContent = st.speed ? st.speed + '×' : '';
         document.getElementById('rpProgress').textContent = st.total
             ? st.index + ' / ' + st.total + ' (' + st.progress_pct + '%)'
@@ -619,6 +674,60 @@ async function rpStatus() {
         return {};
     }
 }
+
+/* §129: the replay instrument is a PICKER, not free text — the same grouped catalogue the
+   Engine's own picker draws from (streaming now → enabled → configured — off), because a typed
+   symbol the app does not hold is a guess the server can only refuse ("must have local history,
+   or use the exchange tape"). Refreshed when the view opens, on focus (the config moves under
+   it) and when the top bar's instrument changes; the current pick is kept when it still exists,
+   so the list cannot silently re-point a loaded session. */
+async function fillReplaySymbols() {
+    const sel = document.getElementById('rpSymbol');
+    const instrument = window.OFAPINSTRUMENT;
+    if (!sel || !instrument || typeof instrument.pickerRows !== 'function') return;
+    let cfg = {};
+    let status = {};
+    try { cfg = await api('/api/control/config'); } catch (e) { cfg = {}; }
+    try { status = await api('/api/control/engine/status'); } catch (e) { status = {}; }
+    const rows = instrument.pickerRows({ instruments: (cfg && cfg.instruments) || [],
+                                         streaming: (status && status.symbols) || [] });
+    if (!rows.length) { sel.innerHTML = '<option value="">no instruments configured</option>'; return; }
+    const current = String(sel.value || (typeof S !== 'undefined' && S.symbol) || '').toUpperCase();
+    let html = '';
+    let group = '';
+    rows.forEach((row) => {
+        if (row.group !== group) {
+            if (group) html += '</optgroup>';
+            html += `<optgroup label="${esc(row.group)}">`;
+            group = row.group;
+        }
+        html += `<option value="${esc(row.value)}">${esc(row.label)}</option>`;
+    });
+    if (group) html += '</optgroup>';
+    sel.innerHTML = html;
+    const pick = rows.find((r) => r.value.toUpperCase() === current) || rows[0];
+    if (pick) sel.value = pick.value;
+}
+
+/* The replay picker's own filler, published for the surfaces that hand work to the replay
+   transport (the heatmap's region hand-off): they must land their symbol in a list that
+   actually carries it, not write into a select whose options were never filled. */
+if (typeof window !== 'undefined') {
+    window.OFAPREPLAY = { fillSymbols: fillReplaySymbols };
+}
+
+(function wireReplaySymbols() {
+    const section = document.querySelector('.view[data-view="replay"]');
+    const sel = document.getElementById('rpSymbol');
+    if (!section || !sel) return;
+    const refresh = () => { if (section.classList.contains('active')) void fillReplaySymbols(); };
+    if (typeof MutationObserver === 'function') {
+        new MutationObserver(refresh).observe(section, { attributes: true, attributeFilter: ['class'] });
+    }
+    sel.addEventListener('focus', () => void fillReplaySymbols());
+    document.addEventListener('ofap:symbol', refresh);
+    refresh();
+})();
 
 document.getElementById('rpLoad').onclick = async () => {
     const symbol = (document.getElementById('rpSymbol').value || S.symbol || 'BTCUSDT').toUpperCase();
@@ -1100,8 +1209,10 @@ function atlasShareSync(name) {
 
 /* ── wiring ─────────────────────────────────────────────────────── */
 
-document.getElementById('hmColumns').onchange = loadHeatmap;
-document.getElementById('hmRows').onchange = loadHeatmap;
+/* §121: user-driven changes are deliberate — force past the intent gate (an Event object would
+   read as truthy as a first argument anyway, so the force is written explicitly). */
+document.getElementById('hmColumns').onchange = () => loadHeatmap(true);
+document.getElementById('hmRows').onchange = () => loadHeatmap(true);
 document.getElementById('hmTrades').onchange = () => { if (A.heat.last) drawHeatmap(A.heat.last); };
 /* The age tint is this view's own display preference, remembered here and nowhere else. */
 (() => {
@@ -1266,7 +1377,9 @@ document.getElementById('cvdReanchor').onclick = async () => {
 };
 
 function atlasSlowRefresh() {
-    if (truthyView('heatmap') && A.heat.auto) loadHeatmap();
+    /* §121: a panned window is history — it cannot change; polling frozen minutes is waste. */
+    if (truthyView('heatmap') && A.heat.auto
+        && !(window.OFAPHEATVIEW && OFAPHEATVIEW.state.until != null)) loadHeatmap();
     /* cvd + trackers are shared channels (see ATLAS_SHARE): the bus owns their cadence, so this
        loop's job is to say whether they should be live — and, with no bus loaded, to keep being the
        asker on the same 5 s it always was. */

@@ -146,11 +146,22 @@ def test_the_scope_fields_are_the_ones_evaluate_checks_generically(source):
     js_scope = set(re.findall(r"key: '(\w+)'", scope_block))
     src = ALERTS_PY.read_text(encoding="utf-8")
     tree = ast.parse(src)
-    segment = next(ast.get_source_segment(src, node) for node in ast.walk(tree)
-                   if isinstance(node, ast.FunctionDef) and node.name == "evaluate")
-    engine_scope = set(re.findall(r'params\.get\("(\w+)"', segment))
+    # §148 / AB-01: the generic scope checks live in `_scope_gates` — ONE implementation that both
+    # `evaluate` and the builder's rehearsal read — so this checks the form against it, and that
+    # evaluate really consumes it. (Before the fix the checks sat inline in evaluate and its own
+    # rehearsal could not see them; the pin froze that placement. The contract is the point: the
+    # scope the form offers is the scope the engine runs.)
+    scope_fn = next(node for node in ast.walk(tree)
+                    if isinstance(node, ast.FunctionDef) and node.name == "_scope_gates")
+    engine_scope = set(re.findall(r'params\.get\("(\w+)"',
+                                  ast.get_source_segment(src, scope_fn) or ""))
+    run = ast.get_source_segment(
+        src, next(node for node in ast.walk(tree)
+                  if isinstance(node, ast.FunctionDef) and node.name == "evaluate")) or ""
     assert js_scope == engine_scope, (
         f"the rule's scope in the form is {sorted(js_scope)}, the evaluator checks {sorted(engine_scope)}")
+    assert "_scope_gates(params, payload)" in run, \
+        "evaluate must run the same scope checks the form offers, not a copy of them"
 
 
 def test_the_heatmap_prefix_matches_the_module_that_writes_it():

@@ -169,6 +169,24 @@
         return out;
     }
 
+    /* The NinjaTrader probe boxes (Platforms ▸ bridge, and the wizard's test row) accept a name
+       the TERMINAL lists — NQ, ES, MNQ 12-26 — which cannot be read offline. What the app does
+       know is the mapping it already holds: a row added from the NinjaTrader lane stamps its
+       `ninjatrader_symbol`. Those names are the options; an empty list (nothing mapped yet) is
+       the honest answer, and typing stays open because the terminal's list is the authority. */
+    function ninjatraderNames(instruments) {
+        var list = Array.isArray(instruments) ? instruments : [];
+        var out = [];
+        var seen = {};
+        list.forEach(function (row) {
+            var name = row && row.ninjatrader_symbol ? String(row.ninjatrader_symbol).trim() : '';
+            if (!name || seen[name.toLowerCase()]) return;
+            seen[name.toLowerCase()] = true;
+            out.push(name);
+        });
+        return out;
+    }
+
     /* The note the stage carries when nothing is drawn: the reason, or an explicit fallback so
        a blank canvas is never wordless. */
     function emptyNote(p) {
@@ -182,7 +200,8 @@
 
     var API = { version: VERSION, STATES: STATES, ACTIONS: ACTIONS, LABELS: LABELS, ORDER: ORDER,
         chip: chip, title: title, actions: actions, primary: primary, rows: rows, state: stateOf,
-        emptyNote: emptyNote, panelText: panelText, pickerRows: pickerRows };
+        emptyNote: emptyNote, panelText: panelText, pickerRows: pickerRows,
+        ninjatraderNames: ninjatraderNames };
 
     if (typeof window !== 'undefined') window.OFAPINSTRUMENT = API;
     if (typeof module !== 'undefined' && module.exports) module.exports = API;

@@ -73,9 +73,10 @@ def test_every_bar_has_a_control_that_cannot_hide_with_it():
     assert "['#railReveal', 'rail']" in chrome, "the edge arrow must be wired"
     assert "aria-pressed" in chrome, "pressed faces must stay honest"
     menubar = (UI / "menubar.js").read_text(encoding="utf-8")
-    assert 'id="mbHide"' in menubar, "the bar keeps its own one-way hide control"
-    menubar = (UI / "menubar.js").read_text(encoding="utf-8")
-    assert 'id="mbHide"' in menubar, "the menu bar must carry its own hide control"
+    assert 'id="mbHide"' not in menubar, "§119: the in-bar duplicate hide is gone — the boxed topbar toggle is the one"
+    assert "mb-hide" not in menubar and "mb-grow" not in menubar, "no half-removed hide markup"
+    css_mb = (UI / "modules.css").read_text(encoding="utf-8")
+    assert ".mb-hide" not in css_mb and ".mb-grow" not in css_mb, "the removed control left its styles behind"
     css = (UI / "modules.css").read_text(encoding="utf-8")
     assert ".chrome-toggle" in css, "the persistent toggles carry a style"
     assert ".mb-reveal" not in css, "the menubar reveal stays replaced by its toggle"

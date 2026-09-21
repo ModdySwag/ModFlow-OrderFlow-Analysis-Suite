@@ -24,6 +24,19 @@ logger = logging.getLogger(__name__)
 _SEVERITY_ICON = {"critical": "🚨", "warning": "⚠️", "info": "📊"}
 
 
+def _with_context(alert: dict[str, Any], text: str) -> str:
+    """§147: append a rule's evidence snapshot to whatever the channel sends.
+
+    Appended, never substituted — the message stays first, so a lock-screen preview still reads as
+    the alert itself, and a rule without a snapshot is byte-for-byte what it always was. This is the
+    one appender: ``alerts.notification_text`` delegates here for a whole-alert render.
+    """
+    block = str(alert.get("context") or "").strip()
+    if not block:
+        return text
+    return (text.rstrip() + "\n" + block) if text.strip() else block
+
+
 class TelegramNotifier:
     """Formats and sends atlas alerts to Telegram, with a per-send throttle."""
 
@@ -105,7 +118,7 @@ class TelegramNotifier:
             str(alert.get("message") or alert.get("name") or ""),
             f"rule: {alert.get('name', '')} · {stamp}",
         ]
-        return "\n".join(l for l in lines if l.strip())
+        return _with_context(alert, "\n".join(l for l in lines if l.strip()))
 
     async def send(self, alert: dict[str, Any], force: bool = False) -> bool:
         """Send one alert. Returns True when it reached Telegram."""
@@ -224,7 +237,7 @@ class NtfyNotifier:
                 f"rule: {alert.get('name', '')}",
             ] if str(line).strip()
         )
-        return title, headers, body
+        return title, headers, _with_context(alert, body)
 
     async def send(self, alert: dict[str, Any], force: bool = False) -> bool:
         if not self.enabled or not self._ready:
@@ -367,7 +380,7 @@ class EmailNotifier:
             f"time:    {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts / 1000))}",
             f"price:   {alert.get('price', '')}",
         ]
-        return subject, "\n".join(body_lines)
+        return subject, _with_context(alert, "\n".join(body_lines))
 
     async def send(self, alert: dict[str, Any], force: bool = False) -> bool:
         if not self.enabled or not self._ready:

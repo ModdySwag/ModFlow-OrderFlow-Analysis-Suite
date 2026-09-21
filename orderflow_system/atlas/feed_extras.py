@@ -16,7 +16,6 @@ All public endpoints: no API key, no account. Verified against
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import json
 import logging
@@ -26,6 +25,8 @@ import urllib.request
 from typing import Any, Callable, Optional
 
 import websockets
+
+from orderflow_system.data.feed_session import VENUE_POLICIES, FeedSession
 
 logger = logging.getLogger(__name__)
 
@@ -52,101 +53,171 @@ def _rest(path: str, params: dict[str, Any]) -> dict[str, Any]:
 
 
 class BybitExtras:
-    """Liquidations + deep book + block-trade flags for one symbol."""
+    """Liquidations + deep book + block-trade flags for one or MANY symbols, on ONE connection.
+
+    The primary ``BybitFeed`` carries trades + a 50-level book; this adds the ``allLiquidation``
+    stream, the deep (200-level) book the liquidity heatmap needs, and the ``BT`` block-trade flag
+    the base feed discards. It used to open one socket PER SYMBOL — five enabled instruments meant
+    five extra connections, each one re-subscribing the ``publicTrade`` stream the primary feed
+    already carries. It now puts every symbol's topics on one socket (the house shape of
+    ``data/bybit_feed.py``), and the loop is ``FeedSession``'s: the reader is never cancelled from
+    outside, the heartbeat is its own task, the reconnect ladder resets on parsed DATA only (acks
+    and pongs answer ``False``, not ``None``) and Bybit's 60 s silence budget closes a socket that
+    stalls without dying. Frames are routed by their topic's own symbol segment — one instrument's
+    print is never delivered to another's callbacks.
+    """
 
     def __init__(
         self,
-        symbol: str,
+        symbols: str | list[str],
         on_liquidation: Optional[Callable] = None,
         on_orderbook: Optional[Callable] = None,
         on_block_trade: Optional[Callable] = None,
         depth: int = 200,
     ) -> None:
-        self.symbol = symbol
+        if isinstance(symbols, str):
+            symbols = [symbols]
+        self.symbols: list[str] = [str(s) for s in symbols]
+        #: Single-symbol callers (and their log lines) keep reading ``.symbol``.
+        self.symbol: str = self.symbols[0] if len(self.symbols) == 1 else f"{len(self.symbols)} symbols"
         self.on_liquidation = on_liquidation
         self.on_orderbook = on_orderbook
         self.on_block_trade = on_block_trade
         self.depth = depth
+        self._session: Optional[FeedSession] = None
         self._ws = None
         self._running = False
-        self._reconnect_delay = 1.0
         self.stats = {"liquidations": 0, "book_updates": 0, "block_trades": 0, "reconnects": 0, "errors": 0}
+        #: Per-symbol channel counters: a shared connection still reports each instrument's own
+        #: numbers (the hub's status line reads these through ``stats_for``).
+        self.per_symbol: dict[str, dict[str, int]] = {
+            s: {"liquidations": 0, "book_updates": 0, "block_trades": 0} for s in self.symbols}
+        #: Local receipt time of the newest book frame per symbol — how the hub decides whether the
+        #: deep book is still authoritative for that instrument (a dead extras socket must hand the
+        #: map back to the primary book instead of freezing it).
+        self._book_local_ms: dict[str, int] = {}
 
     # ── lifecycle ─────────────────────────────────────────────
     async def start(self) -> None:
         self._running = True
-        while self._running:
-            try:
-                await self._listen()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                self.stats["errors"] += 1
-                self.stats["reconnects"] += 1
-                logger.warning("BybitExtras(%s) reconnect in %.1fs: %s", self.symbol, self._reconnect_delay, exc)
-                await asyncio.sleep(self._reconnect_delay)
-                self._reconnect_delay = min(self._reconnect_delay * 2, 30.0)
+        self._session = FeedSession(
+            "bybit",
+            connect=self._connect,
+            on_frame=self._on_frame,
+            # WITHOUT this hook the session opens a socket and never subscribes: the venue answers
+            # our 20 s pings (so the connection looks alive and no error is raised) and sends no
+            # market data at all — measured live as "frames 1→2 in 25 s, zero book updates".
+            on_connected=self._on_connected,
+            policy=VENUE_POLICIES["bybit"],
+            # Bybit answers its own JSON ping with a pong (verified live against the venue). The
+            # session owns liveness here, so the library's keepalive stays off: exactly one owner.
+            ping_payload=json.dumps({"op": "ping"}),
+        )
+        await self._session.run()
 
     async def stop(self) -> None:
         self._running = False
-        if self._ws is not None:
-            try:
-                await self._ws.close()
-            except Exception:
-                pass
+        if self._session is not None:
+            await self._session.stop()
 
-    async def _listen(self) -> None:
-        async with websockets.connect(WS_URL, ping_interval=20) as ws:
-            self._ws = ws
-            self._reconnect_delay = 1.0
-            args = [f"allLiquidation.{self.symbol}", f"orderbook.{self.depth}.{self.symbol}", f"publicTrade.{self.symbol}"]
-            await ws.send(json.dumps({"op": "subscribe", "args": args}))
-            logger.info("BybitExtras subscribed: %s", args)
-            async for raw in ws:
-                if not self._running:
-                    break
-                try:
-                    msg = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                await self._handle(msg)
+    async def _connect(self):
+        conn = await websockets.connect(WS_URL, ping_interval=None)
+        self._ws = conn
+        return conn
 
-    async def _handle(self, msg: dict[str, Any]) -> None:
+    async def _on_connected(self, conn) -> None:
+        args: list[str] = []
+        for sym in self.symbols:
+            args += [f"allLiquidation.{sym}", f"orderbook.{self.depth}.{sym}", f"publicTrade.{sym}"]
+        await conn.send(json.dumps({"op": "subscribe", "args": args}))
+        logger.info("BybitExtras subscribed %d topic(s) for %s", len(args), ", ".join(self.symbols))
+
+    async def _on_frame(self, raw: Any) -> Any:
+        """One raw frame; ``False`` = it carried no market data (ack, pong, junk)."""
+        try:
+            msg = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return False
+        return await self._handle(msg)
+
+    def book_age_ms(self, symbol: str) -> int:
+        """How long ago this symbol's newest book frame arrived (a large number = never)."""
+        last = self._book_local_ms.get(symbol)
+        if not last:
+            return 1 << 62
+        return max(0, int(time.time() * 1000) - last)
+
+    def stats_for(self, symbol: Optional[str] = None) -> dict[str, Any]:
+        """Per-symbol channel counters plus the connection's own health."""
+        out: dict[str, Any] = dict(self.per_symbol.get(symbol or "", {}) or {})
+        session = self._session.stats() if self._session is not None else {}
+        out["connection"] = {"frames": session.get("frames", 0),
+                             "reconnects": session.get("reconnects", 0),
+                             "last_error": session.get("last_error", ""),
+                             "running": self._running}
+        return out
+
+    # ── dispatch ──────────────────────────────────────────────
+    async def _handle(self, msg: dict[str, Any]) -> Any:
+        """Route one frame; ``True`` = parsed market data, ``False`` = nothing for the ladder."""
         if msg.get("success") is False:
             logger.warning("BybitExtras subscribe rejected: %s", msg.get("ret_msg"))
-            return
-        topic = msg.get("topic", "")
+            return False
+        topic = str(msg.get("topic") or "")
+        if not topic:
+            return False                        # a pong / subscribe ack carries no topic
+        symbol = topic.rsplit(".", 1)[-1]
+        hit = self.per_symbol.get(symbol)
+        if hit is None:
+            logger.debug("BybitExtras: %r is not this connection's topic (ignored)", topic)
+            return False
         data = msg.get("data")
+        if not data:
+            return False
         ts_ms = int(msg.get("ts") or time.time() * 1000)
 
-        if topic.startswith("allLiquidation.") and self.on_liquidation and data:
+        if topic.startswith("allLiquidation."):
+            if self.on_liquidation is None:
+                return False
             for row in data:
+                hit["liquidations"] += 1
                 self.stats["liquidations"] += 1
                 await _maybe_await(self.on_liquidation(
-                    symbol=self.symbol,
+                    symbol=symbol,
                     price=float(row.get("p", 0)),
                     size=float(row.get("v", 0)),
                     side=str(row.get("S", "")),
                     ts_ms=int(row.get("T", ts_ms)),
                 ))
+            return True
 
-        elif topic.startswith("orderbook.") and self.on_orderbook and data:
+        if topic.startswith("orderbook."):
+            if self.on_orderbook is None:
+                return False
+            hit["book_updates"] += 1
             self.stats["book_updates"] += 1
-            # NB: data["u"] is an update *sequence id*, not a clock. Use the
-            # envelope timestamp so downstream bucketing sees real time.
-            await _maybe_await(self.on_orderbook(self.symbol, msg.get("type", ""), data, ts_ms))
+            self._book_local_ms[symbol] = int(time.time() * 1000)
+            # NB: data["u"] is an update *sequence id*, not a clock. Use the envelope timestamp so
+            # downstream bucketing sees real time.
+            await _maybe_await(self.on_orderbook(symbol, msg.get("type", ""), data, ts_ms))
+            return True
 
-        elif topic.startswith("publicTrade.") and self.on_block_trade and data:
+        if topic.startswith("publicTrade."):
+            if self.on_block_trade is None:
+                return False
             for row in data:
-                if row.get("BT"):                      # exchange-flagged block trade
+                if row.get("BT"):               # exchange-flagged block trade
+                    hit["block_trades"] += 1
                     self.stats["block_trades"] += 1
                     await _maybe_await(self.on_block_trade(
-                        symbol=self.symbol,
+                        symbol=symbol,
                         price=float(row.get("p", 0)),
                         size=float(row.get("v", 0)),
                         side=str(row.get("S", "")),
                         ts_ms=int(row.get("T", ts_ms)),
                     ))
+            return True                          # real venue data even without a block flag
+        return False
 
 
 class BybitDepthBook:

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0e16">
+<!-- The companion page is as self-contained as the shell: one same-origin script, its own styles,
+     no CDN, no web font, no frame, and nothing to send anywhere. script-src 'self' is enough
+     because there is no inline script on this page at all. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>ModFlow monitor</title>
+<style>
+/* Dark is the shipped look; the tokens are the app's own palette (desktop/ui/atlas.css). */
+:root {
+    --mon-bg: #0a0e16; --mon-deep: #070b12; --mon-surface: #131b2a; --mon-elevated: #182031;
+    --mon-line: #223049; --mon-line-strong: #2e3f5c;
+    --mon-ink: #e9eef8; --mon-ink-dim: #9aa9c1; --mon-ink-muted: #708199;
+    --mon-ok: #3fbf7f; --mon-err: #e2596a; --mon-warn: #e0a33c; --mon-accent: #5b8def;
+    --mon-radius: 12px;
+    --mon-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+    margin: 0; background: var(--mon-bg); color: var(--mon-ink); font-family: var(--mon-font);
+    font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased;
+}
+[data-tone="up"] { color: var(--mon-ok); }
+[data-tone="down"] { color: var(--mon-err); }
+[data-tone="flat"] { color: var(--mon-ink); }
+[data-tone="warn"] { color: var(--mon-warn); }
+[data-tone="crit"] { color: var(--mon-err); }
+[data-tone="info"] { color: var(--mon-ink-dim); }
+
+/* ── the top strip: identity, the read's own state, and one deliberate refresh ─────────────── */
+.mon-top {
+    position: sticky; top: 0; z-index: 3;
+    display: flex; align-items: center; gap: 10px;
+    padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+    background: linear-gradient(180deg, var(--mon-surface), var(--mon-deep));
+    border-bottom: 1px solid var(--mon-line);
+}
+.mon-brand { display: flex; flex-direction: column; line-height: 1.15; }
+.mon-brand b { font-size: 15px; font-weight: 650; }
+.mon-brand span { font-size: 11.5px; color: var(--mon-ink-muted); }
+.mon-state { margin-left: auto; text-align: right; font-size: 11.5px; color: var(--mon-ink-dim); max-width: 46vw; }
+.mon-btn {
+    min-height: 44px; min-width: 44px; padding: 0 14px; border-radius: 10px;
+    border: 1px solid var(--mon-line-strong); background: var(--mon-elevated); color: var(--mon-ink);
+    font-family: inherit; font-size: 14px;
+}
+.mon-btn:active { background: var(--mon-surface); }
+
+main { padding: 12px 14px calc(96px + env(safe-area-inset-bottom)); }
+.mon-panel { display: none; }
+.mon-panel.on { display: block; }
+.mon-sub { color: var(--mon-ink-dim); font-size: 12.5px; margin: 0 0 10px; }
+.mon-head { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 8px; }
+.mon-head h1 { font-size: 17px; margin: 0; font-weight: 620; }
+.mon-head .mon-count { margin-left: auto; font-size: 12.5px; color: var(--mon-ink-muted); }
+
+/* ── rows: one card per thing, big enough to hit with a thumb ──────────────────────────────── */
+.mon-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.mon-row {
+    background: var(--mon-surface); border: 1px solid var(--mon-line);
+    border-radius: var(--mon-radius); padding: 10px 12px;
+}
+.mon-row-top { display: flex; align-items: baseline; gap: 8px; }
+.mon-sym { font-weight: 600; }
+.mon-agedim { margin-left: auto; color: var(--mon-ink-muted); font-size: 12px; }
+.mon-msg { margin: 3px 0 2px; }
+.mon-meta { color: var(--mon-ink-dim); font-size: 12.5px; }
+.mon-line { background: var(--mon-surface); border: 1px solid var(--mon-line); border-radius: var(--mon-radius); padding: 10px 12px; margin-bottom: 8px; }
+.mon-empty { color: var(--mon-ink-dim); font-size: 13.5px; padding: 12px 2px; }
+.mon-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 8px 0; }
+.mon-cell { background: var(--mon-surface); border: 1px solid var(--mon-line); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.mon-cell-k { font-size: 11.5px; color: var(--mon-ink-muted); }
+.mon-cell-v { font-size: 15px; font-variant-numeric: tabular-nums; }
+
+/* ── the watchlist rows are the page's only control: tap a symbol to read it ───────────────── */
+.mon-pick {
+    display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px;
+    padding: 10px 12px; text-align: left; font-family: inherit; font-size: 15px; color: var(--mon-ink);
+    background: var(--mon-surface); border: 1px solid var(--mon-line); border-radius: var(--mon-radius);
+}
+.mon-pick.on { border-color: var(--mon-accent); background: var(--mon-elevated); }
+.mon-pick.dim { color: var(--mon-ink-dim); }
+.mon-quote { margin-left: auto; display: flex; align-items: baseline; gap: 10px; font-variant-numeric: tabular-nums; }
+.mon-last { font-weight: 600; }
+.mon-chg, .mon-delta, .mon-none { font-size: 12.5px; }
+.mon-none { color: var(--mon-ink-muted); }
+
+/* ── the bottom tab bar: thumb-reach, safe-area aware ─────────────────────────────────────── */
+.tabs {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 4; display: flex;
+    background: var(--mon-deep); border-top: 1px solid var(--mon-line);
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+}
+.mon-tab {
+    flex: 1; min-height: 56px; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 2px; background: none; border: 0; color: var(--mon-ink-dim);
+    font-family: inherit; font-size: 12px; padding: 6px 2px;
+}
+.mon-tab.on { color: var(--mon-ink); }
+.mon-tab.on .mon-tab-k { border-bottom: 2px solid var(--mon-accent); padding-bottom: 1px; }
+.mon-badge { font-size: 11px; color: var(--mon-ink-muted); font-variant-numeric: tabular-nums; }
+.mon-foot { color: var(--mon-ink-muted); font-size: 11.5px; margin-top: 14px; }
+</style>
+</head>
+<body>
+
+<header class="mon-top">
+    <div class="mon-brand"><b>ModFlow</b><span>companion monitor</span></div>
+    <div class="mon-state" id="monStatus">connecting…</div>
+    <button type="button" class="mon-btn" data-mon-act="refresh" aria-label="Read every panel again">refresh</button>
+</header>
+
+<main>
+    <!-- alerts: the engine's own firings, newest first -->
+    <section class="mon-panel" data-mon-panel="alerts">
+        <div class="mon-head"><h1>alerts</h1><span class="mon-count" id="monAlertCount">—</span></div>
+        <p class="mon-sub">the alert log newest first; the context line is the firing's own payload</p>
+        <ul class="mon-list" id="monAlertList"></ul>
+    </section>
+
+    <!-- positions: the simulated account the Replay view runs -->
+    <section class="mon-panel" data-mon-panel="paper">
+        <div class="mon-head"><h1>positions</h1></div>
+        <p class="mon-sub" id="monPaperSub">reading…</p>
+        <div id="monPaperPosition"></div>
+        <div class="mon-grid" id="monPaperStats"></div>
+        <p class="mon-sub">working orders</p>
+        <ul class="mon-list" id="monPaperOrders"></ul>
+        <p class="mon-sub">last closed legs</p>
+        <ul class="mon-list" id="monPaperClosed"></ul>
+    </section>
+
+    <!-- watchlist: the stored symbols, quoted from the engine's own rows -->
+    <section class="mon-panel" data-mon-panel="watch">
+        <div class="mon-head"><h1>watchlist</h1></div>
+        <p class="mon-sub" id="monWatchSub">reading…</p>
+        <ul class="mon-list" id="monWatchRows"></ul>
+    </section>
+
+    <!-- read: one order-flow read of the chosen instrument -->
+    <section class="mon-panel" data-mon-panel="read">
+        <div class="mon-head"><h1>read</h1><span class="mon-count" id="monReadSymbol">—</span></div>
+        <p class="mon-sub" id="monReadBanner">reading…</p>
+        <div class="mon-grid">
+            <div class="mon-cell"><span class="mon-cell-k">regime</span><span class="mon-cell-v" id="monReadRegime">—</span></div>
+            <div class="mon-cell"><span class="mon-cell-k">conviction</span><span class="mon-cell-v" id="monReadConviction">—</span></div>
+        </div>
+        <div id="monReadSummary"></div>
+        <p class="mon-sub" id="monReadInputs"></p>
+        <p class="mon-sub">key levels</p>
+        <ul class="mon-list" id="monReadLevels"></ul>
+    </section>
+
+    <p class="mon-foot">This page only reads. Nothing here places an order, changes a setting or clears
+    an alert. The one thing it writes is the symbol you pick, remembered in this browser. The server it
+    reads answers on 127.0.0.1 only, so nothing on the LAN can reach it.
+    Refreshes every 5 s while the tab is in front; pick a symbol on the watchlist to read it.</p>
+</main>
+
+<nav class="tabs" role="tablist" aria-label="monitor sections">
+    <button type="button" class="mon-tab on" role="tab" aria-selected="true" data-mon-tab="alerts">
+        <span class="mon-tab-k">alerts</span><span class="mon-badge" id="monBadgeAlerts">—</span>
+    </button>
+    <button type="button" class="mon-tab" role="tab" aria-selected="false" data-mon-tab="paper">
+        <span class="mon-tab-k">positions</span><span class="mon-badge" id="monBadgePaper">—</span>
+    </button>
+    <button type="button" class="mon-tab" role="tab" aria-selected="false" data-mon-tab="watch">
+        <span class="mon-tab-k">watchlist</span><span class="mon-badge" id="monBadgeWatch">—</span>
+    </button>
+    <button type="button" class="mon-tab" role="tab" aria-selected="false" data-mon-tab="read">
+        <span class="mon-tab-k">read</span><span class="mon-badge" id="monUpdated">—</span>
+    </button>
+</nav>
+
+<script src="/desktop/monitor.js"></script>
+</body>
+</html>

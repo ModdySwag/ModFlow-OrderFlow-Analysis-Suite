@@ -70,14 +70,13 @@
         return [{
             label: 'All panels…', accel: '/', run: () => { const b = el('menuBtn'); if (b) b.click(); },
         }, sep()].concat(items, [sep(),
-            { label: 'Windows & layouts…', run: () => { if (window.OFAPWINDOWS && OFAPWINDOWS.open) OFAPWINDOWS.open(); } },
+            { label: 'Windows & layouts…', run: () => { if (window.OFAPWINMGR && OFAPWINMGR.open) OFAPWINMGR.open(); } },
             { label: 'Legend panel', checked: legendOpen(), run: toggleLegend },
             { label: 'Menu bar', accel: 'B', checked: !(window.OFAPCHROME && OFAPCHROME.hidden('menubar')), run: toggleMenubar },
             { label: 'Rail', accel: 'R', checked: !(window.OFAPCHROME && OFAPCHROME.hidden('rail')), run: toggleRail },
             { label: 'Status bar', checked: !(window.OFAPCHROME && OFAPCHROME.hidden('status')), run: toggleStatus },
             { label: 'Full screen (zen)', checked: document.querySelector('.app.zen'), run: toggleZen },
             sep(),
-            planned('Reset rail order', 'phase 5 — the profile store owns layouts'),
             ...viewDefaultsItems(),
         ]);
     }
@@ -160,6 +159,84 @@
 
     /* The View menu's tail: the active view's own settings trio, or an honest sentence when the
        view keeps nothing of its own. */
+    /* ── the server-made CSV exports (control-surface audit F2) ─────────────────────────────────
+       The three atlas CSV routes have answered real files since the package landed and had no UI
+       door. The shell has no download shelf, so "export" means: fetch the CSV, write it into the
+       exports folder through the same /export/save the panels use, and say where it landed. */
+    function activeSymbol() {
+        const el = document.getElementById('symbolSelect');
+        return el && el.value ? String(el.value) : '';
+    }
+    async function exportServerCsv(path, name) {
+        try {
+            const res = await fetch(path);
+            if (!res.ok) { note('export refused: HTTP ' + res.status); return; }
+            const text = await res.text();
+            const save = await api('/api/control/export/save', { method: 'POST', body: { name: name, text: text } });
+            const where = (save && save.path) ? ' → ' + save.path : '';
+            note(text.trim() ? ('saved ' + name + where)
+                             : (name + ' saved empty — the store holds no rows for it yet' + where));
+        } catch (err) { note('export failed: ' + err); }
+    }
+    function exportItems() {
+        const symbol = activeSymbol();
+        const out = [];
+        if (symbol) {
+            out.push({ label: 'Tape — ' + symbol + ' (CSV)',
+                       run: () => exportServerCsv('/api/atlas/export/tape/' + encodeURIComponent(symbol) + '.csv',
+                                                  'tape-' + symbol + '.csv') });
+            out.push({ label: 'Heatmap — ' + symbol + ' (CSV)',
+                       run: () => exportServerCsv('/api/atlas/export/heatmap/' + encodeURIComponent(symbol) + '.csv',
+                                                  'heatmap-' + symbol + '.csv') });
+        } else {
+            out.push({ label: 'Tape (CSV)', disabled: true, reason: 'no instrument selected' });
+            out.push({ label: 'Heatmap (CSV)', disabled: true, reason: 'no instrument selected' });
+        }
+        out.push({ label: 'Alerts (CSV)',
+                   run: () => exportServerCsv('/api/atlas/export/alerts.csv', 'alerts.csv') });
+        return out;
+    }
+    /* ── Recent (the File-menu stub, promoted) ──────────────────────────────────────────────────
+       Workspaces, profiles and layouts record themselves through the single writer below
+       (`noteRecent`); this reads the same config copy the rest of the menu renders from. */
+    function recentItems() {
+        const cfg = cfgNow();
+        const list = (cfg && cfg.ui && Array.isArray(cfg.ui.recent)) ? cfg.ui.recent : [];
+        if (!list.length) {
+            return [{ label: 'nothing yet', disabled: true,
+                      reason: 'workspaces, profiles and layouts you open land here' }];
+        }
+        const kindLabel = { workspace: 'Workspace', profile: 'Profile', layout: 'Layout' };
+        return list.map((r) => ({
+            label: (kindLabel[r.kind] || 'Recent') + ' — ' + r.name,
+            run: () => {
+                if (r.kind === 'workspace' && window.OFAPMenu && OFAPMenu.applyWorkspaceByName) {
+                    OFAPMenu.applyWorkspaceByName(r.name);
+                } else if (r.kind === 'profile' && window.OFAPPROFILES && OFAPPROFILES.switchTo) {
+                    OFAPPROFILES.switchTo(r.id || r.name);
+                } else if (r.kind === 'layout' && window.OFAPSHELL && OFAPSHELL.activateLayout) {
+                    void OFAPSHELL.activateLayout(r.id || r.name);
+                } else { note('that item is gone — open its own menu'); }
+            },
+        }));
+    }
+    /* The one records writer (writers: applyWorkspace in menu.js, a profile apply, a layout
+       activate). Config-block persisted, newest first, capped; a failed write never surfaces. */
+    function noteRecent(kind, name, ident) {
+        try {
+            const clean = String(name || '').trim().slice(0, 40);
+            if (!clean) return;
+            const cfg = cfgNow();
+            const list = (cfg && cfg.ui && Array.isArray(cfg.ui.recent)) ? cfg.ui.recent.slice() : [];
+            const entry = { kind: kind, name: clean, id: String(ident || '').slice(0, 40), at: Date.now() };
+            const next = [entry].concat(list.filter((r) => !(r && r.kind === kind
+                && (r.id ? r.id === entry.id : r.name === entry.name)))).slice(0, 8);
+            if (cfg && cfg.ui) cfg.ui.recent = next;    // the in-page copy stays truthful
+            void api('/api/control/config', { method: 'POST', body: { ui: { recent: next } } }).catch(() => {});
+        } catch (err) { /* recents are a convenience — never a blocker */ }
+    }
+    if (typeof window !== 'undefined') window.OFAPMENUBAR_RECENT = noteRecent;
+
     function viewDefaultsItems() {
         /* Resolve the view LIVE: `state.view` only tracks rail clicks, and a view reached by the
            palette, the scanner or a script must not leave this menu talking about the last rail
@@ -247,6 +324,13 @@
                carries no `source`, so a stale copy would leave the source chips (topbar,
                Alpaca card) naming the old venue until a reload. */
             try { S.config = S.config || {}; if (res && res.data_source) S.config.data_source = res.data_source; } catch (e) { /* page copy only */ }
+            /* One event tells every surface that SHOWS the source to re-read — the Settings card
+               keeps its own select and rebuilds a full config on save, so a stale one there would
+               roll this switch back. The menu cannot call into a view that may not be loaded. */
+            try {
+                document.dispatchEvent(new CustomEvent('ofap:source',
+                    { detail: { source: (res && res.data_source) || id } }));
+            } catch (e) { /* announce only */ }
             note(res && res.ok === false ? `refused: ${res.error || 'unknown source'}`
                 : `engine restarted on ${name}`);
             await loadSources();
@@ -290,12 +374,55 @@
         });
         return out;
     }
+    /* §145: what a stored value is CALLED, and a number at the precision the control edits. */
+    const CHOICE_JOBS = {
+        default: 'Default', delta: 'Delta body', split: 'Split candle', heat: 'Heat body',
+        wick: 'Wick + footprint', candles: 'Candles', theme: 'Theme palette',
+        deutan: 'Deuteranopia-safe', protan: 'Protanopia-safe', tritan: 'Tritanopia-safe',
+        classic: 'Classic ramp', thermal: 'Thermal ramp', auto: 'Auto', manual: 'Manual',
+        none: 'Off', traded: 'Traded volume', resting: 'Resting size', scheduled: 'Scheduled',
+        conditional: 'Conditional', same_price: 'Same price', diagonal: 'Diagonal',
+    };
+    function choiceLabel(value) {
+        if (value === null || value === undefined) return '—';
+        const text = String(value);
+        const views = (window.OFAPVIEWS && window.OFAPVIEWS.byId) || null;
+        if (views && views[text]) return views[text];
+        if (text === 'true') return 'on';
+        if (text === 'false') return 'off';
+        if (CHOICE_JOBS[text]) return CHOICE_JOBS[text];
+        return text.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+    }
+    function stepDecimals(step) {
+        const n = Number(step);
+        if (!isFinite(n) || n <= 0) return null;
+        const text = String(n);
+        const dot = text.indexOf('.');
+        return dot < 0 ? 0 : text.length - dot - 1;
+    }
+    function sameValue(a, b) {
+        try { return JSON.stringify(a) === JSON.stringify(b); } catch (err) { return a === b; }
+    }
+    function paramHint(p) {
+        if (p.kind === 'number') return `range ${p.min} – ${p.max} · step ${p.step}`;
+        if (p.kind === 'enum') return `${(p.choices || []).length} choices: ${(p.choices || []).map(choiceLabel).join(' · ')}`;
+        if (p.kind === 'list') return 'comma-separated numbers';
+        return '';
+    }
+
     function paramLabel(p) {
         const value = p.kind === 'bool' ? (p.value ? 'on' : 'off') : (p.value === null || p.value === undefined ? '—' : p.value);
         return `${p.label}${p.unit ? ` (${p.unit})` : ''}`;
     }
     function paramValueText(p) {
         if (p.kind === 'bool') return p.value ? '✓' : '';
+        if (p.kind === 'enum') return choiceLabel(p.value);
+        if (p.kind === 'number') {
+            const n = Number(p.value);
+            if (!isFinite(n)) return String(p.value);
+            const dp = stepDecimals(p.step);
+            return dp === null ? String(n) : String(parseFloat(n.toFixed(dp)));
+        }
         return String(p.value);
     }
     function chartItems() {
@@ -307,21 +434,27 @@
         groups.forEach(([group, rows], gi) => {
             if (gi) items.push(sep());
             items.push({ header: group });
-            rows.forEach((p) => items.push({
-                label: paramLabel(p),
-                value: paramValueText(p),
-                kind: p.kind,
-                submenu: [
-                    { label: p.meaning, disabled: true, reason: '' },
-                    sep(),
-                    p.kind === 'list'
-                        ? planned('Edit list', 'phase 2 — list editor (this one is a list of numbers)')
-                        : { label: 'Change…', keepOpen: true, run: () => openEditor(p) },
-                    { label: `Restore default (${p.default})`, checked: false, run: () => setParam(p, p.default) },
-                    sep(),
-                    { label: `path: ${p.path}`, disabled: true, reason: p.applies === 'restart' ? 'needs an engine restart' : 'applies live' },
-                ],
-            }));
+            rows.forEach((p) => {
+                const changed = !sameValue(p.value, p.default);
+                const hint = paramHint(p);
+                items.push({
+                    label: paramLabel(p),
+                    value: paramValueText(p) + (changed ? ' · changed' : ''),
+                    kind: p.kind,
+                    submenu: [
+                        { label: p.meaning, disabled: true, reason: '' },
+                        ...(hint ? [{ label: hint, disabled: true, reason: '' }] : []),
+                        sep(),
+                        { label: 'Change…', keepOpen: true, run: () => openEditor(p) },
+                        changed
+                            ? { label: `Restore default (${choiceLabel(p.default)})`, checked: false,
+                                run: () => setParam(p, p.default) }
+                            : { label: `already at the default (${choiceLabel(p.default)})`, disabled: true, reason: '' },
+                        sep(),
+                        { label: `path: ${p.path}`, disabled: true, reason: p.applies === 'restart' ? 'needs an engine restart' : 'applies live' },
+                    ],
+                });
+            });
         });
         return items;
     }
@@ -344,7 +477,11 @@
             control = `<input type="checkbox" id="mbEditBool" ${value ? 'checked' : ''}>`;
         } else if (p.kind === 'enum') {
             control = `<select id="mbEditEnum">${(p.choices || []).map((c) =>
-                `<option ${c === value ? 'selected' : ''}>${c}</option>`).join('')}</select>`;
+                `<option value="${escp(c)}" ${c === value ? 'selected' : ''}>${escp(choiceLabel(c))}</option>`).join('')}</select>`;
+        } else if (p.kind === 'list') {
+            /* A list variable (numbers, comma-separated) — the editor the "Edit list" stub promised,
+               written through the same /api/control/params door as every other kind. */
+            control = `<input type="text" id="mbEditList" value="${(Array.isArray(value) ? value : []).join(', ')}" style="min-width:220px">`;
         } else {
             control = `<input type="number" id="mbEditNum" value="${value}" min="${p.min}" max="${p.max}" step="${p.step || 1}">`
                 + `<input type="range" id="mbEditRange" value="${value}" min="${p.min}" max="${p.max}" step="${p.step || 1}">`;
@@ -353,6 +490,7 @@
             <div class="mb-editor-head">${p.label} <span class="mb-dim">${p.path}</span></div>
             <div class="mb-editor-why">${p.meaning}</div>
             <div class="mb-editor-row">${control}${p.unit ? `<span class="mb-unit">${p.unit}</span>` : ''}</div>
+            ${paramHint(p) ? `<div class="mb-editor-row"><span class="mb-dim">${escp(paramHint(p))}</span></div>` : ''}
             <div class="mb-editor-row">
                 <button class="mb-btn primary" id="mbEditApply">Apply</button>
                 <button class="mb-btn" id="mbEditCancel">Cancel</button>
@@ -366,7 +504,10 @@
         let value;
         if (p.kind === 'bool') value = el('mbEditBool').checked;
         else if (p.kind === 'enum') value = el('mbEditEnum').value;
-        else value = Number(el('mbEditNum').value);
+        else if (p.kind === 'list') {
+            value = el('mbEditList').value.split(',')
+                .map((s) => Number(s.trim())).filter((n) => Number.isFinite(n));
+        } else value = Number(el('mbEditNum').value);
         const stateLine = el('mbEditState');
         if (stateLine) stateLine.textContent = 'saving…';
         await setParam(p, value);
@@ -468,6 +609,9 @@
             state.layouts = (res && res.items) || {};
             state.layoutVersions = (res && res.versions) || {};
             state.layoutMode = (res && res.mode) || 'classic';
+            state.layoutAutocull = res ? res.autocull !== false : true;
+            state.layoutKeep = Number(res && res.keep) || 5;
+            state.layoutMax = Number(res && res.max) || 10;
         } catch (err) { /* the menu reports what it has */ }
     }
 
@@ -496,6 +640,69 @@
     function widgetCount(layout) {
         const m = window.OFAPSHELL && window.OFAPSHELL.math;
         return m ? m.countWidgets(layout) : 0;
+    }
+
+    /* ── §129: previous versions, made legible ────────────────────────────────────────────────
+       The old shape was a flat wall of rows reading "Restore "Moddy" — saved 06:54 pm", three of
+       them identical when the saves landed in the same minute, with nothing said about why they
+       exist or how many are kept. Now: ONE submenu row carrying the depth, five rows inside it,
+       each naming the time to the second, the age, and what the version actually holds — plus the
+       auto-cull switch and the one line that says why the feature is there at all. */
+
+    function versionStamp(at) {
+        const when = new Date(Number(at) || 0);
+        return when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function versionAge(at) {
+        const then = Number(at) || 0;
+        if (!then) return '';
+        const mins = Math.floor(Math.max(0, Date.now() - then) / 60000);
+        if (mins < 1) return 'just now';
+        if (mins < 60) return mins + ' min ago';
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return hours === 1 ? '1 h ago' : hours + ' h ago';
+        const days = Math.floor(hours / 24);
+        return days === 1 ? 'yesterday' : days + ' days ago';
+    }
+
+    function versionItems(currentId, versions, layoutName) {
+        const autocull = state.layoutAutocull !== false;
+        const keep = Number(state.layoutKeep) || 5;
+        const max = Number(state.layoutMax) || 10;
+        const rows = [{ header: 'Undo history · ' + (layoutName || 'this layout') }];
+        if (!versions.length) {
+            rows.push({ label: 'No earlier versions yet', disabled: true,
+                        reason: 'one is kept each time you save over this layout or delete it' });
+        }
+        versions.slice(0, keep).forEach((v, i) => {
+            const bits = [versionAge(v.at)];
+            if (v.widgets) bits.push(v.widgets + ' widget' + (v.widgets === 1 ? '' : 's'));
+            if (v.tabs) bits.push(v.tabs + ' tab' + (v.tabs === 1 ? '' : 's'));
+            rows.push({
+                label: 'Restore the ' + versionStamp(v.at) + ' version' + (i === 0 ? ' · newest' : ''),
+                value: bits.filter(Boolean).join(' · '),
+                hint: 'sets this layout back exactly as it was; the arrangement you have now is kept as a version too',
+                run: () => layoutAction(() => window.OFAPSHELL.restoreVersion(currentId, Number(v.at) || 0),
+                                        (r) => 'restored “' + ((r && r.name) || v.name) + '”' +
+                                            (r && r.culled ? ' — ' + r.culled + ' older version(s) dropped' : '')),
+            });
+        });
+        if (versions.length > keep) {
+            rows.push({ label: versions.length - keep + ' older versions are kept', disabled: true,
+                        reason: 'auto-cull is off — it keeps only the newest ' + keep + ' when on' });
+        }
+        rows.push(sep());
+        rows.push({ label: 'Auto-cull old versions', kind: 'bool', checked: autocull,
+                    hint: 'on: keep the 5 most recent and drop older ones as you save · off: keep up to ' + max,
+                    run: () => layoutAction(() => api('/api/control/layouts',
+                            { method: 'POST', body: { autocull: !autocull } }),
+                        (r) => autocull
+                            ? 'auto-cull off — up to ' + max + ' versions are kept now'
+                            : 'auto-cull on — ' + (r && r.culled ? r.culled + ' older version(s) dropped' : 'the last ' + keep + ' are kept')) });
+        rows.push({ label: 'Why versions exist', disabled: true,
+                    reason: 'a save-over, an auto-arrange, a reset or a delete is one click — this is the one click back' });
+        return rows;
     }
 
     function layoutItems() {
@@ -572,18 +779,15 @@
             });
         });
         const versions = (state.layoutVersions && currentId && state.layoutVersions[currentId]) || [];
-        if (versions.length) {
-            items.push(sep(), { header: 'This layout — previous versions' });
-            versions.slice(0, 3).forEach((v) => {
-                const when = new Date(Number(v.at) || 0);
-                const stamp = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                items.push({
-                    label: 'Restore “' + v.name + '” — saved ' + stamp,
-                    run: () => layoutAction(() => shell.restoreVersion(currentId, Number(v.at) || 0),
-                                            (r) => 'restored “' + ((r && r.name) || v.name) + '”'),
-                });
-            });
-        }
+        const myName = current ? current.name : '';
+        items.push(sep(), {
+            label: 'Previous versions of this layout',
+            value: versions.length
+                ? versions.length + ' kept · auto-cull ' + (state.layoutAutocull === false ? 'off' : 'on')
+                : 'nothing kept yet',
+            hint: 'one-click undo for THIS layout — a save-over, an auto-arrange, a reset or a delete',
+            submenu: versionItems(currentId, versions, myName),
+        });
         items.push(sep(), { label: ids.length + ' of 24 layouts', disabled: true,
                             reason: 'layouts live in your config file; the browser keeps no copy' });
         return items;
@@ -719,10 +923,10 @@
             { header: 'Optional' },
             { label: 'MT5 feed support — optional',
               hint: 'MetaTrader 5 is never required: pick it as the source, or open Market Watch to mirror the running terminal',
-              run: () => { showView('marketwatch'); note('MT5 is optional — the board mirrors your running terminal when MT5 is chosen'); } },
+              run: () => { (window.OFAPNAV ? OFAPNAV.jump('marketwatch') : showView('marketwatch')); note('MT5 is optional — the board mirrors your running terminal when MT5 is chosen'); } },
             { label: 'NinjaTrader 8 bridge — optional',
               hint: 'the AddOn lane: source \u2192 NinjaScript Editor F5 \u2192 the trust prompt',
-              run: () => { showView('platforms'); note('NinjaTrader is optional — the Platforms view holds the bridge lane'); } },
+              run: () => { (window.OFAPNAV ? OFAPNAV.jump('platforms') : showView('platforms')); note('NinjaTrader is optional — the Platforms view holds the bridge lane'); } },
             { label: 'Dev tooling — uv \u00b7 pytest \u00b7 node selftests',
               hint: 'the gates ship with the source tree',
               run: () => note('uv run pytest \u00b7 node ui/*.selftest.js \u00b7 ruff — CONTRIBUTING.md lists the gates') },
@@ -799,17 +1003,22 @@
                 sep(),
                 { label: 'Open user folder', run: () => openFolder('config') },
                 { label: 'Open exports folder', run: () => openFolder('exports') },
-                { label: 'Show log file', run: () => { openFolder('logs'); if (window.showView) showView('logs'); } },
+                { label: 'Show log file', run: () => { openFolder('logs'); if (window.OFAPNAV) OFAPNAV.jump('logs'); else if (window.showView) showView('logs'); } },
                 sep(),
                 { label: 'Start engine', keyId: 'engine-start', run: () => engine('start') },
                 { label: 'Stop engine', keyId: 'engine-stop', run: () => engine('stop') },
                 { label: 'Restart engine', keyId: 'engine-restart', run: () => engine('restart') },
                 sep(),
-                planned('Import profile…', 'phase 3 — the profile store'),
-                planned('Export data…', 'phase 4 — export manager (the endpoint exists: /export/save)'),
+                { label: 'Import profile…', hint: 'the Profiles view — import a shared setup file from its card',
+                  run: () => showView('profiles') },
+                { label: 'Export data…', hint: 'opens the exports folder — every CSV the app writes lands there',
+                  run: () => { void api('/api/control/folder/open', { method: 'POST', body: { folder: 'exports' } }).catch(() => {}); note('Opened the exports folder'); } },
+                { label: 'Recent', submenu: recentItems() },
                 planned('Record session…', 'phase 5 — session capture'),
-                planned('Recent', 'phase 4 — recents list'),
-                planned('Exit', 'the window close button closes the app'),
+                /* Exit is a decision, not a promise: the close button is the app's way out, and a
+                   greyed "planned" would imply a quit path is coming that is not. */
+                { label: 'Exit', disabled: true,
+                  reason: 'close the window (✕) — the app has no in-app quit by design' },
             ] },
             { id: 'view', label: 'View', items: viewItems() },
             { id: 'layout', label: 'Layout', items: layoutItems() },
@@ -821,9 +1030,9 @@
                 { label: 'Index funds & indices — which platform?…', keepOpen: true,
                   hint: 'three lines: ETF vs CFD vs futures, the shared how-to, and the doors to each route',
                   run: () => { explainer = 'indices'; paintOpenMenu(); } },
-                { label: 'Instruments…', run: () => showView('instruments') },
+                { label: 'Instruments…', run: () => (window.OFAPNAV ? OFAPNAV.jump('instruments') : showView('instruments')) },
                 { label: 'Instrument look-up\u2026', run: () => { if (window.OFAPHINT) OFAPHINT.run('lookup'); else showView('ofx'); } },
-                { label: 'Feed health', run: () => { showView('instruments'); note('tick rate and latency live in the status bar and the Instruments view'); } },
+                { label: 'Feed health', run: () => { (window.OFAPNAV ? OFAPNAV.jump('instruments') : showView('instruments')); note('tick rate and latency live in the status bar and the Instruments view'); } },
                 sep(),
                 { header: 'Streams' },
                 { label: 'Extra Bybit streams (200-level book, liquidations)', checked: !!(state.params && extrasValue()), run: () => setExtraStreams(!extrasValue()) },
@@ -831,9 +1040,14 @@
                 { label: 'Timeframe / aggregation…',
                   hint: 'the chart panel owns the bar size — this opens it and focuses the timeframe dropdown',
                   run: () => openChartTimeframe() },
-                planned('History & retention', 'phase 3 — storage policy (DB is ~547 MB of ticks)'),
-                planned('Replay…', 'phase 2 — the Replay view exists; deep-linking comes with the settings dialogs'),
-                planned('Notifications…', 'phase 2 — the Settings view already holds the channels'),
+                /* §123: these three named real panels as "planned" — dead rows for things that exist.
+                   A menu row that names a control must land on it. */
+                { label: 'History & retention…', hint: 'Settings ▸ Data — how many days of ticks to keep',
+                  run: () => { showView('settings'); note('Settings ▸ Data — history & retention lives there'); } },
+                { label: 'Replay…', hint: 'the Replay panel — re-run recorded tape through the same analytics',
+                  run: () => (window.OFAPNAV ? OFAPNAV.jump('replay') : showView('replay')) },
+                { label: 'Notifications…', hint: 'Settings ▸ Alerts & notifications — the channels',
+                  run: () => { showView('settings'); note('Settings ▸ Alerts & notifications'); } },
             ] },
             { id: 'profiles', label: 'Profiles', items: profileItems() },
             { id: 'run', label: 'Run', items: runItems() },
@@ -845,10 +1059,14 @@
                 { header: 'Diagnostics' },
                 { label: 'Render telemetry', run: showTelemetry },
                 { label: 'Copy diagnostics', run: copyDiagnostics },
-                { label: 'Client errors', run: () => { showView('logs'); note('client errors are appended to the log as "client error:" lines'); } },
+                { label: 'Client errors', run: () => { (window.OFAPNAV ? OFAPNAV.jump('logs') : showView('logs')); note('client errors are appended to the log as "client error:" lines'); } },
                 sep(),
-                planned('Performance…', 'phase 2 — refresh rate, depth resolution, safe mode'),
-                planned('Studies library', 'phase 2 — deep-link into the Studies view settings'),
+                { label: 'Performance…', hint: 'Settings ▸ Engine — refresh rate, depth resolution, safe mode',
+                  run: () => { showView('settings'); note('Settings ▸ Engine — refresh rate, depth resolution, safe mode'); } },
+                { label: 'Studies library', hint: 'the Studies view — the library and saved setups',
+                  run: () => showView('studies') },
+                sep(),
+                { label: 'Export', submenu: exportItems() },
             ] },
             { id: 'update', label: updateLabel(), items: updateItems() },
             { id: 'help', label: 'Help', items: [
@@ -872,7 +1090,7 @@
                 { label: 'Setup guide…', run: () => { if (typeof window.openWizard === 'function') openWizard(true); else note('the wizard is available from the Overview view'); } },
                 { label: 'Legend & keys', run: toggleLegend },
                 { label: 'Hotkeys…', accel: '?', run: () => document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true })) },
-                { label: 'Platforms (the DTC platform DTC, the reference platform)', run: () => showView('platforms') },
+                { label: 'Platforms (the DTC platform DTC, the reference platform)', run: () => (window.OFAPNAV ? OFAPNAV.jump('platforms') : showView('platforms')) },
                 sep(),
                 { about: true },
             ] },
@@ -885,6 +1103,15 @@
     }
     async function setExtraStreams(on) {
         await setParam({ path: 'atlas.extras_enabled', label: 'Extra Bybit streams', applies: 'restart' }, on);
+    }
+
+    /* §143: fill alpha from the line colour, so a shape's wash always matches its stroke. */
+    function fillFor(hex, alpha) {
+        if (!alpha) return '';
+        const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || '');
+        if (!m) return '';
+        const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+        return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
     }
 
     function drawItems() {
@@ -906,6 +1133,21 @@
             run: () => { D.state.single = !D.state.single; D.save(); },
         });
         items.push({
+            label: 'Snap to 45°', checked: !!D.state.snap45,
+            hint: 'trend line, ray and channel follow the diagonal without holding Shift',
+            run: () => { D.state.snap45 = !D.state.snap45; D.save(); },
+        });
+        items.push({
+            label: 'Undo' + (D.undoDepth() ? ` (${D.undoDepth()})` : ''),
+            hint: D.undoDepth() ? 'Ctrl+Z' : 'nothing to undo yet',
+            run: () => { if (D.undoDepth()) D.undo(); },
+        });
+        items.push({
+            label: 'Redo' + (D.redoDepth() ? ` (${D.redoDepth()})` : ''),
+            hint: D.redoDepth() ? 'Ctrl+Shift+Z' : 'nothing to redo',
+            run: () => { if (D.redoDepth()) D.redo(); },
+        });
+        items.push({
             label: 'Hide all drawings', checked: !!D.state.hidden,
             run: () => D.hideAll(),
         });
@@ -924,6 +1166,32 @@
                 label: colour, checked: D.state.style.line === colour,
                 run: () => { D.state.style.line = colour; D.save(); D.paint(); },
             });
+        });
+        const picked = (D.state.multiIds || []).length + (D.state.selected ? 1 : 0);
+        if (picked) {
+            items.push(sep(), { header: `${picked} selected` });
+            items.push({ label: `Duplicate selected (${picked})`, hint: 'Ctrl+D — offset five ticks',
+                run: () => D.duplicateSelection() });
+            items.push({ label: `Delete selected (${picked})`, hint: 'Del',
+                run: () => D.deleteSelection() });
+        }
+        items.push(sep(), { header: 'Style for new drawings' });
+        [1, 2, 3, 4].forEach((w) => {
+            items.push({ label: `Line width ${w}`, checked: (D.state.style.width || 2) === w,
+                run: () => { D.state.style.width = w; D.save(); D.paint(); } });
+        });
+        ['solid', 'dashed', 'dotted'].forEach((dash) => {
+            items.push({ label: `Line ${dash}`, checked: (D.state.style.dash || 'solid') === dash,
+                run: () => { D.state.style.dash = dash; D.save(); D.paint(); } });
+        });
+        [['off', 0], ['10%', 0.1], ['20%', 0.2], ['35%', 0.35]].forEach((pair) => {
+            const alpha = pair[1];
+            const want = fillFor(D.state.style.line, alpha);
+            const have = D.state.style.fill || '';
+            const same = alpha ? (have === want || (have && have.indexOf(',' + alpha + ')') > 0)) : !have;
+            items.push({ label: 'Fill ' + pair[0], checked: !!same,
+                hint: 'shapes only — rectangle, ellipse, channel',
+                run: () => { D.state.style.fill = want; D.save(); D.paint(); } });
         });
         if (D.drawings.length) {
             items.push(sep(), { header: `On this view: ${D.drawings.length}` });
@@ -1237,13 +1505,11 @@
             /* The bar owns its own dropdown layer so a menu can never be clipped by the topbar. */
             state.bar.innerHTML = menus().map((m) => `<div class="mb-slot" data-slot="${m.id}">`
                 + `<button class="mb-title" data-menu="${m.id}">${escp(m.label)}</button>`
-                + `<div class="mb-menu" data-menu="${m.id}"></div></div>`).join('')
-                /* §92: the bar hides itself — a physical control, and the paired reveal button
-                   lives in the topbar's marked spot (visible only while the bar is hidden). */
-                + '<div class="mb-grow"></div>'
-                + '<button class="mb-hide" id="mbHide" title="Hide the top menu bar">hide</button>';
-            const hideBtn = state.bar.querySelector('#mbHide');
-            if (hideBtn) hideBtn.addEventListener('click', () => { if (window.OFAPCHROME) OFAPCHROME.toggle('menubar'); });
+                + `<div class="mb-menu" data-menu="${m.id}"></div></div>`).join('');
+            /* §119: one control per action — the bar no longer carries its own "hide" button; the
+               boxed topbar toggle (menu hide / menu show) is the single way out and back, with B on
+               the keys. A duplicate hide read as clutter, and a hide that folds its own way back
+               away is the trap the heatmap's minimal mode once had. */
             bind();
             /* R7: labels can change while the app runs (the Update title badges a waiting build),
                so the titles can be re-read without a page reload. */
@@ -1298,8 +1564,17 @@
         });
         /* A top menu closes the moment you touch anything else — on mousedown, in the CAPTURE phase,
            so a panel that stops propagation (canvas drags, the tape) cannot hold it open, and the
-           dropdown never sits over a gesture the user already started. Window blur and any scroll
-           close it too, as a native menu does. */
+           dropdown never sits over a gesture the user already started. Window blur, a focus change
+           and Tab close it too, as a native menu does.
+           §129b exempted the dropdown's OWN scroll from the closer. §134 removes the closer's other
+           false positive: a scroll EVENT is not proof of a user gesture. The suite's panels scroll
+           THEMSELVES — the strips pin to the newest print, the signal log sticks to its bottom — so
+           as soon as data flows a scroll fires every few seconds and killed the menu mid-reach
+           (owner: "fine at first, but after 10-20 s it disappears before I can pick anything").
+           What closes the menu now is what closes a native one: the USER scrolling — a wheel or a
+           touch drag — anywhere outside the bar. Dragging a scrollbar lands on mousedown (which
+           still closes), and keyboard scrolling only happens once focus has left the bar (which the
+           focus change closes first). */
         document.addEventListener('mousedown', (ev) => {
             if (!ev.target.closest || !ev.target.closest('#menuBar')) closeAll();
         }, true);
@@ -1307,7 +1582,14 @@
             if (state.open && ev.target.closest && !ev.target.closest('#menuBar')) closeAll();
         });
         window.addEventListener('blur', () => closeAll());
-        document.addEventListener('scroll', () => closeAll(), true);
+        document.addEventListener('wheel', (ev) => {
+            if (ev.target && ev.target.closest && ev.target.closest('#menuBar')) return;
+            closeAll();
+        }, { capture: true, passive: true });
+        document.addEventListener('touchmove', (ev) => {
+            if (ev.target && ev.target.closest && ev.target.closest('#menuBar')) return;
+            closeAll();
+        }, { capture: true, passive: true });
         document.addEventListener('keydown', (ev) => {
             if (ev.key === 'Tab' && state.open) closeAll();
         }, true);

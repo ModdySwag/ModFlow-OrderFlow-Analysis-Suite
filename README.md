@@ -5,9 +5,9 @@
 [![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](.)
 [![License](https://img.shields.io/badge/license-MIT-informational?style=for-the-badge)](LICENSE)
 [![Instruments](https://img.shields.io/badge/instruments-49-blue?style=for-the-badge)](.)
-[![Code](https://img.shields.io/badge/code-~98k%20lines-brightgreen?style=for-the-badge)](.)
-[![API](https://img.shields.io/badge/API-186%20routes-orange?style=for-the-badge)](.)
-[![Tests](https://img.shields.io/badge/tests-1584%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+[![Code](https://img.shields.io/badge/code-~129k%20lines-brightgreen?style=for-the-badge)](.)
+[![API](https://img.shields.io/badge/API-190%20routes-orange?style=for-the-badge)](.)
+[![Tests](https://img.shields.io/badge/tests-2494%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
 
 **Where it sits:** ModFlow is an analytics layer, not a broker terminal — it reads the market in
 depth and sits beside whatever you execute in. No order tickets, no positions, no sign-up; your
@@ -70,6 +70,28 @@ The full write-up, with the reasoning behind each, is in
 
 ---
 
+## Multiple monitors
+
+Every panel can live in its own real window, on any monitor you have — a depth map pinned on the
+second screen, the tape on the third, the board itself wherever you left it.
+
+- **One click to place.** A widget's **⧉** button (Terminal mode) or **View → Windows & layouts…**
+  opens any panel on any monitor, already placed — left half, right half, a corner, centred or
+  filling the screen. Ten shapes, every display, in both the Terminal and the Classic layout.
+- **One click to move.** Send an open window to another monitor, or snap it where it is, from its
+  row in the window menu, from the Windows & layouts dialog, or from the window's own bar.
+  **Ctrl+Alt+Shift+←/→** moves the panel you are working on one monitor over; **Ctrl+Alt+W** opens
+  its window menu.
+- **It remembers — and it rescues.** Positions are saved, so tomorrow's launch rebuilds the same
+  desk; if a monitor is not there any more, the window comes home to the primary rather than
+  sitting off-screen, and **Bring them home** in the dialog rescues every stranded window at once.
+
+A note on the honest limit: dragging a panel out of the board with the mouse is not possible inside
+the app's embedded browser (a page cannot start an operating-system window drag), so moving and
+placing are commands — one click, or one shortcut, each.
+
+---
+
 ## Credit & Lineage
 
 The original **OrderFlow Analysis Pro** — the microstructure engines, the five pattern detectors,
@@ -87,6 +109,9 @@ give it a star: **<https://github.com/mahmoud20138/OrderFlow-Analysis-Pro>**
 **v0.1.0-beta.** The suite runs a live venue feed, a canvas UI and a local API, and it is
 published so it can be read, run and reviewed — not as a finished product. What that means in
 practice:
+
+**Release identity.** The package and artifact version is `0.1.0`; the public release is
+tagged **`v0.1.0-beta`** — the label used in this README and in `SECURITY.md`.
 
 - **Feed data is only as good as the venue.** The suite does not invent guarantees the exchanges
   do not provide: there is no trade-level gap detection or replay, Alpaca's free `iex` feed is a
@@ -110,6 +135,7 @@ practice:
 - [See It Running](#see-it-running)
 - [Status, limitations & privacy](#status-limitations--privacy)
 - [Golden Features](#golden-features)
+- [Multiple monitors](#multiple-monitors)
 - [Credit & Lineage](#credit--lineage)
 - [What Is OrderFlow Analysis?](#what-is-orderflow-analysis)
 - [System Overview](#system-overview)
@@ -163,6 +189,10 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 | **Orderbook** | Limit orders waiting at each price level | Where are the walls? Thin levels = easy to sweep. |
 | **Absorption** | Aggressive volume with no price movement | Someone is defending a level with limit orders. |
 | **Initiative** | Aggressive volume WITH price movement | Institutional conviction pushing price. |
+| **Dealer gamma (GEX)** | The gamma option dealers carry, strike by strike, with the call/put walls | Which strikes pin price, and where a hedge-driven move accelerates? |
+| **IV smile & 25Δ skew** | Implied volatility per strike and expiry, and the put-vs-call wings | What is the options market pricing for this expiry, and which wing is bid? |
+| **Option flow** | Option prints classified into sweeps, blocks and unusual premium | Where is the size going, and in which strikes? |
+| **Market read** | A deterministic read of the engine's own state — regime, conviction, key levels | What do the live analyzers agree on right now? |
 
 ---
 
@@ -194,7 +224,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
 │               │                                  │                          │
 │  ┌────────────▼──────────┐  ┌───────────────────▼────────────────────┐     │
 │  │   Telegram Alerts     │  │   FastAPI Dashboard                    │     │
-│  │   Entry/BE/Trail/Exit │  │   186 REST/WS routes + streams         │     │
+│  │   Entry/BE/Trail/Exit │  │   192 REST/WS routes + streams         │     │
 │  │   Daily Bias updates  │  │   Charts, VP, Footprint, Orderbook     │     │
 │  └───────────────────────┘  │   Scanner, Strategy Status, Tape       │     │
 │                              └───────────────────────────────────────┘     │
@@ -221,7 +251,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
                             │
      ┌──────────────┐       │       ┌──────────────┐
      │  Bybit Feed  │───────┤       │   Database   │
-     │  (394L)      │       ├──────▶│  (669L)      │
+     │  (394L)      │       ├──────▶│  (673L)      │
      │  WebSocket   │       │       │  SQLite WAL  │
      │  Free, no key│       │       └──────────────┘
      └──────────────┘       │
@@ -265,7 +295,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
                       ▼
             ┌─────────────────────┐
             │  Signal Aggregator  │ ← State machine (6 states)
-            │  (530L)             │ ← Composite scoring (0-100)
+            │  (540L)             │ ← Composite scoring (0-100)
             │                     │ ← SL/TP calculation
             └──────┬──────────────┘
                    │
@@ -274,7 +304,7 @@ Lagging: Yes (averages)            Leading: No (real-time microstructure)
  ┌──────────┐ ┌──────────┐  ┌───────────────┐
  │ Telegram │ │Dashboard │  │  Database     │
  │ Bot      │ │ FastAPI  │  │  Journal      │
- │ (205L)   │ │ (1453L)  │  │  Logging      │
+ │ (205L)   │ │ (1461L)  │  │  Logging      │
  └──────────┘ └──────────┘  └───────────────┘
 ```
 
@@ -291,7 +321,7 @@ main.py (1341L) ─── System orchestrator
     │   ├── mt5_feed.py (613L) ─── MT5 terminal: ticks, book, history
     │   ├── bybit_feed.py (394L) ─── Bybit WebSocket: trades + orderbook
     │   ├── ninjatrader_feed.py (646L) ─── NinjaTrader 8 via the shipped read-only bridge
-    │   └── database.py (669L) ─── SQLite: 5 tables, WAL mode
+    │   └── database.py (673L) ─── SQLite: 5 tables, WAL mode
     │
     ├── analytics/
     │   ├── volume_profile.py (343L) ─── POC/VAH/VAL/LVN/shape
@@ -308,7 +338,7 @@ main.py (1341L) ─── System orchestrator
     │
     ├── signals/
     │   ├── profile_framing.py (352L) ─── Daily bias + qualified levels
-    │   └── aggregator.py (530L) ─── State machine + composite scoring
+    │   └── aggregator.py (540L) ─── State machine + composite scoring
     │
     ├── alerts/
     │   └── telegram_bot.py (205L) ─── Telegram notifications
@@ -321,13 +351,13 @@ main.py (1341L) ─── System orchestrator
         └── static/ ─── the legacy page's assets, served at /static/
 
     ├── atlas/ ─── live analytics (CVD, heatmap, imbalance, tapeflow, profiles)
-    │   └── api.py ─── the /api/atlas/* surface (56 routes)
+    │   └── api.py ─── the /api/atlas/* surface (70 routes)
     │
     ├── desktop/ ─── the desktop application
     │   ├── launcher.py ─── pywebview window / --headless server
     │   ├── api.py ─── /api/control/* (config, feeds, alerts, exports, layouts)
     │   ├── engine.py ─── the live pipeline host the UI reads from
-    │   └── ui/ ─── vanilla-JS modules (~45,567L across 115 files) + index.html
+    │   └── ui/ ─── vanilla-JS modules (~63,627L across 154 files) + index.html
 ```
 
 ---
@@ -631,7 +661,7 @@ The system auto-discovers instruments across 200+ broker-specific naming variant
 
 ### Frontend Components
 
-The current UI is the desktop suite: **115 vanilla-JS modules** (35 of them selftests) in `orderflow_system/desktop/ui/`
+The current UI is the desktop suite: **154 vanilla-JS modules** (56 of them selftests) in `orderflow_system/desktop/ui/`
 (shell and menus, chart, the order-flow engine, heatmap, tape, alerts, options, fundamentals, news,
 search, watchlist, studies — no build step, no framework). The 8 modules listed below are the legacy
 dashboard page's assets, still served at `/static/`:
@@ -993,7 +1023,7 @@ orderflow_system/
 │   ├── mt5_feed.py                  # MT5 terminal feed with auto-discovery (613L)
 │   ├── ninjatrader_feed.py          # NinjaTrader 8 via the shipped read-only bridge (646L)
 │   ├── ninjatrader_bridge/          # the NT8 add-on: C# source, build.ps1, the built DLL
-│   └── database.py                  # SQLite persistence, 5 tables (669L)
+│   └── database.py                  # SQLite persistence, 5 tables (673L)
 │
 ├── analytics/
 │   ├── volume_profile.py            # POC, VAH, VAL, LVN, shape classification (343L)
@@ -1010,13 +1040,13 @@ orderflow_system/
 │
 ├── signals/
 │   ├── profile_framing.py           # Daily bias + qualified levels (352L)
-│   └── aggregator.py                # State machine + composite scoring (530L)
+│   └── aggregator.py                # State machine + composite scoring (540L)
 │
 ├── alerts/
 │   └── telegram_bot.py              # Telegram notifications (205L)
 │
 └── dashboard/
-    ├── app.py                       # FastAPI REST + WebSocket (1453L)
+    ├── app.py                       # FastAPI REST + WebSocket (1461L)
     ├── websocket_manager.py         # 10-channel broadcast manager (308L)
     ├── demo_data.py                 # Deterministic demo data generator (806L)
     ├── __main__.py                  # Standalone launcher (90L)
@@ -1024,10 +1054,10 @@ orderflow_system/
         ├── index.html               # Main HTML shell (121L)
         ├── app.js                   # the chart library charts + WebSocket (951L)
         ├── style.css                # Dashboard styling (566L)
-        ├── footprint.js             # Canvas footprint chart (726L)
+        ├── footprint.js             # Canvas footprint chart (749L)
         ├── signals.js               # Signal recommendation cards (479L)
         ├── performance.js           # Performance analytics (644L)
-        ├── orderbook.js             # Orderbook depth ladder (398L)
+        ├── orderbook.js             # Orderbook depth ladder (451L)
         ├── microstructure.js        # Microstructure indicators (417L)
         └── tape.js                  # Time & sales (448L)
 ```
@@ -1038,17 +1068,17 @@ orderflow_system/
 
 | Area | Files | Python Lines | UI Lines (JS/CSS/HTML) | Total Lines |
 |------|-------|-------------|------------------------|-------------|
-| Config | 2 | 842 | — | 842 |
-| Data feeds + storage | 17 | 7,368 | — | 7,368 |
-| Analytics (delta, footprint, volume profile, patterns, signals, alerts) | 17 | 3,196 | — | 3,196 |
-| Atlas (live analytics + `/api/atlas/*`) | 30 | 9,481 | — | 9,481 |
-| Desktop app (desktop package + packaging scripts) | 39 | 19,460 | — | 19,460 |
-| Desktop UI (vanilla JS + CSS + HTML, no build step) | 125 | — | 49,112 | 49,112 |
-| Legacy dashboard (host + legacy page assets) | 14 | 2,658 | 4,859 | 7,517 |
-| Orchestrator (`main.py` + package init) | 2 | 1,350 | — | 1,350 |
-| **Total (excluding tests)** | **246** | **44,355** | **53,971** | **98,326** |
+| Config | 2 | 892 | — | 892 |
+| Data feeds + storage | 20 | 8,593 | — | 8,593 |
+| Analytics (delta, footprint, volume profile, orderbook, session, signals) | 9 | 2,052 | — | 2,052 |
+| Atlas (live analytics + `/api/atlas/*`) | 41 | 20,557 | — | 20,557 |
+| Desktop app (desktop package + packaging scripts) | 42 | 23,198 | — | 23,198 |
+| Desktop UI (vanilla JS + CSS + HTML, no build step) | 165 | — | 67,857 | 67,857 |
+| Legacy dashboard (host + legacy page assets) | 15 | 2,666 | 5,088 | 7,754 |
+| Orchestrator (`main.py` + package init) | 2 | 1,387 | — | 1,387 |
+| **Total (excluding tests)** | **296** | **56,679** | **72,945** | **129,624** |
 
-Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest suite is another 146 files / 27,729 lines. The NinjaTrader bridge add-on ships as C# (`orderflow_system/data/ninjatrader_bridge/` — 1,126 lines of source + build script, plus the built DLL) and is not counted in the columns above; the desktop UI count also excludes its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the eleven Help Centre screenshots (`orderflow_system/desktop/ui/help/`).
+Measured with a line count over `orderflow_system/**` and `scripts/*.py` (the two PowerShell release scripts — 271 lines — are not counted); the pytest suite is another 180 files / 42,418 lines. The NinjaTrader bridge add-on ships as C# (`orderflow_system/data/ninjatrader_bridge/` — 1,666 lines across four files, plus the built DLL) and is not counted in the columns above; the desktop UI count also excludes its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the eleven Help Centre screenshots (`orderflow_system/desktop/ui/help/`).
 
 ---
 
@@ -1056,8 +1086,8 @@ Measured with a line count over `orderflow_system/**` and `scripts/`; the pytest
 
 ### REST Endpoints (legacy dashboard API)
 
-The app additionally serves `/api/atlas/*` (56 routes — heatmap, tape, CVD, profiles, imbalance,
-trades, scanner, alerts, replay) and `/api/control/*` (108 routes — config, feeds, exports, layouts, backfill, windows, help).
+The app additionally serves `/api/atlas/*` (70 routes — heatmap, tape, CVD, profiles, imbalance,
+trades, scanner, alerts, replay) and `/api/control/*` (103 routes — config, feeds, exports, layouts, backfill, windows, help).
 The always-current list is the running app's OpenAPI schema at `/docs`. The endpoints below are the
 legacy dashboard set, kept for compatibility:
 

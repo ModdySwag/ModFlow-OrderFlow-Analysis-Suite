@@ -98,7 +98,27 @@ select, input[type="text"], input[type="number"], input[type="password"] {
     border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; outline: none;
 }
 select:focus, input:focus { border-color: var(--border-active); }
-.symbol-picker select { border: none; background: transparent; padding: 0; font-weight: 600; font-size: 13.5px; }
+|.symbol-picker select { border: none; background: transparent; padding: 0; font-weight: 600; font-size: 13.5px; }
+|.symbol-picker.switching { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue), 0 0 8px rgba(0, 100, 200, .35); }
+|.symbol-picker.switching::after {
+|    content: "";
+|    display: inline-block;
+|    width: 10px; height: 10px;
+|    border: 1.5px solid var(--blue);
+|    border-top-color: transparent;
+|    border-radius: 50%;
+|    animation: spin 0.6s linear infinite;
+|    position: absolute;
+|    right: 14px; top: 50%;
+|    transform: translateY(-50%);
+|    pointer-events: none;
+|}
+|.symbol-picker { position: relative; }
+/* The dropdown's popup is drawn by the browser, not the page: with no option colours the theme's
+   light ink landed on the platform's white list and every row but the hovered one was unreadable
+   (the instrument menu in the top bar — light text on white). The tokens are the theme's own, so
+   the popup follows the appearance switch instead of pinning one. */
+select option { background-color: var(--bg-panel); color: var(--text-primary); }
 .pill {
     display: inline-flex; align-items: center; gap: 7px;
     padding: 5px 11px; border-radius: 999px; font-size: 12px;
@@ -123,6 +143,47 @@ select:focus, input:focus { border-color: var(--border-active); }
 .btn.primary { background: linear-gradient(140deg, rgb(var(--of-accent-2-rgb)), rgb(var(--of-accent-3-rgb))); border-color: transparent; color: var(--of-white); }
 .btn.success { background: rgba(var(--of-ok-rgb),.16); border-color: rgba(var(--of-ok-rgb),.4); color: var(--green); }
 .btn.danger  { background: rgba(var(--of-err-rgb),.14); border-color: rgba(var(--of-err-rgb),.4); color: var(--red); }
+
+/* §132/§133 — the engine progress bar, first child of the button cluster.
+   Measured lesson (§133): an absolutely-positioned bar anchored off the cluster landed ON TOP of the
+   Classic/Terminal switch — the space left of the buttons is not empty, and the bar covered a live
+   control (the owner's screenshot). So it is IN FLOW with its width RESERVED: the top bar's flex
+   spacer absorbs it (nothing to its right ever moves), `visibility` hides it when idle while keeping
+   the 152 px so the controls never jump, and growing it can never reach a neighbour. Green on the way
+   up, red on the way down (the owner's ask), a 4 px track under a one-line caption, tabular figures
+   so the ticking seconds never twitch the text. */
+.engine-ctl { display: inline-flex; align-items: center; gap: 6px; }
+.ep {
+    /* shrinkable (never a fixed 152 px of pressure on a crowded bar): the caption ellipsises
+       before the slot pushes anyone */
+    flex: 0 1 152px; min-width: 0; width: 152px; display: inline-flex; flex-direction: column; gap: 3px;
+    align-items: flex-end; pointer-events: none;   /* a hint, never a target: clicks are the buttons' */
+}
+/* `hidden` must keep the space (a shifting top bar is worse than an empty slot): it is the
+   visibility that changes, never the box. */
+.ep[hidden] { display: inline-flex; visibility: hidden; }
+.ep-cap {
+    font-size: 10.5px; line-height: 1.1; letter-spacing: .02em; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; text-align: right; color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+.ep-track { height: 4px; border-radius: 2px; background: rgba(var(--of-white-rgb),.10); overflow: hidden; }
+.ep-fill {
+    display: block; height: 100%; width: 0%; border-radius: 2px;
+    transition: width .18s linear;      /* the maths carves; this only smooths the last 180 ms */
+}
+.ep.up .ep-cap { color: var(--green); }
+.ep.up .ep-fill { background: linear-gradient(90deg, rgba(var(--of-ok-rgb),.55), var(--green)); }
+.ep.down .ep-cap { color: var(--red); }
+.ep.down .ep-fill { background: var(--red); }
+.ep.done .ep-fill { background: var(--green); }
+.ep.done .ep-cap { color: var(--green); }
+body.zen .ep, body.zen .engine-ctl .ep { display: none; }   /* zen hides the chrome, bar included */
+/* Crowded bars (the suite already collides pill-to-pill below ~1180 px): the slot gives way before
+   it pushes anyone — the caption ellipsises, the bar stays. 152 px at his working width, less when
+   the room is not there. */
+@media (max-width: 1500px) { .ep { flex-basis: 118px; width: 118px; } }
+@media (max-width: 1180px) { .ep { flex-basis: 96px; width: 96px; } }
 .btn.small   { padding: 4px 10px; font-size: 12px; }
 
 /* ── views ────────────────────────────────────────────────────── */
@@ -171,6 +232,23 @@ table.data th {
 table.data td { padding: 7px 12px; border-bottom: 1px solid rgba(var(--of-line-rgb),.5); font-family: var(--font-mono); }
 table.data tr:hover td { background: rgba(var(--of-accent-rgb),.05); }
 table.data td.name { font-family: var(--font-sans); font-weight: 550; }
+
+/* Figures, option sides and the two row states a chain reader looks for (§139). A table whose
+   numbers are left-aligned cannot be read down a column, and a chain that does not say which rows
+   are in the money makes the reader do the comparison in their head. */
+table.data td.num, table.data th.num { text-align: right; }
+table.data td.call, table.data th.call { color: var(--green); }
+table.data td.put,  table.data th.put  { color: var(--red); }
+table.data tr.itm td { background: rgba(var(--of-white-rgb),.022); }
+table.data tr.atm td {
+    background: rgba(var(--of-accent-rgb),.10);
+    box-shadow: inset 2px 0 0 var(--of-accent);
+}
+table.data td.chip { text-transform: uppercase; font-size: 10.5px; letter-spacing: .06em; }
+table.data td.chip.sweep   { color: var(--of-accent); }
+table.data td.chip.block   { color: var(--orange); }
+table.data td.chip.unusual { color: var(--purple); }
+table.data td.chip.routine { color: var(--text-muted); }
 .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 10.5px; letter-spacing: .04em; background: rgba(var(--of-white-rgb),.06); color: var(--text-secondary); font-family: var(--font-sans); }
 .tag.ok { background: var(--green-bg); color: var(--green); }
 .tag.no { background: var(--red-bg); color: var(--red); }

@@ -341,6 +341,72 @@ def test_credentials_are_masked_on_read_and_kept_through_a_masked_write(tmp_path
     assert "mask_secrets" in api, "GET /config and /bootstrap must mask"
 
 
+def test_the_rest_feeds_credentials_are_masked_and_kept_through_a_masked_write(tmp_path, monkeypatch) -> None:
+    """The optional REST feeds (Tradier / Market Data / Finnhub) hold keys too — same rules."""
+    from orderflow_system.desktop import config_store
+
+    monkeypatch.setattr(config_store, "config_dir", lambda: tmp_path)
+    stored = config_store.save_config({
+        "tradier": {"key_id": "TR-REAL-ID", "secret": "TR-REAL-SECRET", "chain_width": 9},
+        "marketdata": {"api_key": "MD-REAL-KEY"},
+        "finnhub": {"api_key": "FH-REAL-KEY"},
+    })
+
+    masked = config_store.mask_secrets(stored)
+    for path in ("tradier.key_id", "tradier.secret", "marketdata.api_key", "finnhub.api_key"):
+        block, leaf = path.split(".")
+        assert masked[block][leaf] == config_store.SECRET_MASK, path
+    assert masked["tradier"]["chain_width"] == 9, "a width is not a credential"
+
+    # the UI flow: the whole masked config goes back, and every feed key survives
+    config_store.merge_config(masked)
+    kept = config_store.load_config()
+    assert kept["tradier"]["key_id"] == "TR-REAL-ID" and kept["tradier"]["secret"] == "TR-REAL-SECRET"
+    assert kept["marketdata"]["api_key"] == "MD-REAL-KEY" and kept["finnhub"]["api_key"] == "FH-REAL-KEY"
+
+    # a genuine value replaces; an explicit empty string clears (the Feed keys card's ×)
+    config_store.merge_config({"finnhub": {"api_key": "FH-NEW"}})
+    assert config_store.load_config()["finnhub"]["api_key"] == "FH-NEW"
+    config_store.merge_config({"finnhub": {"api_key": ""}})
+    assert config_store.load_config()["finnhub"]["api_key"] == ""
+    assert config_store.load_config()["tradier"]["secret"] == "TR-REAL-SECRET", "and only that leaf"
+
+
+def test_every_credential_leaf_in_a_feed_block_is_on_the_secret_list(tmp_path, monkeypatch) -> None:
+    """The mask list is a literal list, so a new feed must not be able to forget it.
+
+    SECRET_PATHS is the only thing standing between GET /config and a user's Tradier / Market Data /
+    Finnhub key. This walks the SHIPPED blocks — the same names the Settings ▸ Feed keys card writes
+    through `_FEED_KEY_BLOCKS` — and fails on any credential-shaped leaf the list does not cover,
+    in either direction: an uncovered leaf leaks, and a covered name with no leaf behind it is a
+    stale entry that hides the next real miss.
+    """
+    import re
+
+    from orderflow_system.desktop import api as desktop_api
+    from orderflow_system.desktop import config_store
+
+    monkeypatch.setattr(config_store, "config_dir", lambda: tmp_path)
+    cfg = config_store.default_config()
+    feed_leaves = {name: set(leaves) for name, _label, _buys, leaves in desktop_api._FEED_KEY_BLOCKS}
+    assert feed_leaves, "the card's feed list is the source of truth for this sweep"
+
+    credential = re.compile(r"(^|_)(key|secret|token|password)")
+    covered = {path for path in config_store.SECRET_PATHS if path.split(".")[0] in feed_leaves}
+
+    for feed, leaves in feed_leaves.items():
+        block = cfg.get(feed) or {}
+        for leaf in sorted(block):
+            if credential.search(leaf):
+                assert f"{feed}.{leaf}" in config_store.SECRET_PATHS, \
+                    f"{feed}.{leaf} is stored and would be read back in plain text"
+        for leaf in sorted(leaves):
+            assert leaf in block, f"the card offers {feed}.{leaf}, which the shipped block does not carry"
+    for path in sorted(covered):
+        feed, leaf = path.split(".")
+        assert leaf in (cfg.get(feed) or {}), f"{path} masks nothing — the leaf is not in the block"
+
+
 # ── SEC-08 · the shell's script-src carries a hash, not 'unsafe-inline' ──────────────────────
 def test_the_shell_csp_hashes_its_inline_script_instead_of_allowing_all_inline() -> None:
     import base64

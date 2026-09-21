@@ -9,7 +9,7 @@
     'use strict';
 
     const PLAT = { data: null, plan: 'free', integrated: false, bmPlan: 'digital', bmIntegrated: false,
-                   ntPlan: 'free', ntIntegrated: false };
+                   ntPlan: 'free', ntIntegrated: false, ntNames: [] };
     const el = (id) => document.getElementById(id);
     function plEsc(t) {
         return String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -31,6 +31,14 @@
         } catch (err) {
             PLAT.data = { sierra: {}, note: `integration state unavailable: ${err}` };
         }
+        /* The NinjaTrader probe box's options: the terminal names already mapped in the config
+           (instrument.js's pure half picks them out). A failed read leaves the list empty —
+           the box keeps its plain-text behaviour rather than inventing names. */
+        try {
+            const cfg = await api('/api/control/config');
+            PLAT.ntNames = (window.OFAPINSTRUMENT && OFAPINSTRUMENT.ninjatraderNames)
+                ? OFAPINSTRUMENT.ninjatraderNames((cfg && cfg.instruments) || []) : [];
+        } catch (err) { PLAT.ntNames = []; }
         const s = (PLAT.data && PLAT.data.sierra) || {};
         PLAT.plan = s.plan || 'free';
         PLAT.integrated = !!s.integrated;
@@ -125,8 +133,9 @@
                 <label>Username<input id="plDtcUser" value="${plEsc(s.username || '')}" size="14" autocomplete="off"></label>
                 <label>Password<input id="plDtcPass" type="password" placeholder="${s.password_set ? '•••• saved' : 'not set'}"
                        size="14" autocomplete="new-password"></label>
-                <label>Symbol<input id="plDtcSymbol" value="${plEsc(s.symbol || (syms[0] || ''))}" size="12"
+                <label>Symbol<input id="plDtcSymbol" list="plDtcSymbolOptions" value="${plEsc(s.symbol || (syms[0] || ''))}" size="12"
                        placeholder="e.g. ${plEsc(syms[0] || 'ESZ6')}"></label>
+                <datalist id="plDtcSymbolOptions">${syms.map((sym) => `<option value="${plEsc(sym)}"></option>`).join('')}</datalist>
                 <label class="switch"><input type="checkbox" id="plDtcTls" ${s.use_tls ? 'checked' : ''}> TLS</label>
                 <label class="switch"><input type="checkbox" id="plDtcEnabled" ${s.enabled ? 'checked' : ''}> Enabled</label>
             </div>
@@ -257,8 +266,9 @@
             <div class="field-row">
                 <label>Host<input id="bmHost" value="${plEsc(bm.host || '127.0.0.1')}" size="14"></label>
                 <label>Port<input id="bmPort" value="${plEsc(bm.port || 8791)}" size="7"></label>
-                <label>Symbol<input id="bmSymbol" value="${plEsc(bm.symbol || (syms[0] || ''))}" size="12"
+                <label>Symbol<input id="bmSymbol" list="bmSymbolOptions" value="${plEsc(bm.symbol || (syms[0] || ''))}" size="12"
                        placeholder="optional filter, e.g. ${plEsc(syms[2] || 'BTCUSDT')}"></label>
+                <datalist id="bmSymbolOptions">${syms.map((sym) => `<option value="${plEsc(sym)}"></option>`).join('')}</datalist>
                 <label class="switch"><input type="checkbox" id="bmAddonBuilt" ${bm.addon_built ? 'checked' : ''}> add-on added</label>
                 <label class="switch"><input type="checkbox" id="bmEnabled" ${bm.enabled ? 'checked' : ''}> Enabled</label>
             </div>
@@ -378,8 +388,9 @@
             <div class="field-row">
                 <label>Host<input id="ntHost" value="${plEsc(nt.host || '127.0.0.1')}" size="14"></label>
                 <label>Port<input id="ntPort" value="${plEsc(nt.port || 8790)}" size="7"></label>
-                <label>Test instrument<input id="ntSymbol" value="${plEsc(nt.symbol || 'NQ')}" size="10"
+                <label>Test instrument<input id="ntSymbol" list="ntSymbolOptions" value="${plEsc(nt.symbol || 'NQ')}" size="10"
                        placeholder="NQ / NQ1 / ES\u2026" title="Any name your terminal lists \u2014 NQ, NQ1, ES, MNQ 12-26\u2026"></label>
+                <datalist id="ntSymbolOptions">${(PLAT.ntNames || []).map((n) => `<option value="${plEsc(n)}"></option>`).join('')}</datalist>
                 <label class="switch"><input type="checkbox" id="ntEnabled" ${nt.enabled ? 'checked' : ''}> Enabled</label>
             </div>
             <div class="field-row">

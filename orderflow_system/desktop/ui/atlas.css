@@ -191,7 +191,9 @@ td.down, b.down, span.down { color: var(--red); }
 /* ── order-flow engine ─────────────────────────────────────────────────── */
 .ofx-bar { gap: 10px; align-items: center; flex-wrap: wrap; }
 .ofx-bar input { background: rgba(var(--of-input-2-rgb),.9); color: var(--of-ink-2); border: 1px solid rgba(var(--of-steel-rgb),.35); border-radius: 4px; padding: 3px 6px; }
+.ofx-bar input.switching { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue), 0 0 6px rgba(0, 100, 200, .4); }
 .ofx-bar select.ofx-sym-pick { background: rgba(var(--of-input-2-rgb),.9); color: var(--of-ink-2); border: 1px solid rgba(var(--of-steel-rgb),.35); border-radius: 4px; padding: 3px 6px; max-width: 230px; }
+.ofx-bar select.ofx-sym-pick.switching { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue), 0 0 6px rgba(0, 100, 200, .4); }
 .ofx-stage { position: relative; height: clamp(320px, 58vh, 900px); margin: 8px 0; border: 1px solid rgba(var(--of-steel-rgb),.25); border-radius: 6px; overflow: hidden; background: var(--of-bg-deep); }
 .ofx-layer { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #ofxHeat { z-index: 1; } #ofxBase { z-index: 2; cursor: crosshair; } #ofxLive { z-index: 3; pointer-events: none; }
@@ -412,6 +414,16 @@ tr.ofx-traced, .ofx-traced { outline: 1px solid rgba(var(--of-trace-rgb),.8); ou
     border: 0; border-radius: 2px; padding: 3px 8px; }
 .ofap-hold.on { display: inline-block; }
 
+/* §140: the depth map’s colour scale, stated on screen. A map whose brightness has no legend
+   cannot be read at a glance — the bar is painted from the same ramp the cells use, at paint
+   time, so the legend can never describe a scale the map is not drawing. */
+.hm-legend { display: inline-flex; align-items: center; gap: 7px; margin-right: 12px; }
+.hm-legend-bar {
+    width: 78px; height: 8px; border-radius: 3px;
+    border: 1px solid rgba(var(--of-line-rgb),.6); background: rgba(var(--of-accent-rgb),.08);
+}
+.hm-legend .dim { font: 500 10px ui-monospace, monospace; white-space: nowrap; }
+
 /* ── Engine legend panel ──────────────────────────────────────────────────
    The engine's own account of the layout, the colour keys, the data it reads and the interactions.
    Three columns on a wide window, two when it narrows, scrollable so the ribbon and the stage keep
@@ -547,6 +559,16 @@ body.term-mode main.views > section.view { display: none; }
 .win-pin, .win-x { background: transparent; border: 0; color: var(--of-ink-hi); cursor: pointer;
     font: inherit; padding: 3px 6px; border-radius: 5px; }
 .win-pin:hover, .win-x:hover { background: rgba(var(--of-link-rgb),.30); }
+/* §128: ⇥ sends a window to a monitor and opens the snap grid; the shapes are one small button
+   each, so a whole two-monitor desk is four clicks. */
+.win-send { background: transparent; border: 1px solid transparent; color: var(--of-ink-hi);
+    cursor: pointer; font: inherit; padding: 2px 6px; border-radius: 5px; }
+.win-send:hover { background: rgba(var(--of-link-rgb),.30); border-color: rgba(var(--of-steel-rgb),.38); }
+.win-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; padding: 2px 6px 5px; }
+.win-preset { display: block; text-align: left; background: transparent; border: 1px solid transparent;
+    color: var(--of-ink-hi); font: inherit; padding: 4px 6px; border-radius: 5px; cursor: pointer; }
+.win-preset:hover { background: rgba(var(--of-link-rgb),.30); border-color: rgba(var(--of-steel-rgb),.38); }
+.win-where { font-size: 10.5px; color: var(--text-muted); }
 .win-sep { height: 1px; margin: 4px 0; background: rgba(var(--of-steel-rgb),.30); }
 .win-note, .win-err { padding: 5px 10px; color: var(--text-muted); font-size: 11px; }
 .win-err { color: var(--red); }
@@ -787,3 +809,19 @@ body.wf-gesture .wf-body { pointer-events: none; }
 .ld-ledger-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 1px 0; opacity: .9; }
 .ld-ledger-reject, .ld-ledger-cancel { opacity: .65; }
 .ld-ledger-end, .ld-ledger-start { opacity: .6; font-style: italic; }
+
+
+/* §144 — the panels drawer. Rows read left to right (name, then what it does), the walk the arrows
+   step through is the same order the eye sees, and the row for the panel already open says so. */
+.menu-head .pal-count { align-self: center; font: 500 10px ui-monospace, monospace; color: var(--of-ink-muted); white-space: nowrap; }
+#menuBody .pal-row .menu-hint { margin-left: 8px; flex: 1 1 auto; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#menuBody .pal-row.pal-cur { background: rgba(var(--of-cyan-rgb),.16); border-color: rgba(var(--of-cyan-rgb),.45); }
+#menuBody .pal-row.pal-open .menu-label::after { content: '\25CF'; color: rgb(var(--of-cyan-2-rgb)); font-size: 8px; vertical-align: middle; margin-left: 6px; }
+#menuBody .pal-hit { color: rgb(var(--of-cyan-2-rgb)); }
+.pal-foot { display: block; width: 100%; margin-top: 4px; padding-top: 6px; border-top: 1px solid rgba(var(--of-steel-rgb),.25);
+  font: 500 10px ui-monospace, monospace; color: var(--of-ink-muted); }
+.pal-empty { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; padding: 6px 8px;
+  border: 1px dashed rgba(var(--of-steel-rgb),.45); border-radius: 6px; color: var(--of-ink-muted); font-size: 11px; }
+.pal-clear { background: rgba(var(--of-steel-rgb),.14); border: 1px solid rgba(var(--of-steel-rgb),.4);
+  border-radius: 6px; color: var(--of-ink-2); padding: 3px 8px; cursor: pointer; font-size: 11px; }

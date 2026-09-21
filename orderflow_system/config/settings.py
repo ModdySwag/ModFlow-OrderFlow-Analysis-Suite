@@ -94,6 +94,9 @@ class DataSource(Enum):
     BOTH = "both"                # Exchange + MT5 simultaneously
     ALPACA = "alpaca"            # Alpaca Markets: US equities/ETFs/options/crypto
     ALL = "all"                  # Every configured source at once
+    TRADIER = "tradier"           # Tradier: real-time OPRA options chains (free tier, brokerage account)
+    MARKETDATA = "marketdata"     # Market Data: real-time OPRA, server-side greeks (~$30/mo, email signup)
+    FINNHUB = "finnhub"           # Finnhub: economic calendar + headlines (free tier, 60 req/min)
 
 
 class BiasDirection(Enum):
@@ -275,6 +278,41 @@ class AlpacaConfig:
         "AAPL": "AAPL", "TSLA": "TSLA", "AMZN": "AMZN", "MSFT": "MSFT",
         "NVDA": "NVDA", "META": "META", "GOOGL": "GOOGL", "SPY": "SPY", "QQQ": "QQQ",
         "BTCUSDT": "BTC/USD", "ETHUSDT": "ETH/USD", "SOLUSDT": "SOL/USD",
+    })
+
+
+@dataclass
+class TradierConfig:
+    """Tradier market-data settings (keys are runtime values, set from config.json)."""
+    key_id: str = ""                          # filled from the user config at start
+    secret: str = ""                          # brokerage account API secret
+    chain_width: int = 6                      # strikes around forward per expiry
+    sandbox: bool = False                     # sandbox.tradier.com when True
+    #: app symbol → Tradier symbol (same ticker for equities).
+    symbols: dict = field(default_factory=lambda: {
+        "SPY": "SPY", "QQQ": "QQQ", "IWM": "IWM", "AAPL": "AAPL",
+        "TSLA": "TSLA", "NVDA": "NVDA", "MSFT": "MSFT",
+    })
+
+
+@dataclass
+class MarketDataConfig:
+    """Market Data (marketdata.app) settings — OPRA chains with greeks."""
+    api_key: str = ""                         # filled from the user config at start
+    symbols: dict = field(default_factory=lambda: {
+        "SPY": "SPY", "QQQ": "QQQ", "IWM": "IWM",
+    })
+
+
+@dataclass
+class FinnhubConfig:
+    """Finnhub settings — economic calendar + news headlines."""
+    api_key: str = ""                         # filled from the user config at start
+    calendar_category: str = "all"            # all | forex | crypto | indices | stocks
+    calendar_days: int = 7                    # days forward to fetch
+    news_category: str = "general"            # general | federalReserve | economic | company | markets
+    symbols: dict = field(default_factory=lambda: {
+        "SPY": "SPY", "QQQ": "QQQ", "NVDA": "NVDA",
     })
 
 
@@ -820,6 +858,18 @@ NINJATRADER = NinjaTraderConfig()
 # The symbol map is app symbol → Alpaca symbol, the same pattern MT5.symbols uses.
 # Equities are plain tickers; Alpaca's crypto pairs are "BASE/QUOTE".
 ALPACA = AlpacaConfig()
+
+# Tradier configuration — real-time OPRA options chains for US equities.
+# Free brokerage account needed; keys live in config.json → "tradier".
+TRADIER = TradierConfig()
+
+# Market Data configuration — OPRA chains with server-side greeks.
+# Market Data account needed (~$30/mo); key lives in config.json → "marketdata".
+MARKETDATA = MarketDataConfig()
+
+# Finnhub configuration — economic calendar + news headlines.
+# Free tier (60 calls/min); key lives in config.json → "finnhub".
+FINNHUB = FinnhubConfig()
 
 # Telegram config — user fills in their token/chat_id
 TELEGRAM = TelegramConfig()

@@ -229,11 +229,16 @@ async function switchInstrument(symbol) {
     const select = document.getElementById('symbolSelect');
     if (select.value !== symbol) select.value = symbol;
 
+    // Show switching indicator while data loads
+    if (select) select.classList.add('switching');
+
     const overlay = document.getElementById('waitingOverlay');
     if (overlay) overlay.classList.add('hidden');
 
     if (!state.priceChart) createPriceChart();
     await loadSymbolData(symbol);
+    // Remove switching indicator after data loads
+    if (select) select.classList.remove('switching');
 }
 
 async function loadSymbolData(symbol) {
@@ -613,7 +618,7 @@ function updateScanner(pairs) {
             <span class="scanner-conf-bar"><span class="scanner-conf-fill" style="width:${conf}%;background:${confColor}"></span></span>
             <span class="scanner-steps">${pips}</span>
             <span class="scanner-bias" style="color:${biasColor}">${biasArrow}</span>
-            <span class="scanner-price">${p.current_price ? p.current_price.toFixed(p.current_price > 100 ? 1 : 4) : '--'}</span>
+            <span class="scanner-price">${p.current_price ? p.current_price.toFixed(p.current_price > 100 ? 1 : 4) : '—'}</span>
         `;
 
         row.addEventListener('click', () => switchInstrument(p.symbol));
@@ -675,15 +680,15 @@ function updateChartInfoOverlay() {
     const poc = vp.poc || bias.poc;
     const vah = vp.vah || bias.vah;
     const val = vp.val || bias.val;
-    const shape = vp.shape || bias.profile_shape || '--';
+    const shape = vp.shape || bias.profile_shape || '—';
 
     let trHtml = '';
     if (poc || vah || val) {
         trHtml += `<div class="chart-vp-levels">`;
         trHtml += `<div class="chart-vp-row"><span class="cvp-label" style="color:var(--text-muted)">Shape</span><span class="cvp-price" style="color:var(--text-muted)">${shape}</span></div>`;
-        trHtml += `<div class="chart-vp-row"><span class="cvp-label" style="color:#d29922">POC</span><span class="cvp-price" style="color:#d29922">${poc ? formatPrice(poc) : '--'}</span></div>`;
-        trHtml += `<div class="chart-vp-row"><span class="cvp-label" style="color:#f85149">VAH</span><span class="cvp-price" style="color:#f85149">${vah ? formatPrice(vah) : '--'}</span></div>`;
-        trHtml += `<div class="chart-vp-row"><span class="cvp-label" style="color:#3fb950">VAL</span><span class="cvp-price" style="color:#3fb950">${val ? formatPrice(val) : '--'}</span></div>`;
+        trHtml += `<div class="chart-vp-row"><span class="cvp-label" style="color:#d29922">POC</span><span class="cvp-price" style="color:#d29922">${poc ? formatPrice(poc) : '—'}</span></div>`;
+        trHtml += `<div class="chart-vp-row"><span class="cvp-label" style="color:#f85149">VAH</span><span class="cvp-price" style="color:#f85149">${vah ? formatPrice(vah) : '—'}</span></div>`;
+        trHtml += `<div class="chart-vp-row"><span class="cvp-label" style="color:#3fb950">VAL</span><span class="cvp-price" style="color:#3fb950">${val ? formatPrice(val) : '—'}</span></div>`;
 
         const qLevels = bias.qualified_levels || [];
         if (qLevels.length > 0) {
@@ -919,26 +924,26 @@ function updatePriceDisplay(price, delta) {
     const deltaEl = document.getElementById('currentDelta');
 
     if (price != null && priceEl) priceEl.textContent = formatPrice(price);
-    else if (priceEl) priceEl.textContent = '--';
+    else if (priceEl) priceEl.textContent = '—';
 
     if (delta != null && deltaEl) {
         deltaEl.textContent = `Δ ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}`;
         deltaEl.className = `panel-delta ${delta >= 0 ? 'positive' : 'negative'}`;
     } else if (deltaEl) {
-        deltaEl.textContent = 'Δ --';
+        deltaEl.textContent = 'Δ —';
         deltaEl.className = 'panel-delta';
     }
 }
 
 function formatPrice(price) {
-    if (price == null || price === 0) return '--';
+    if (price == null || price === 0) return '—';
     if (price > 1000) return price.toFixed(1);
     if (price > 10) return price.toFixed(2);
     return price.toFixed(4);
 }
 
 function formatNumber(n) {
-    if (n == null) return '--';
+    if (n == null) return '—';
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
     if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
     return n.toString();

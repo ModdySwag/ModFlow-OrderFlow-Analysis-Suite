@@ -18,6 +18,17 @@ const GUIDE = { tips: 0, step: 0, open: false, cfg: null, obs: null };
 
 const G_ESC = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+/* The wizard's NinjaTrader probe box offers the terminal names the app already knows — the
+   mapping the config carries from rows added on the NinjaTrader lane. The shell's own config
+   copy is the source (no extra fetch); an empty list is the honest answer, and the box stays
+   typeable because the terminal's own list cannot be read offline. */
+const G_NT_NAMES = () => {
+    const mod = (typeof window !== 'undefined' && window.OFAPINSTRUMENT) || null;
+    const cfg = (typeof S !== 'undefined' && S && S.config) || null;
+    return (mod && typeof mod.ninjatraderNames === 'function')
+        ? mod.ninjatraderNames((cfg && cfg.instruments) || []) : [];
+};
+
 /* ══════════════════════════════════════════════════════════════════
    1. Tooltips
    ══════════════════════════════════════════════════════════════════ */
@@ -410,6 +421,7 @@ function buildGuideView() {
             <div class="view-sub">what this program does, how to get the most out of it, and how to set it up</div>
             <div class="grow"></div>
             <button class="btn small" id="guideSetupBtn" title="Re-open the step-by-step setup assistant">Run setup assistant</button>
+            <button class="btn small" id="guideCentreBtn" title="Search every topic, walkthrough and screenshot in the Help Centre">Search the Help Centre</button>
         </div>
         <div id="guideBody"></div>`;
 
@@ -422,6 +434,11 @@ function buildGuideView() {
 
     main.appendChild(section);
     section.querySelector('#guideSetupBtn').onclick = () => openWizard(true);
+    const centreBtn = section.querySelector('#guideCentreBtn');
+    if (centreBtn) centreBtn.onclick = () => {
+        if (window.OFAPHELP) OFAPHELP.open('');
+        else toast($('#guideBody') || document.body, 'The Help Centre is not loaded in this build.', 'info');
+    };
     applyTips(section);
 }
 
@@ -1156,12 +1173,12 @@ function openWizard(force) {
     overlay.className = 'wiz-overlay';
     overlay.id = 'wizOverlay';
     overlay.innerHTML = `
-        <div class="wiz-card" role="dialog" aria-modal="true" aria-label="Setup assistant">
+        <div class="wiz-card" role="dialog" aria-modal="true" aria-label="Setup assistant" tabindex="-1">
             <div class="wiz-head"><div>
                 <div class="wiz-title" id="wizTitle">Setup</div>
                 <div class="wiz-sub" id="wizSub"></div>
             </div><div class="grow" style="flex:1"></div>
-            <button class="btn small" id="wizClose" title="Close without changing anything">✕</button></div>
+            <button class="btn small" id="wizClose" title="Close — your place is kept; the assistant resumes at this step">✕</button></div>
             <div class="wiz-body" id="wizBody"></div>
             <div class="wiz-foot">
                 <div class="wiz-dots" id="wizDots"></div>
@@ -1173,7 +1190,10 @@ function openWizard(force) {
     document.body.appendChild(overlay);
     GUIDE.open = true;                      // open only once it is really on screen
 
-    overlay.querySelector('#wizClose').onclick = () => closeWizard();
+    overlay.querySelector('#wizClose').onclick = () => {
+        closeWizard();
+        toast(document.body, 'Setup assistant closed — it resumes at this step next time.', 'info');
+    };
     overlay.querySelector('#wizSkip').onclick = () => finishWizard({ skip: true });
     overlay.querySelector('#wizBack').onclick = () => { renderStep(GUIDE.step - 1); };
     overlay.querySelector('#wizNext').onclick = () => {
@@ -1213,8 +1233,11 @@ function renderStep(i) {
     body.innerHTML = step.render();
     if (step.after) step.after();
 
+    /* §123: a visited dot goes back there — the one navigation move a long wizard must have. */
     document.getElementById('wizDots').innerHTML = wizList()
-        .map((_, n) => `<span class="wiz-dot ${n <= i ? 'on' : ''}"></span>`).join('');
+        .map((_, n) => n <= i
+            ? `<span class="wiz-dot on" data-wiz-dot="${n}" style="cursor:pointer" title="Step ${n + 1} — click to go back"></span>`
+            : `<span class="wiz-dot" title="Step ${n + 1}"></span>`).join('');
     document.getElementById('wizBack').disabled = i === 0;
     document.getElementById('wizNext').textContent = i === wizList().length - 1 ? 'Save & finish' : 'Next';
 
@@ -1249,9 +1272,21 @@ function renderStep(i) {
     /* renderStep is not nested in openWizard: it must look the overlay up, never close over it.
        A bare `overlay` here was a ReferenceError the moment the wizard tried to draw. */
     const ov = document.getElementById('wizOverlay');
+    /* §123: focus rides into the dialog so Esc/Enter/Tab work without a mouse; a step that is
+       mid-typing (an input focused) keeps its focus. */
+    if (ov) {
+        const card = ov.querySelector('.wiz-card');
+        const ae = document.activeElement;
+        if (card && (!ae || ae === document.body || ov.contains(ae))
+            && !/^(INPUT|SELECT|TEXTAREA)$/.test((ae || {}).tagName || '')) {
+            card.focus({ preventScroll: true });
+        }
+    }
     if (ov && !ov.$wizWired) {
         ov.$wizWired = true;                          // wire once per overlay, not per step
         ov.addEventListener('click', (ev) => {
+            const dot = ev.target.closest('[data-wiz-dot]');
+            if (dot) { renderStep(parseInt(dot.dataset.wizDot, 10)); return; }
             const modeBtn = ev.target.closest('[data-wiz-mode]');
             if (modeBtn) {
                 GUIDE.mode = modeBtn.dataset.wizMode === 'pro' ? 'pro' : 'express';
@@ -1427,7 +1462,44 @@ async function finishWizard({ skip }) {
    Boot: build the view, apply tips, offer setup on a fresh install
    ══════════════════════════════════════════════════════════════════ */
 
+/* §123: the industry keyboard grammar for every overlay this layer owns. Esc dismisses through
+   the overlay's OWN close control (so a wizard close still keeps its place), Enter advances a
+   wizard step when the dialog itself holds focus, and Tab stays inside the dialog. One listener,
+   and only the top-most overlay answers — a notice stacked over the wizard owns the keys. */
+function overlayKeys(ev) {
+    const overlays = document.querySelectorAll('.wiz-overlay');
+    if (!overlays.length) return;
+    const ov = overlays[overlays.length - 1];
+    if (ev.key === 'Escape') {
+        const closer = ov.querySelector('#wizClose, #helpClose, #mt5NoticeClose');
+        if (!closer) return;
+        ev.preventDefault();
+        closer.click();
+        return;
+    }
+    if (ev.key === 'Enter') {
+        if (ov.id !== 'wizOverlay') return;
+        const tag = (document.activeElement || {}).tagName || '';
+        if (/^(INPUT|SELECT|TEXTAREA|BUTTON|A)$/.test(tag)) return;   // native behaviour owns those
+        ev.preventDefault();
+        const next = document.getElementById('wizNext');
+        if (next && !next.disabled) next.click();
+        return;
+    }
+    if (ev.key === 'Tab') {
+        const f = Array.prototype.filter.call(
+            ov.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+            (el) => el.offsetParent !== null || el === document.activeElement);
+        if (!f.length) return;
+        const first = f[0];
+        const last = f[f.length - 1];
+        if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+        else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+    }
+}
+
 function guideBoot() {
+    document.addEventListener('keydown', overlayKeys);   // §123: one listener, every overlay
     buildGuideView();
     guideStyles();
     applyTips(document);
@@ -1509,6 +1581,16 @@ function helpStyles() {
 }
 
 /* ── the topics ─────────────────────────────────────────────────── */
+/* §123: where each inline walkthrough continues. Exact Centre topic ids where one exists, else
+   a query that lands on the right topics — the card's door (and openTopic's own fallback) run it. */
+const CENTRE_QUERY = {
+    mt5: 'MetaTrader 5', ninjatrader: 'NinjaTrader', alpaca: 'Alpaca', telegram: 'Telegram',
+    ntfy: 'ntfy', email: 'email alerts', webhook: 'webhook', extras: 'deep book liquidations',
+    context: 'market context', instruments: 'instruments',
+    /* the view modules extend HELP_TOPICS at runtime — their cards get the door too */
+    studies: 'studies library', platforms: 'platforms', ofx: 'the engine view',
+};
+
 const HELP_TOPICS = {
     mt5: {
         title: 'MetaTrader 5 data source',
@@ -1769,10 +1851,20 @@ function openHelp(id) {
                 ${steps}
                 ${topic.note ? `<div class="help-note">${topic.note}</div>` : ''}
                 ${topic.test === 'mt5' ? mt5TestPanel() : topic.test === 'ninjatrader' ? ninjatraderTestPanel() : ''}
+                <div class="wiz-note" style="margin-top:12px">
+                    <button class="btn small" id="helpToCentre"
+                        title="Search every topic, walkthrough and screenshot in the Help Centre">Open in the Help Centre →</button>
+                </div>
             </div>
         </div>`;
     document.body.appendChild(overlay);
     overlay.querySelector('#helpClose').onclick = () => overlay.remove();
+    const toCentre = overlay.querySelector('#helpToCentre');
+    if (toCentre) toCentre.onclick = () => {
+        overlay.remove();
+        if (window.OFAPHELP) OFAPHELP.open(CENTRE_QUERY[id] || id);
+        else toast(document.body, 'The Help Centre is not loaded in this build.', 'info');
+    };
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
     overlay.querySelectorAll('.help-copy').forEach((b) => {
         b.onclick = () => copyText(b.dataset.copy || '', b);
@@ -1875,8 +1967,9 @@ function ninjatraderTestPanel() {
                     value="${G_ESC(nt.host || '127.0.0.1')}" title="The bridge binds loopback only; leave 127.0.0.1.">
                 <input type="text" id="ntPort" style="flex:0 0 84px" placeholder="port"
                     value="${G_ESC(String(nt.port || 8790))}" title="The bridge's port \u2014 8790 unless the bridge was rebuilt with another.">
-                <input type="text" id="ntSymbol" style="flex:1;min-width:110px" placeholder="instrument"
+                <input type="text" id="ntSymbol" list="ntSymbolOptions" style="flex:1;min-width:110px" placeholder="instrument"
                     value="${G_ESC(nt.symbol || 'NQ')}" title="Any name your terminal lists \u2014 NQ, NQ1, ES, MNQ 12-26\u2026">
+                <datalist id="ntSymbolOptions">${G_NT_NAMES().map((n) => `<option value="${G_ESC(n)}"></option>`).join('')}</datalist>
                 <button class="btn primary" id="ntTestBtn"
                     title="Connect to the bridge inside NinjaTrader, subscribe, and report what arrived">Test the bridge</button>
             </div>
@@ -2165,7 +2258,13 @@ WIZ_STEPS.splice(2, 0, {
     /* One delegated listener handles every help button, present or future. */
     document.addEventListener('click', (e) => {
         const b = e.target && e.target.closest && e.target.closest('[data-help]');
-        if (b) openHelp(b.dataset.help);
+        if (b) {
+            /* §123: 'studies', 'bridges' and 'start.identity' carried dead clicks — openHelp()
+               returned silently on an unknown id. The Help Centre's openTopic falls back to a
+               search by itself, so an unknown id still LANDS somewhere. */
+            if (HELP_TOPICS[b.dataset.help]) openHelp(b.dataset.help);
+            else if (window.OFAPHELP) OFAPHELP.open(b.dataset.help);   // lands on the search results
+        }
     });
 
     /* The alert step names four channels: give each its own walkthrough. */
@@ -2226,8 +2325,28 @@ WIZ_STEPS.splice(2, 0, {
                  them — exactly as with any terminal.</p>
                <p><b>The workspace is yours to keep.</b> Screen arrangements save as layouts, whole setups
                  save as playbooks, indicator sets save as collections, and every shortcut can be
-                 re-bound — all in your own config file.
+                 re-bound — all in your own config file. A layout also keeps its last five states
+                 (<b>Layout ▸ Previous versions</b>), so an auto-arrange, a reset or a save-over is one
+                 click back.
                  <button class="btn small" data-help="start.identity">Open the topic</button></p>`,
+    });
+    /* §128: the multi-monitor section — the one place that says what the whole capability is,
+       now that send/snap/rescue all exist in both modes. */
+    GUIDE_SECTIONS.push({
+        h: 'Multiple monitors',
+        body: `<p>Every panel can live in its own real window, on any monitor. The quickest route is the
+                 <b>⧉</b> button on a widget's title bar (Terminal mode) or <b>View ▸ Windows &amp;
+                 layouts…</b>: pick a panel, a monitor and a shape, and the window opens there already
+                 placed — left half of Monitor 2, full screen on the third display, anything.</p>
+               <p>A window that is already open can be sent to another monitor at any time (<b>⇥</b> on
+                 its row in the Windows menu, or <b>Ctrl+Alt+Shift+← / →</b>), snapped to a half, a
+                 corner or the whole monitor with one click, and pinned above your other windows.
+                 Positions are remembered, so tomorrow's launch reopens the same desk; a window whose
+                 monitor is gone comes home to the primary instead of sitting off-screen, and
+                 <b>Bring them home</b> in the dialog rescues every stranded window at once.</p>
+               <p>Both modes are covered: in Terminal mode the ⧉ button sits on each widget, in Classic
+                 mode the same dialog opens any panel on any monitor. What an OS drag would do is a
+                 command here — Windows' own Win+Shift+Arrow, spelled with Alt so it cannot collide.</p>`,
     });
     /* the view is built lazily, but if it already exists, refresh it */
     const body = document.getElementById('guideBody');
@@ -2512,6 +2631,14 @@ const WIZ_PRO = [
             one to learn first; everything else is a lens on the same tape.<br>
             <div style="margin-top:6px"><button class="btn small" data-wiz-save-ws="research">Save a
             "research" workspace from the current layout</button></div></div>
+            <div class="wiz-note"><b>If a layout change goes wrong:</b> <b>Layout ▸ Previous versions
+            of this layout</b> holds the last five states of the layout you are on — one click puts
+            one back. Arranging a board, resetting it, saving over it or deleting it is one click
+            each, so the undo is one click too. Five is the depth because that is the handful people
+            actually reach for, and because every version is a full copy in your config file; the
+            <b>Auto-cull</b> switch inside that submenu is what keeps it at five (turn it off to keep
+            up to ten). A restore is recorded as well, so you can step forward again if the older
+            arrangement was not the one you wanted.</div>
             ${wizFooter({
                 unlocks: 'a screen you can rebuild instantly, arranged for the task at hand',
                 deeper: 'the ☰ menu groups panels by purpose and the Workspaces group saves and recalls them',

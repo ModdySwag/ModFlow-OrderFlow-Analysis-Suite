@@ -22,9 +22,9 @@
 const ATLAS_V2 = { soundLog: [], audio: null, rules: [], timer: null };
 
 const V2_Q = (s) => encodeURIComponent(s);
-const V2_TIME = (ms) => (ms ? new Date(ms).toLocaleTimeString('en-US', { hour12: false }) : '--');
+const V2_TIME = (ms) => (ms ? new Date(ms).toLocaleTimeString('en-US', { hour12: false }) : '—');
 const V2_SZ = (v) => {
-    if (v === null || v === undefined || Number.isNaN(Number(v))) return '--';
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return '—';
     const a = Math.abs(Number(v));
     if (a === 0) return '0';
     if (a >= 1000) return compact(v);
@@ -182,6 +182,105 @@ async function loadHistory() {
         <td>${e.price ? fmt(e.price, 2) : '—'}</td><td>${e.size ? V2_SZ(e.size) : '—'}</td>
         <td class="name">${esc(e.detail || '')}</td></tr>`).join('')
         || v2Empty(5, 'nothing persisted yet for this instrument'));
+}
+
+/* ── F1 (control-surface audit): the reads the view's menu copy promised ────────────────────────
+   Cross-venue book, rolling correlation, trade clusters, the venue's REST feed history and the
+   participants' intent read all had live routes and no caller. Every one runs inside v2Poll's
+   existing 4 s beat while Trackers is on screen — never a second timer. */
+
+async function loadCrossvenue() {
+    if (!S.symbol) return;
+    let d;
+    try { d = await api(`/api/atlas/crossvenue/${V2_Q(S.symbol)}`); } catch (e) { return; }
+    const rows = d.venues || [];
+    const best = d.consolidated || {};
+    const st = $("#tkCvStats");
+    if (st) st.textContent = best.available
+        ? `best bid ${fmt(best.bid, 2)} (${best.bid_venue}) · best ask ${fmt(best.ask, 2)} (${best.ask_venue}) · ` +
+          `spread ${fmt(best.spread_bps, 1)} bps${best.crossed ? ' · CROSSED — venues disagree' : ''}`
+        : (best.reason || 'no venue could answer');
+    v2Set('#tkCvTable tbody', rows.map((r) => `<tr>
+        <td class="name">${esc(r.label || r.venue)} <span class="dim">${esc(r.kind || '')}</span></td>
+        <td class="${r.ok ? 'up' : 'dim'}">${r.bid ? fmt(r.bid, 2) : '—'}</td>
+        <td>${r.bid_size ? V2_SZ(r.bid_size) : '—'}</td>
+        <td class="${r.ok ? 'down' : 'dim'}">${r.ask ? fmt(r.ask, 2) : '—'}</td>
+        <td>${r.ask_size ? V2_SZ(r.ask_size) : '—'}</td>
+        <td>${r.age_known && r.age_ms != null ? Math.round(r.age_ms) + ' ms' : '—'}</td>
+        <td>${r.ok ? '' : `<span class="tag warn" title="${esc(r.note || (r.stale ? 'stale' : 'no quote'))}">${esc(r.stale ? 'stale' : 'n/a')}</span>`}</td>
+        </tr>`).join('') || v2Empty(7, 'no venues configured for this instrument'));
+}
+
+async function loadCorrelation() {
+    let d;
+    try { d = await api('/api/atlas/correlation?top=10'); } catch (e) { return; }
+    const pairs = d.top || [];
+    const st = $("#tkCorrStats");
+    if (st) st.textContent = pairs.length
+        ? `${pairs.length} pairs · source: ${d.source || 'live buckets'}${d.backfilled ? ` (${d.backfilled} seeded from stored candles)` : ''}`
+        : (d.note || 'needs more shared history');
+    v2Set('#tkCorrTable tbody', pairs.map((p) => `<tr>
+        <td class="name">${esc(p.a)} / ${esc(p.b)}</td>
+        <td class="${p.r >= 0 ? 'up' : 'down'}">${fmt(p.r, 2)}</td>
+        <td>${p.n}</td></tr>`).join('') || v2Empty(3, 'no pair has enough shared buckets yet'));
+}
+
+async function loadIntent() {
+    if (!S.symbol) return;
+    let d;
+    try { d = await api(`/api/atlas/intent/${V2_Q(S.symbol)}`); } catch (e) { return; }
+    const line = $("#tkIntentLine");
+    if (d.ok === false) {
+        if (line) line.textContent = d.note || 'no data yet';
+        v2Set('#tkIntentGrid', '');
+        return;
+    }
+    const p = d.pressure || {}, a = d.absorption || {}, t = d.tape_quality || {}, s = d.stats || {};
+    const v = d.verdict || {};
+    if (line) line.textContent = (v.line || '—') + (v.confidence != null ? ` · confidence ${v.confidence}%` : '');
+    const kpi = (label, value, sub, cls) => `<div class="kpi"><span class="kpi-label">${label}</span>`
+        + `<span class="kpi-value ${cls || ''}">${value}</span><span class="kpi-sub">${sub}</span></div>`;
+    v2Set('#tkIntentGrid',
+        kpi('Book pressure', p.training ? 'training' : `${p.buy_pct_of_normal}% / ${p.sell_pct_of_normal}%`,
+            p.training ? `${p.training_remaining_s}s left` : `buy vs sell, of normal · edge ${p.edge_pct}%`,
+            p.side === 'buyers' ? 'up' : (p.side === 'sellers' ? 'down' : ''))
+        + kpi('Absorption', a.absorbing != null ? a.absorbing : '—',
+            a.aggressor ? `${esc(a.aggressor)} side · score ${a.score}` : 'aggression into resting size')
+        + kpi('Slippage prints', t.slippage_prints != null ? t.slippage_prints : '—',
+            `above ask ${t.share_pct ? (t.share_pct.above_ask || 0) : 0}% · below bid ${t.share_pct ? (t.share_pct.below_bid || 0) : 0}%`
+            + (t.fresh_book === false ? ' · book stale' : ''))
+        + kpi('Pulled size', (d.pulled_size || []).length,
+            s.book_age_ms >= 0 ? `book age ${Math.round(s.book_age_ms)} ms` : 'waiting for the book'));
+}
+
+async function loadDots() {
+    if (!S.symbol) return;
+    let d;
+    try { d = await api(`/api/atlas/dots/${V2_Q(S.symbol)}?max_dots=120`); } catch (e) { return; }
+    const rows = (d.dots || []).slice(-40).reverse();
+    const st = $("#tkDotsStats");
+    if (st) st.textContent = d.shown
+        ? `${d.shown} clusters in the window · largest ${V2_SZ((d.legend || {}).max)}`
+        : 'no clusters yet';
+    v2Set('#tkDotsTable tbody', rows.map((x) => `<tr>
+        <td>${V2_TIME(x.ts)}</td><td>${fmt(x.price, 2)}</td>
+        <td><span class="tag ${x.side === 'buy' ? 'ok' : 'no'}">${esc(x.side)}</span></td>
+        <td>${V2_SZ(x.size)} <span class="dim">· ${x.count} prints</span></td></tr>`).join('')
+        || v2Empty(4, 'no trade clusters yet — they form while volume prints'));
+}
+
+async function loadRecentTrades() {
+    if (!S.symbol) return;
+    let d;
+    try { d = await api(`/api/atlas/trades/recent/${V2_Q(S.symbol)}?limit=120`); } catch (e) { return; }
+    const rows = (d.trades || []).slice(-30).reverse();
+    const st = $("#tkRtStats");
+    if (st) st.textContent = d.ok === false ? (d.error || 'feed history unavailable')
+        : `${d.count || rows.length} recent prints from the venue's REST history`;
+    v2Set('#tkRtTable tbody', rows.map((x) => `<tr>
+        <td>${V2_TIME(x.ts_ms)}</td><td>${fmt(x.price, 2)}</td><td>${V2_SZ(x.size)}</td>
+        <td><span class="tag ${x.side === 'buy' ? 'ok' : 'no'}">${esc(x.side)}</span>${x.block ? ' <span class="tag warn">block</span>' : ''}</td></tr>`).join('')
+        || v2Empty(4, 'the venue returned no prints'));
 }
 
 /* ── per-rule alert routing (telegram / ntfy / email / webhook) ────── */
@@ -342,6 +441,11 @@ function v2Poll() {
     if (!S.symbol) return;
     if (truthyView('trackers')) {
         loadImbalance();                                  /* this card's own series: no one else reads it */
+        loadCrossvenue();                                 /* F1: the five reads the menu promised */
+        loadCorrelation();
+        loadIntent();
+        loadDots();
+        loadRecentTrades();
         /* the zone card watches the tape url atlas.js's Trackers tables do: join that channel, and
            be the asker only when no delivery layer is loaded */
         if (!v2ShareSync('tape')) loadZones();

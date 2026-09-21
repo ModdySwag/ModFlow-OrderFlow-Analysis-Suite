@@ -89,3 +89,27 @@ def test_pause_control_is_wired():
         assert name in src, f"pause.js no longer exposes {name}"
     assert "ofapPause" in (UI / "index.html").read_text(encoding="utf-8"), "the chip is not in the topbar"
     assert "OFAP_PAUSED" in (UI / "ofx-view.js").read_text(encoding="utf-8"), "the engine poll ignores the freeze"
+
+
+def test_the_engine_adopts_the_clamped_params_after_a_save():
+    """config_store clamps the engine's dials on write (ofx.R max 20, stack max 8, lambda 100–5000).
+    The accepted block must come back to the controls: the save's answer carries it, and a control
+    left on a value the store never took is the same 'two surfaces, one story' defect the symbol
+    bar learned — the next params re-read would look like the app changing the user's input."""
+    view = (UI / "ofx-view.js").read_text(encoding="utf-8")
+    assert "async function _saveParamsNow" in view
+    assert "adoptSavedOfx(res && res.ofx)" in view, "the save no longer adopts the stored block"
+    assert "function adoptSavedOfx(saved)" in view, "the adoption helper is gone"
+    assert "function adoptSavedOfx" in view and "OFX.setParams(next)" in view
+    for control in ("ofxR", "ofxStack", "ofxLambda", "ofxMinBlock", "ofxVaPct", "ofxRamp"):
+        assert re.search(rf"el\('{control}'\)\) el\('{control}'\)\.value = String\(OFX\.state\.params\.", view), \
+            f"adoptSavedOfx no longer writes {control} back"
+
+
+def test_the_params_reread_repairs_the_preset_chips():
+    """loadParams and adoptSavedOfx write the number fields programmatically; a bare value write
+    fires no event, so the preset combobox beside each field must be re-paired explicitly or it
+    keeps naming the bygone value (the control pair in the same 'matching' family)."""
+    view = (UI / "ofx-view.js").read_text(encoding="utf-8")
+    assert view.count("if (window.OFAPPRESETS && OFAPPRESETS.refresh) OFAPPRESETS.refresh();") >= 2, \
+        "the engine's re-seed paths stopped repairing the preset chips"

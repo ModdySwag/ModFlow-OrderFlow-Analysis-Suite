@@ -15,7 +15,7 @@
    duplicates that rendering.
    ══════════════════════════════════════════════════════════════════ */
 
-const ALPCARD = { lastLoad: 0, lastKey: '' };
+const ALPCARD = { lastLoad: 0, lastKey: '', assets: null, assetsAt: 0 };
 
 function alpC(id) { return document.getElementById(id); }
 
@@ -162,7 +162,7 @@ function alpBannerRender() {
     host.innerHTML = `<div class="banner info">
         <span>Connect Alpaca to add US equities, ETFs, options, Benzinga news and the US market calendar.
               Free paper account, no funding — and optional.</span>
-        <button class="btn small primary" id="ovAlpGo">Set up now</button>
+        <button class="btn small primary" id="ovAlpGo" title="Open the Alpaca card — keys, environment and the capability report">Set up now</button>
         <button class="btn small" id="ovAlpLater" title="Hide this until the next start — it will not come back this run">Not now</button>
     </div>`;
     const go = alpC('ovAlpGo');
@@ -189,6 +189,25 @@ function alpSymbols() {
     return (cfg.view_symbols || []).slice();
 }
 
+/* The account's OWN tradable symbols into the ticker box's datalist (§129) — the same
+   /api/alpaca/assets lane the instrument look-up reads. Cached for ten minutes because the route
+   asks Alpaca; unlinked, it answers with an empty list and its own note, so the box simply stays
+   a plain text entry and nothing invents tickers the account cannot trade. */
+async function alpFillAssetOptions() {
+    const host = alpC('alpAssetOptions');
+    if (!host) return;
+    const fresh = Array.isArray(ALPCARD.assets) && (Date.now() - ALPCARD.assetsAt) < 600000;
+    if (!fresh) {
+        try {
+            const res = await api('/api/control/alpaca/assets');
+            ALPCARD.assets = (res && Array.isArray(res.symbols)) ? res.symbols : [];
+            ALPCARD.assetsAt = Date.now();
+        } catch (e) { ALPCARD.assets = ALPCARD.assets || []; }
+    }
+    host.innerHTML = (ALPCARD.assets || []).slice(0, 800)
+        .map((s) => `<option value="${G_ESC(String(s))}"></option>`).join('');
+}
+
 function alpRouteRender() {
     const host = alpC('alpRouteHost');
     if (!host) return;
@@ -199,11 +218,12 @@ function alpRouteRender() {
             : '<span class="dim">no symbols yet — the defaults are AAPL, MSFT, NVDA, SPY, QQQ</span>'}</div>
         <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
             <div class="field" style="flex:0 0 180px"><label>Add symbol</label>
-                <input type="text" id="alpAddSym" placeholder="e.g. TSLA" autocomplete="off" spellcheck="false"
+                <input type="text" id="alpAddSym" list="alpAssetOptions" placeholder="e.g. TSLA" autocomplete="off" spellcheck="false"
                        title="Subscribes the Alpaca feed's quote/trade stream for this ticker — to chart it as an instrument, add it in the Instrument look-up instead."></div>
-            <button class="btn small" id="alpAddBtn">Add</button>
+            <datalist id="alpAssetOptions"></datalist>
+            <button class="btn small" id="alpAddBtn" title="Subscribe this ticker on the Alpaca feed">Add</button>
             <button class="btn small" id="alpDefaultsBtn" title="AAPL, MSFT, NVDA, SPY, QQQ">Use the defaults</button>
-            <button class="btn small" id="alpSaveBtn">Save list</button>
+            <button class="btn small" id="alpSaveBtn" title="Save the list to your config — the feed re-subscribes">Save list</button>
             <span class="dim" id="alpRouteMsg"></span>
         </div>`;
     host.querySelectorAll('button[data-alp-del]').forEach((b) => {
@@ -212,6 +232,10 @@ function alpRouteRender() {
             alpWriteSymbols(next);
         };
     });
+    /* §129: the ticker box lists the account's OWN tradable symbols (the same /api/alpaca/assets
+       lane the look-up reads) instead of asking the user to recall them. Unlinked, the endpoint
+       answers with an empty list and its own note, so the box simply stays a plain text entry. */
+    void alpFillAssetOptions();
     const add = alpC('alpAddBtn');
     if (add) add.onclick = () => {
         const inp = alpC('alpAddSym');

@@ -40,6 +40,9 @@ from orderflow_system.config.settings import (
     MT5,
     NINJATRADER,
     ALPACA,
+    TRADIER,
+    MARKETDATA,
+    FINNHUB,
     DASHBOARD,
 )
 from orderflow_system.data.models import (
@@ -310,6 +313,10 @@ class OrderflowSystem:
         self.mt5_feed: Optional[MT5Feed] = None
         self.alpaca_feed = None            # AlpacaFeed when that source is on
         self.nt_feed = None                # NinjaTraderFeed when that source is on
+        # Options-data REST feeds (poll on demand, not tick streams).
+        self.tradier_feed = None           # TradierFeed when that source is on
+        self.marketdata_feed = None        # MarketDataFeed when that source is on
+        self.finnhub_feed = None           # FinnhubFeed when that source is on
         self.ws_manager: WebSocketManager = ws_manager
         self._running = False
         self._tick_batch_size = 100
@@ -493,6 +500,32 @@ class OrderflowSystem:
                 logger.warning("NinjaTrader source selected but no enabled instrument is mapped — "
                                "nothing to stream (add one from the Instruments panel)")
 
+        # ── Tradier REST feed (OPRA options chains) ──────────────────────────────
+        # Not a tick stream — created when selected, polled on demand by the options/gex panels.
+        if self.data_source in (DataSource.TRADIER, DataSource.ALL):
+            from orderflow_system.data.tradier_feed import TradierFeed
+            self.tradier_feed = TradierFeed(
+                key_id=TRADIER.key_id,
+                secret=TRADIER.secret,
+                chain_width=TRADIER.chain_width,
+                sandbox=TRADIER.sandbox,
+            )
+            logger.info("Tradier feed configured (chain_width=%d, sandbox=%s)",
+                        TRADIER.chain_width, TRADIER.sandbox)
+
+        # ── Market Data REST feed (OPRA chains with greeks) ─────────────────────
+        if self.data_source in (DataSource.MARKETDATA, DataSource.ALL):
+            from orderflow_system.data.marketdata_feed import MarketDataFeed
+            self.marketdata_feed = MarketDataFeed(api_key=MARKETDATA.api_key)
+            logger.info("Market Data feed configured")
+
+        # ── Finnhub REST feed (economic calendar + news headlines) ──────────────
+        if self.data_source in (DataSource.FINNHUB, DataSource.ALL):
+            from orderflow_system.data.finnhub_feed import FinnhubFeed
+            self.finnhub_feed = FinnhubFeed(api_key=FINNHUB.api_key)
+            logger.info("Finnhub feed configured (calendar=%s, news=%s)",
+                        FINNHUB.calendar_category, FINNHUB.news_category)
+
         self._running = True
         source_name = self.data_source.value.upper()
         logger.info(f"Starting live feed [{source_name}] for: {', '.join(symbols)}")
@@ -531,6 +564,10 @@ class OrderflowSystem:
                 await self.alpaca_feed.stop()
             if self.nt_feed:
                 await self.nt_feed.stop()
+            # Options-data REST feeds have no persistent connection to close.
+            self.tradier_feed = None
+            self.marketdata_feed = None
+            self.finnhub_feed = None
         finally:
             # MEM-A1-07: the last batch and the database close are not optional — this block
             # runs even when a feed hangs and the engine's 15 s watchdog cancels this

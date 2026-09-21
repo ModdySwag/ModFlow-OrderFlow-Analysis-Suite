@@ -97,6 +97,9 @@
             + '<span class="set-name" title="' + esc(p.meaning || '') + '">' + esc(p.label || p.path)
             + (p.unit ? ' <span class="dim">(' + esc(p.unit) + ')</span>' : '') + '</span>'
             + '<span class="set-ctl">' + control(p, now) + '</span>'
+            /* Sierra's Show-Original-Values habit, tightened: a staged row says what the value WAS
+               before this edit — the number Revert (this row, or Revert all) puts back. */
+            + (staged ? '<span class="set-was dim" title="The value in effect before this staged edit — what Revert restores">was ' + esc(fmtDefault(state.applied[p.path])) + '</span>' : '')
             + '<span class="set-default" title="The factory default, before any change">default ' + esc(fmtDefault(p.default)) + '</span>'
             + buttons
             + '<span class="set-path" title="' + esc(p.path) + ' — drives the ' + esc(p.view || 'app') + ' panel">'

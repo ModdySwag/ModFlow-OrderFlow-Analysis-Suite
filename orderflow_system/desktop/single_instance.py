@@ -40,7 +40,7 @@ def instance_mutex_name(profile_dir: str) -> str:
     are the same profile (they are).
     """
     key = str(profile_dir).strip().casefold().replace("/", "\\").rstrip("\\")
-    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha1(key.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
     return f"{_MUTEX_PREFIX}-{digest}"
 
 

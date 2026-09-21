@@ -38,6 +38,9 @@
         style: { line: '#4f8cff', fill: 'rgba(79,140,255,.14)', width: 2, dash: 'solid', fontSize: 12 },
         adapter: null, host: null, canvas: null, ctx: null, overlay: null, toolbar: null,
         dragging: null, draft: null, menu: null, seq: 0, tickSize: 0.1, dirty: false, loading: false,
+        /* §143: snap-to-45° as a MODE. It was Shift-at-drag only, which every charting package also
+           offers as a latch for people drawing a fan of parallels. */
+        snap45: false,
         /* T13/B12: the multi-selection and the bounded undo history (the primary stays
            `selected`); T13/B11: the consequence chip element. */
         multiIds: [], undoStack: [], tip: null,
@@ -50,21 +53,41 @@
     /* T13/B12: the undo history — one entry per reversible edit, newest last, bounded; the
        entries are closures over what was there, which is all a local edit needs. */
     const UNDO_MAX = 50;
+    /* §143: redo. The undo entries are closures over what was there, so the ones that can be
+       re-applied say how (an `add` re-adds the same object, a `move` re-applies the geometry it
+       ended on); a new edit clears the branch, exactly as an editor does. */
+    let redoStack = [];
     function pushUndo(entry) {
         if (!entry || typeof entry.undo !== 'function') return;
         state.undoStack.push(entry);
         if (state.undoStack.length > UNDO_MAX) state.undoStack.shift();
+        redoStack = [];
     }
     function undo() {
         const entry = state.undoStack.pop();
         if (!entry) return false;
         entry.undo();
+        if (typeof entry.redo === 'function') redoStack.push(entry);
         state.multiIds = state.multiIds.filter((id) => state.drawings.some((d) => d.id === id));
         if (state.selected && !state.drawings.some((d) => d.id === state.selected)) state.selected = null;
         paint(); save();
         refreshToolbar();
         return true;
     }
+    function redo() {
+        const entry = redoStack.pop();
+        if (!entry || typeof entry.redo !== 'function') return false;
+        entry.redo();
+        state.undoStack.push(entry);
+        state.multiIds = state.multiIds.filter((id) => state.drawings.some((d) => d.id === id));
+        if (state.selected && !state.drawings.some((d) => d.id === state.selected)) state.selected = null;
+        paint(); save();
+        refreshToolbar();
+        return true;
+    }
+    const undoDepth = () => state.undoStack.length;
+    const redoDepth = () => redoStack.length;
+
     /* Pure, so the selftest can pin the shift-click toggle. */
     function toggleMember(list, id) {
         const out = (list || []).slice();
@@ -305,6 +328,7 @@
             style: { ...state.style },
             hidden: state.hidden,
             single: state.single,
+            snap45: state.snap45,
             drawings: state.drawings.map((d) => ({
                 id: d.id, kind: d.kind, a: d.a, b: d.b || d.a, text: d.text || '',
                 style: d.style || null, highlight: d.highlight || null,
@@ -341,6 +365,7 @@
             if (block && block.style) state.style = { ...state.style, ...block.style };
             state.hidden = !!(block && block.hidden);
             state.single = !!(block && block.single);
+            state.snap45 = !!(block && block.snap45);
         } catch (err) { state.drawings = []; }
         state.loading = false;
         paint();
@@ -392,7 +417,8 @@
         if (state.selected === id) state.selected = null;
         state.multiIds = state.multiIds.filter((m) => m !== id);
         pushUndo({ label: 'remove ' + gone.kind,
-            undo: () => { state.drawings.splice(Math.min(at, state.drawings.length), 0, gone); } });
+            undo: () => { state.drawings.splice(Math.min(at, state.drawings.length), 0, gone); },
+            redo: () => { state.drawings = state.drawings.filter((d) => d.id !== gone.id); } });
         paint(); save();
         refreshToolbar();
     }
@@ -409,7 +435,7 @@
             ats.slice().sort((x, y) => x.at - y.at).forEach((s) => {
                 state.drawings.splice(Math.min(s.at, state.drawings.length), 0, s.draw);
             });
-        } });
+        }, redo: () => { state.drawings = state.drawings.filter((d) => ids.indexOf(d.id) < 0); } });
         paint(); save();
         refreshToolbar();
         return true;
@@ -427,7 +453,8 @@
         state.drawings = [];
         state.selected = null;
         state.multiIds = [];
-        pushUndo({ label: 'clear', undo: () => { state.drawings = gone; } });
+        pushUndo({ label: 'clear', undo: () => { state.drawings = gone; },
+            redo: () => { state.drawings = []; } });
         paint(); save(true);
     }
     function hideAll(flag) {
@@ -441,9 +468,36 @@
         copy.b.p += (state.tickSize || 0.1) * 5;
         state.drawings.push(copy);
         pushUndo({ label: 'duplicate ' + draw.kind,
-            undo: () => { state.drawings = state.drawings.filter((d) => d.id !== copy.id); } });
+            undo: () => { state.drawings = state.drawings.filter((d) => d.id !== copy.id); },
+            redo: () => { if (!state.drawings.some((d) => d.id === copy.id)) state.drawings.push(copy); } });
         paint(); save();
         return copy;
+    }
+
+    /* §143: duplicate the selection (Ctrl+D) in one undoable step — the copies offset by the same
+       five ticks `duplicate` uses and become the selection, so a fan of parallels or a repeated
+       level is one keystroke. */
+    function duplicateSelection() {
+        const ids = selectionIds();
+        if (!ids.length) return false;
+        const copies = ids.map((id) => state.drawings.find((d) => d.id === id))
+            .filter(Boolean)
+            .map((draw) => {
+                const copy = { ...draw, id: uid(), a: { ...draw.a }, b: { ...draw.b } };
+                copy.a.p += (state.tickSize || 0.1) * 5;
+                copy.b.p += (state.tickSize || 0.1) * 5;
+                return copy;
+            });
+        if (!copies.length) return false;
+        copies.forEach((c) => state.drawings.push(c));
+        pushUndo({ label: 'duplicate ' + copies.length + ' marking(s)',
+            undo: () => { state.drawings = state.drawings.filter((d) => copies.indexOf(d) < 0); },
+            redo: () => { copies.forEach((c) => { if (state.drawings.indexOf(c) < 0) state.drawings.push(c); }); } });
+        state.selected = null;
+        state.multiIds = copies.map((c) => c.id);
+        paint(); save();
+        refreshToolbar();
+        return true;
     }
 
     function closeMenu() {
@@ -573,7 +627,8 @@
                 const draw = { id: uid(), kind: 'text', a: data, b: data, text: '' };
                 state.drawings.push(draw);
                 pushUndo({ label: 'add text',
-                    undo: () => { state.drawings = state.drawings.filter((d) => d.id !== draw.id); } });
+                    undo: () => { state.drawings = state.drawings.filter((d) => d.id !== draw.id); },
+                    redo: () => { if (!state.drawings.some((d) => d.id === draw.id)) state.drawings.push(draw); } });
                 select(draw.id);
                 const host = (state.canvas && state.canvas.parentElement) || document.body;
                 const hrect = host.getBoundingClientRect();
@@ -600,7 +655,8 @@
             if (!state.draft || !state.dragging) return;
             const rect = canvas.getBoundingClientRect();
             const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
-            if (ev.shiftKey && (state.tool === 'line' || state.tool === 'ray' || state.tool === 'channel')) {
+            if ((ev.shiftKey || state.snap45)
+                && (state.tool === 'line' || state.tool === 'ray' || state.tool === 'channel')) {
                 state.draft = snap45(state.draft, { b: toData(x, y) });
             } else {
                 state.draft.b = toData(x, y);
@@ -615,7 +671,8 @@
             if (spec.needs === 'two' || spec.needs === 'one') {
                 state.drawings.push(draw);
                 pushUndo({ label: 'add ' + draw.kind,
-                    undo: () => { state.drawings = state.drawings.filter((d) => d.id !== draw.id); } });
+                    undo: () => { state.drawings = state.drawings.filter((d) => d.id !== draw.id); },
+                    redo: () => { if (!state.drawings.some((d) => d.id === draw.id)) state.drawings.push(draw); } });
                 select(draw.id);
             }
             state.draft = null;
@@ -685,14 +742,21 @@
                 document.removeEventListener('mouseup', up, true);
                 if (tip) tip.hidden = true;
                 if (movedFlag && mode === 'move') {
+                    const ends = starts.map((s) => ({ draw: s.draw, a: { ...s.draw.a }, b: { ...s.draw.b } }));
                     pushUndo({ label: 'move', undo: () => {
                         starts.forEach((s) => { s.draw.a = { ...s.a }; s.draw.b = { ...s.b }; });
+                    }, redo: () => {
+                        ends.forEach((e) => { e.draw.a = { ...e.a }; e.draw.b = { ...e.b }; });
                     } });
                 } else if (movedFlag && mode === 'handle') {
                     const isA = found.handle === 'a';
+                    const endA = { ...found.draw.a }, endB = { ...found.draw.b };
                     pushUndo({ label: 'reshape', undo: () => {
                         if (isA) found.draw.a = { ...startA };
                         else found.draw.b = { ...startB };
+                    }, redo: () => {
+                        if (isA) found.draw.a = { ...endA };
+                        else found.draw.b = { ...endB };
                     } });
                 }
                 save();
@@ -736,7 +800,15 @@
                 }
             }
             if ((ev.key === 'z' || ev.key === 'Z') && (ev.ctrlKey || ev.metaKey)) {
-                if (state.undoStack.length) { ev.preventDefault(); undo(); }
+                if (ev.shiftKey) {
+                    if (redoStack.length) { ev.preventDefault(); redo(); }
+                } else if (state.undoStack.length) { ev.preventDefault(); undo(); }
+            }
+            if ((ev.key === 'y' || ev.key === 'Y') && (ev.ctrlKey || ev.metaKey)) {
+                if (redoStack.length) { ev.preventDefault(); redo(); }
+            }
+            if ((ev.key === 'd' || ev.key === 'D') && (ev.ctrlKey || ev.metaKey)) {
+                if (selectionIds().length) { ev.preventDefault(); duplicateSelection(); }
             }
         });
         /* The tool's keys stay local (scoped to the drawing selection and the draft in progress);
@@ -746,6 +818,8 @@
                 { keys: 'Esc', label: 'close the drawing menu, cancel the draft, drop the tool, deselect', scope: 'Drawings' },
                 { keys: 'Del / Backspace', label: 'remove the selected drawing', scope: 'Drawings' },
                 { keys: 'Ctrl+Z', label: 'undo the last marking edit', scope: 'Drawings' },
+                { keys: 'Ctrl+Shift+Z', label: 'redo the edit that was undone', scope: 'Drawings' },
+                { keys: 'Ctrl+D', label: 'duplicate the selection (offset five ticks)', scope: 'Drawings' },
                 { keys: 'shift+click', label: 'add a drawing to the selection (drag moves the set)', scope: 'Drawings' },
             ]);
         }
@@ -846,7 +920,8 @@
     root.OFAPDRAW = { detach,
         TOOLS: KINDS, state, attach, resize, paint, setTool, select, remove, clearAll, hideAll,
         duplicate, save, load, serialize,
-        undo, deleteSelection, selectAll, isSelected,
+        undo, redo, deleteSelection, selectAll, isSelected, duplicateSelection,
+        redoDepth: () => redoStack.length,
         undoDepth: () => state.undoStack.length,
         get selected() { return state.selected; },
         get multiIds() { return state.multiIds.slice(); },

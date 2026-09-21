@@ -553,9 +553,9 @@ class PerformanceDashboard {
             return `
                 <tr class="perf-trade-row ${pnlClass}">
                     <td>${this._formatTime(trade.timestamp)}</td>
-                    <td>${trade.symbol || '--'}</td>
-                    <td class="${trade.side === 'long' ? 'perf-profit' : 'perf-loss'}">${trade.side?.toUpperCase() || '--'}</td>
-                    <td>${trade.pattern || '--'}</td>
+                    <td>${trade.symbol || '—'}</td>
+                    <td class="${trade.side === 'long' ? 'perf-profit' : 'perf-loss'}">${trade.side?.toUpperCase() || '—'}</td>
+                    <td>${trade.pattern || '—'}</td>
                     <td>${this._formatPrice(trade.entry)}</td>
                     <td>${this._formatPrice(trade.exit)}</td>
                     <td class="${pnlClass}">${this._formatCurrency(trade.pnl)}</td>
@@ -595,14 +595,14 @@ class PerformanceDashboard {
     }
 
     _formatPrice(price) {
-        if (!price) return '--';
+        if (!price) return '—';
         if (price >= 1000) return price.toFixed(1);
         if (price >= 1) return price.toFixed(2);
         return price.toFixed(4);
     }
 
     _formatTime(timestamp) {
-        if (!timestamp) return '--';
+        if (!timestamp) return '—';
         return new Date(timestamp).toLocaleTimeString('en-US', {
             hour: '2-digit',
             minute: '2-digit',

@@ -569,13 +569,14 @@ def mt5_validate_symbols(names: list[str], payload: dict[str, Any] | None = None
 def bybit_validate(symbols: list[str]) -> dict[str, bool]:
     """Ask Bybit which of these symbols exist as linear perpetuals."""
     import json
+    import urllib.parse
     import urllib.request
 
     result: dict[str, bool] = {}
     for sym in symbols:
         url = (
             "https://api.bybit.com/v5/market/instruments-info"
-            f"?category=linear&symbol={sym}"
+            f"?category=linear&symbol={urllib.parse.quote(str(sym), safe='')}"
         )
         try:
             with urllib.request.urlopen(url, timeout=8) as resp:
@@ -1087,6 +1088,33 @@ def apply_settings(cfg: dict[str, Any]) -> None:
     except (TypeError, ValueError):
         pass
 
+    # The options/lookup REST feeds: the config is the only place these keys live, and the feeds
+    # are built from `settings` (main.py) or straight from these attributes (atlas/options_api).
+    # Every cast is defensive — a hand-edited file must not be able to put a non-string into a
+    # request header, and a chain width outside the routes' own range must not survive.
+    trad = cfg.get("tradier", {}) or {}
+    settings.TRADIER.key_id = str(trad.get("key_id", "") or "").strip()
+    settings.TRADIER.secret = str(trad.get("secret", "") or "").strip()
+    settings.TRADIER.sandbox = bool(trad.get("sandbox", False))
+    try:
+        settings.TRADIER.chain_width = min(max(int(trad.get("chain_width", 6)), 1), 20)
+    except (TypeError, ValueError):
+        settings.TRADIER.chain_width = 6
+
+    md = cfg.get("marketdata", {}) or {}
+    settings.MARKETDATA.api_key = str(md.get("api_key", "") or "").strip()
+
+    fnh = cfg.get("finnhub", {}) or {}
+    settings.FINNHUB.api_key = str(fnh.get("api_key", "") or "").strip()
+    settings.FINNHUB.calendar_category = str(
+        fnh.get("calendar_category", settings.FINNHUB.calendar_category) or "all")
+    settings.FINNHUB.news_category = str(
+        fnh.get("news_category", settings.FINNHUB.news_category) or "general")
+    try:
+        settings.FINNHUB.calendar_days = min(max(int(fnh.get("calendar_days", 7)), 1), 30)
+    except (TypeError, ValueError):
+        settings.FINNHUB.calendar_days = 7
+
     mt5 = cfg.get("mt5", {})
     settings.MT5.login = int(mt5.get("login", 0) or 0)
     settings.MT5.password = mt5.get("password", "") or ""
@@ -1258,7 +1286,12 @@ async def _start_atlas_extras(system) -> None:
     # prints); under the bybit source it is every pipeline symbol the venue lists.
     leg = None
     parts = getattr(system, "_feed_symbols", None)
-    if isinstance(parts, dict) and parts.get("bybit"):
+    # The partition is only consulted when the run actually partitions (the same rule main.py
+    # applies to its legs): under a single-venue source nothing is partitioned, and a broker
+    # stamp on a crypto row would otherwise strand that symbol's extras forever — BTCUSDT
+    # (mt5_symbol set by the wizard) lost its deep book, liquidations and block trades this way
+    # while four lesser symbols kept theirs.
+    if source in ("both", "all") and isinstance(parts, dict) and parts.get("bybit"):
         leg = {str(s) for s in parts["bybit"]}
     symbols: dict[str, float] = {}
     for pipeline in system.pipelines.values():
@@ -1274,8 +1307,43 @@ async def _start_atlas_extras(system) -> None:
         logger.exception("the reference layout extras feed failed to start")
 
 
+def tick_gaps(timestamps_ms: list[int], *, floor_ms: int = 5000,
+              factor: float = 10.0) -> dict[str, Any]:
+    """Provenance for a symbol's retained tick window (the MT5-wound fix, v2 report §7-9).
+
+    A gap is an inter-arrival interval wider than ``max(floor_ms, factor × median)`` — wide enough
+    that a normally busy tape never produces one, so a non-zero count means the feed genuinely
+    went quiet (reconnect, throttling, venue hiccup), while a thin symbol's ordinary cadence is
+    never miscalled. The result describes the RETAINED window only — it never claims to know the
+    whole session.
+    """
+    clean = sorted(int(t) for t in timestamps_ms if t)
+    intervals = [b - a for a, b in zip(clean, clean[1:]) if b > a]
+    if not intervals:
+        return {"window": 0}
+    median = sorted(intervals)[len(intervals) // 2]
+    threshold = max(int(floor_ms), int(factor * median))
+    return {
+        "window": len(intervals),
+        "median_ms": median,
+        "threshold_ms": threshold,
+        "count": sum(1 for i in intervals if i > threshold),
+        "worst_ms": max(intervals),
+    }
+
+
 class EngineController:
     """Start / stop / inspect the live system from the GUI."""
+
+    #: §132: the stage the controller is at RIGHT NOW — for the top bar's engine progress bar.
+    #: Keys, not sentences: the route is the source of truth for state, the UI owns the words.
+    #: The plan is ordered, so a bar can size each step; the log keeps the measured durations
+    #: (they are what the bar's own pacing is calibrated against, and what a slow stop is
+    #: explained with — "flushing history" took the seconds, not a frozen app).
+    STAGE_PLAN = {
+        "starting": ("config", "instruments", "build", "connect"),
+        "stopping": ("feeds", "history", "release"),
+    }
 
     def __init__(self) -> None:
         self._system = None
@@ -1287,6 +1355,22 @@ class EngineController:
         self._skipped: list[dict[str, str]] = []
         self._source = ""
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        #: §132 — stage bookkeeping for the progress bar. `_stage_at` is an epoch second so the
+        #: bar can interpolate between polls instead of stepping every two seconds.
+        self._stage: str = ""
+        self._stage_at: float = 0.0
+        self._stage_log: list[dict[str, Any]] = []
+
+    def _mark(self, stage: str) -> None:
+        """Record a stage boundary on the start/stop paths (never per tick). Closes the previous
+        stage into the log with its measured duration."""
+        now = time.time()
+        if self._stage:
+            self._stage_log.append({"stage": self._stage,
+                                    "ms": int((now - self._stage_at) * 1000)})
+            del self._stage_log[:-24]
+        self._stage = stage
+        self._stage_at = now
 
     # ── properties ──
     @property
@@ -1314,6 +1398,7 @@ class EngineController:
         self._state = "starting"
         self._error = None
         self._skipped = []
+        self._mark("config")                 # §132: stage 1 of 4 shown by the engine progress bar
 
         try:
             # Settings FIRST: select_instruments reads settings.ALPACA.symbols and the venue maps
@@ -1323,6 +1408,7 @@ class EngineController:
             apply_settings(cfg)
             instruments, skipped = select_instruments(cfg)
             self._skipped = skipped
+            self._mark("instruments")
             if not instruments:
                 self._state = "stopped"
                 msg = "No usable instruments for the selected data source"
@@ -1344,6 +1430,7 @@ class EngineController:
                 cfg, [i.instrument.value for i in instruments],
                 legs=(("bybit", "mt5") if source_now == "both"
                       else ("bybit", "alpaca", "mt5", "ninjatrader")))
+            self._mark("build")              # §132: stage 3 — constructing the run itself
             system = OrderflowSystem(instruments=instruments, data_source=settings.DATA_SOURCE,
                                      feed_symbols=partition)
             system.aggregator.min_composite_score = float(risk.get("min_composite_score", 40.0))
@@ -1351,6 +1438,7 @@ class EngineController:
 
             dashboard_app.set_system(system)     # existing REST endpoints go live
             _verify_candle_wiring(system)
+            self._mark("connect")                # §132: stage 4 — wiring the atlas hub and feeds
             await _wire_atlas(system, cfg)
             self._system = system
             self._symbols = [i.instrument.value for i in instruments]
@@ -1358,6 +1446,9 @@ class EngineController:
             self._started_at = time.time()
             self._task = asyncio.create_task(self._run(system))
             self._state = "running"
+            self._mark("ready")                  # §132: the start half is done; the UI keeps the
+            #                                      bar up (green, "waiting for ticks") until the
+            #                                      first print lands, so "started" never lies
             logger.info("Engine started: source=%s symbols=%s", self._source, self._symbols)
             try:
                 # What this run consumes is fixed from here: stamp it, so a later config change
@@ -1372,6 +1463,7 @@ class EngineController:
         except Exception as exc:                 # never take the GUI down with us
             self._state = "error"
             self._error = f"{type(exc).__name__}: {exc}"
+            self._mark("failed")
             logger.exception("Engine start failed")
             return {"ok": False, "error": self._error}
 
@@ -1386,6 +1478,7 @@ class EngineController:
             return
         hub = getattr(system, "_atlas_hub", None)
         if hub is not None:
+            self._mark("feeds")              # §132: stage 1 of 3 on the way down
             try:
                 await hub.stop_feeds()
             except Exception:
@@ -1394,6 +1487,7 @@ class EngineController:
             # the feeds alone left one orphaned per engine stop/restart cycle (audit A-01).
             history = getattr(hub, "history", None)
             if history is not None:
+                self._mark("history")        # §132: usually instant (measured 9 ms)
                 try:
                     await history.stop()
                 except Exception:
@@ -1415,6 +1509,9 @@ class EngineController:
                 except Exception:
                     logger.debug("atlas hub task shutdown failed", exc_info=True)
         system._running = False
+        self._mark("release")            # §132: stage 3 — draining the run's own tasks. This is
+        #                                  where a stop's seconds actually live (measured 10.0 s of
+        #                                  a 10.3 s stop; feeds 271 ms, history 9 ms)
         try:
             await asyncio.wait_for(system.stop(), timeout=15)
         except asyncio.TimeoutError:
@@ -1478,6 +1575,7 @@ class EngineController:
             self._symbols = []
             self._started_at = None
             self._state = "stopped"
+            self._mark("closed")             # §132: the bar's terminus — "stopped" is the truth now
             logger.info("Engine stopped")
         return {"ok": True, "state": self._state}
 
@@ -1599,6 +1697,10 @@ class EngineController:
                     "trade_direction": getattr(trade, "direction", "none"),
                     "last_tick_ms": int(getattr(ticks_deque[-1], "timestamp_ms", 0)) if ticks_deque else 0,
                     "last_candle_ms": int(getattr(candle, "timestamp_ms", 0)) if candle is not None else 0,
+                    # §125 (v2 §7-9): the silence pattern of the retained window — how often this
+                    # symbol's tape went quiet and for how long at worst. Computed here, on read:
+                    # no ingest-path bookkeeping, nothing to drift.
+                    "gaps": tick_gaps([getattr(t, "timestamp_ms", 0) for t in (ticks_deque or [])]),
                 })
         return {
             "state": self._state,
@@ -1611,6 +1713,15 @@ class EngineController:
             "config_dir": str(config_store.config_dir()),
             "per_symbol": per_symbol,
             "ws_clients": getattr(self._system, "ws_manager", None).client_count if self._system else 0,
+            # §132: the progress bar's own feed. `stage` is a key from STAGE_PLAN, `stage_at` an
+            # epoch second (so the bar interpolates between the 2 s polls), `stage_ms` how long the
+            # current stage has run, `stage_plan` the ordered keys of this direction and
+            # `stage_log` the last measured stages — the evidence a slow stop is explained with.
+            "stage": self._stage,
+            "stage_at": round(self._stage_at, 3),
+            "stage_ms": int((time.time() - self._stage_at) * 1000) if self._stage_at else 0,
+            "stage_plan": list(self.STAGE_PLAN.get(self._state, ())),
+            "stage_log": list(self._stage_log[-12:]),
         }
 
 

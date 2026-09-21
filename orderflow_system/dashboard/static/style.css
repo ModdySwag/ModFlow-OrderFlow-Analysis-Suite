@@ -113,6 +113,21 @@ html, body {
 .terminal-select:focus { border-color: var(--border-active); box-shadow: 0 0 0 1px var(--border-active); }
 .terminal-select option { background: var(--bg-secondary); color: var(--text-primary); }
 .terminal-select optgroup { font-weight: 700; color: var(--text-muted); font-size: 11px; background: var(--bg-primary); }
+.terminal-select.switching { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue), 0 0 6px rgba(0, 100, 200, .4); }
+.terminal-select.switching::after {
+    content: "";
+    display: inline-block;
+    width: 8px; height: 8px;
+    border: 1.5px solid var(--blue);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    position: absolute;
+    right: 8px; top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+}
+.control-group { position: relative; }
 
 .btn-group {
     display: flex;

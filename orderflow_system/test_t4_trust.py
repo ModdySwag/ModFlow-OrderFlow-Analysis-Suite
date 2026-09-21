@@ -144,3 +144,65 @@ def test_the_widget_title_carries_the_live_token():
     assert "function titleToken" in shell
     assert "title.textContent = titleToken(view)" in shell
     assert "S.frames.forEach" in shell, "the titles are never refreshed after an instrument change"
+
+
+def test_changing_the_instrument_actually_repaints_the_titles():
+    """The refresh above only runs when the shell's status pass runs, and nothing called it on a
+    symbol change: measured live (§130) every frame kept the symbol it was BUILT with — after moves
+    to ETHUSDT / SOLUSDT / XRPUSDT the montage still read "· BTCUSDT" minutes later, which is the
+    owner's photographed "panel says ETHUSDT, title says BTCUSDT" contradiction. The top bar must
+    ask for the repaint, through the shell's own exported pass."""
+    ui = _text(UI / "ui.js")
+    handler = ui.split('$("#symbolSelect").onchange', 1)[1].split("};", 1)[0]
+    assert "ofap:symbol" in handler, "the top bar stopped announcing its instrument"
+    assert "OFAPSHELL.paintStatus" in handler, "the frame titles are stale again after a symbol change"
+    assert "paintStatus: paintStatus" in _text(UI / "shell.js"), "the shell no longer exports the repaint"
+
+
+def test_a_widgets_hover_text_lives_on_its_grip_not_over_its_content():
+    """The owner's screenshot (§131): "Guide & setup · 3×2 cells" popped over the panel's own text —
+    the FRAME element carried a native title, so the tooltip covered the whole widget and fired
+    wherever the pointer sat, including over the chart or the prose being read (measured: every
+    widget frame in both modes carried `view · 6×4 cells`). A widget's hover text belongs to a
+    CONTROL (the resize grip); the frame bar already names the widget and hints the move."""
+    shell = _text(UI / "shell.js")
+    assert "frame.title" not in shell, "a whole-panel tooltip is back — it covers the widget's content"
+    assert "function gripTip(" in shell and "grip.title = gripTip(" in shell, "the grip lost its own hover text"
+    assert "now ' + w + '×' + h + ' cells" in shell, "the grip stopped saying how big the widget is"
+    assert "Drag to move this widget" in shell, "the frame bar's own move hint is gone"
+
+
+def test_the_chart_retry_is_bounded():
+    """FG-06 (final release audit): the chart's retry-until-it-lands watch ran forever at a 5 s
+    cadence while the Chart view stayed open — a permanently failing load cost one request every
+    5 s, with no attempt cap and nothing said. Bounded now: CHART_RETRY_MAX tries, then the watch
+    stops and the chart head says so; a landed load or a new selection resets the budget."""
+    ui = _text(UI / "ui.js")
+    assert "CHART_RETRY_MAX" in ui, "the chart retry lost its cap"
+    watch = ui.split("function chartLoadWatch()", 1)[1].split(chr(10) + "}", 1)[0]
+    assert "chartRetryTries >= CHART_RETRY_MAX" in watch, "chartLoadWatch retries without a bound again"
+    assert "did not load" in watch, "the bounded retry stopped saying what happened"
+    handler = ui.split('$("#symbolSelect").onchange', 1)[1].split("};", 1)[0]
+    assert "chartRetryTries = 0" in handler, "a new selection must reset the retry budget"
+
+
+def test_the_live_chip_reuses_the_status_payload():
+    """FG-07 (final release audit): refreshLiveChip() spent a second GET /engine/status on every
+    status application (2 s; 480 ms during transitions) although applyStatus already held the very
+    payload it wanted. The payload is handed over now; only a bare call fetches."""
+    ui = _text(UI / "ui.js")
+    assert "async function refreshLiveChip(status)" in ui, "the live chip fetches instead of reusing the payload"
+    assert "const st = status || await api(" in ui, "the payload hand-over is gone"
+    assert "refreshLiveChip(payload);" in ui, "the status path stopped handing its payload over"
+
+
+def test_the_top_bar_and_help_say_that_a_pick_can_start_the_engine():
+    """FG-05 (final release audit): with the Engine view initialised, picking an instrument starts
+    the engine (ofx-view's pickSymbol → resolve 'ready' → runInstrumentAction('start_engine')) —
+    designed (§82) and reproduced live, but nothing in the top bar said so. Documentation-only
+    fix: the selector's own tooltip and the Instruments help topic both state it."""
+    page = _text(UI / "index.html")
+    assert 'id="symbolSelect" title=' in page, "the selector stopped saying a pick can start the engine"
+    assert "starts the engine when it is stopped" in page
+    help_data = _text(UI / "help-data.js")
+    assert "starts the engine when it is stopped" in help_data, "the help topic lost the note"

@@ -124,3 +124,65 @@ InstallShield.
 - **WebView2 branch**: the runtime is present on this machine (v153), so the setup's check skipped the
   bootstrapper exactly as designed (nothing extracted in the log). The missing-runtime branch is
   untested here - try it on a clean image per `docs\RELEASE_CHECKLIST.md` section 5.
+
+## Verified journey (Inno pipeline, the §125 rebuild) - measured 2026-09-19
+
+- **Build**: the §119–§125 tree (HEAD `797eea0`, worktree dirty; `dist/BUILD_INFO.json` records commit + state, built 2026-09-19T16:03:35+0930). Setup `ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe`, **37,659,252 bytes** (35.91 MB), sha256
+  `5B8BF8B46DEAB5F7F004E58530353D340F353EBEC076EEFD7C625A8E2ACE699A`; the WebView2 bootstrapper embedded in it is 1.76 MB, sha256
+  `83004A28553BCF2F932BF03564FBAB407B8E1F59CD265F8DC99CC53D028E459C`.
+  The payload it wraps: 896 files (232 developer files pruned); zip 42,998,781 bytes, sha256
+  `917a48b2556633f5a23662e365a43efd75662c38896e498f573706baec5beb9a`; CycloneDX SBOM, sha256
+  `eb51942bd71e95d92aaae290e19fa3293cc5b373ee2cb129dd768cf0485c9bac`. dist exe: 15.3 MB, sha256
+  `b2eb32d8f6fb15064fa6cd92f071332024a701e573c63d17295c01abcc31b8e2`.
+- **Frozen smoke** (dist exe, port 8098, scratch APPDATA): **18/18** — healthz + BTCUSDT candles, unknown-symbol `[]` on footprint/tape, hostile-Host 403, `/api/control/sources` (7 venues), radar endpoint + education corpus present, **asset parity 78 shell refs + 11 help PNGs + corpus/search/pane byte-identical to the tree**, help payload `frozen=true`, WS 101/403, 0 client errors.
+- **Silent install** (`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=<scratch>`): exit 0; **898 files** (the 896-file payload + `unins000.exe`/`.dat`), installed exe sha256 equal to the dist exe's; Start Menu entry created; desktop icon correctly skipped (task unchecked); ARP entry under
+  `HKCU\...\Uninstall\{C2042089-3E19-410D-ABA6-C32BC9C13D80}_is1`.
+- **Installed app**: headless on 8097 → `/healthz` 200, `/api/candles/BTCUSDT` 200 (173 KB), `/api/footprint/UNKNOWNXYZ` → `[]`, `/desktop` 200.
+- **Silent uninstall**: exit 0; install dir, ARP entry and Start Menu entry all gone;
+  `%APPDATA%\OrderFlowAnalysisPro` untouched; the dev desktop shortcut was backed up before the journey and left exactly as found.
+
+
+## Verified journey (Inno pipeline, the §127 rebuild) - measured 2026-09-19
+
+- **Build**: the §119–§127 tree (HEAD `797eea0`, worktree dirty; `dist/BUILD_INFO.json` records commit + state, built 2026-09-19T17:06:16+0930). Setup `ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe`, **37,661,860 bytes** (35.92 MB), sha256
+  `0D0BF7C57329ADC02B642CF07B187A398CC8666AA4481CA0662E563981D692E2`; the WebView2 bootstrapper embedded in it is 1.76 MB, sha256
+  `83004A28553BCF2F932BF03564FBAB407B8E1F59CD265F8DC99CC53D028E459C` (unchanged).
+  The payload it wraps: 896 files (232 developer files pruned); zip 43,001,835 bytes, sha256
+  `113be091cd0befb22e187b21b292337e399fa2a80ee6ad45ce060a80d06b4f2f`; CycloneDX SBOM, sha256
+  `8e2fa4b02096d45c00511b7e436eec078a16396a14843bfc4ce6e1ab890f3130`. dist exe: 15.3 MB, sha256
+  `8ae3b25018dfd89643b23a3b289de28fb18fbd7e45e8e21871ef1e4c26c8896e`.
+- **Frozen smoke** (dist exe, port 8098, scratch APPDATA): **18/18** — healthz + BTCUSDT candles, unknown-symbol `[]`, hostile-Host 403, `/api/control/sources` (7 venues), radar endpoint + education corpus present, **asset parity 78 shell refs + 11 help PNGs + corpus/search/pane byte-identical to the tree**, help payload `frozen=true`, WS 101/403, 0 client errors.
+- **Silent install** (`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=<scratch>`): exit 0; **898 files** (the 896-file payload + `unins000.exe`/`.dat`), installed exe sha256 equal to the dist exe's; Start Menu entry created; desktop icon correctly skipped (task unchecked); ARP entry under
+  `HKCU\...\Uninstall\{C2042089-3E19-410D-ABA6-C32BC9C13D80}_is1`.
+- **Installed app**: headless on 8097 → `/healthz` 200, `/api/candles/BTCUSDT` 200 (173 KB), `/api/footprint/UNKNOWNXYZ` → `[]`, `/desktop` 200.
+- **Silent uninstall**: exit 0; install dir, ARP entry and Start Menu entry all gone;
+  `%APPDATA%\OrderFlowAnalysisPro` untouched; the dev desktop shortcut was backed up before the journey and left exactly as found.
+
+## Verified journey (Inno pipeline, the §129b rebuild) - measured 2026-09-19
+
+- **Build**: the §119–§129b tree (HEAD `797eea0`, worktree dirty; `dist/BUILD_INFO.json` records commit + state, built 2026-09-19T20:20:02+0930). Setup `ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe`, **37,693,744 bytes** (35.95 MB), sha256
+  `E39E3ADC03E5CEB8AAC54B6368D7CD8B142EE4BA813B518479225360D785B961`; the WebView2 bootstrapper embedded in it is 1.76 MB, sha256
+  `83004A28553BCF2F932BF03564FBAB407B8E1F59CD265F8DC99CC53D028E459C` (unchanged).
+  The payload it wraps: 896 files (232 developer files pruned); zip 43,032,010 bytes, sha256
+  `b51b1c9fb2e8c2aaefc5975573616dd8a0bc7e877a10682eb1e8d3f8a76c75d8`; CycloneDX SBOM, sha256
+  `cc88e4ccaafa3d1c52e3e5807a281e0f02fa1cc57cf55bc04b363ed9f6245edf`. dist exe: 15.3 MB, sha256
+  `1863553f91eb4bc4cec3d65d7ab0e820f5c0cb42ab53d34753ba2b8a921bd7fb`.
+- **Frozen smoke** (dist exe, port 8098, scratch APPDATA): **18/18** — healthz + BTCUSDT candles, unknown-symbol `[]`, hostile-Host 403, `/api/control/sources` (7 venues), radar endpoint + education corpus present, **asset parity 78 shell refs + 11 help PNGs + corpus/search/pane byte-identical to the tree**, help payload `frozen=true`, WS 101/403, 0 client errors.
+- **Frozen features** (same exe, port 8097): **20/20** — payload parity for `menubar.js` / `windows-ui.js` / `windowing.js` / `help-data.js`; the §129 versions row + auto-cull switch and the §129b scroll guard present in the payload AND in the file the page actually requests; `/api/control/layouts` answers `keep=5 max=10 autocull=True` and the switch writes through it (`{autocull:false}` → response `autocull: False`, store False — the stale-answer defect THIS probe found is fixed and pinned); `/api/control/windows` answers the §128 `stranded` + `open_geometry`; served `help-data.js` carries the ring explanation; 0 client errors; port released.
+- **Frozen UI over CDP** (the artifact's own WebView2, app 8104 / CDP 9224): the owner's gesture re-run against the frozen build — the View menu stayed open through a real wheel (`scrollTop 260`) and the below-the-fold **Rail** row clicked → rail toggled; the Layout menu stayed open through a wheel, the row read `✓Auto-cull old versions`, clicking it flipped the route's flag (True→False, then restored).
+- **Silent install / uninstall** (`scripts/verify_installer.ps1`): **11/11 PASS** — install exit 0, 898 files, ARP entry + Start Menu entry created, the installed app booted headless (`/healthz` 200, `/desktop` 200, `/docs` 404), port released, uninstall exit 0, install dir + ARP + Start Menu gone, `%APPDATA%\OrderFlowAnalysisPro` untouched, the dev desktop shortcut left as found.
+
+## Verified journey (Inno pipeline, the §135 fix pass) - measured 2026-09-19
+
+- **Build**: the §119–§134 tree + the §135 fix pass (HEAD `797eea0`, worktree dirty; `dist/BUILD_INFO.json` records commit + state, built 2026-09-19T22:42:07+0930). Setup `ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe`, **37,699,102 bytes** (35.95 MB), sha256
+  `D921D58EF76394879377D978C6A2DA6F4B39AE00A259EEEED05F5B693B3C0A9F`; the WebView2 bootstrapper embedded in it is 1.76 MB, sha256
+  `83004A28553BCF2F932BF03564FBAB407B8E1F59CD265F8DC99CC53D028E459C` (unchanged).
+  The payload it wraps: 899 files (233 developer files pruned); zip 43,040,670 bytes, sha256
+  `6a1926a7411818387d5f60bc0aa4dbdb406507988288102bcaec19b27d2c4907`; CycloneDX SBOM, sha256
+  `26dad36f93ee74ac56b8da8e46760c70dfbff5f9fd4b9f113a7904896f377bba`. dist exe: 15.3 MB, sha256
+  `bb503bcd9d9421710699ab39833afe651e1f254a0018933e2b481ae9dc88d15d`.
+- **Frozen smoke** (dist exe, port 8098, scratch APPDATA): **18/18** — healthz + BTCUSDT candles, unknown-symbol `[]`, hostile-Host 403, `/api/control/sources` (7 venues), radar endpoint + education corpus present, **asset parity 79 shell refs + 11 help PNGs + corpus/search/pane byte-identical to the tree**, help payload `frozen=true`, WS 101/403, 0 client errors.
+- **Frozen features** (same exe, port 8097): **20/20** — payload parity for `menubar.js` / `windows-ui.js` / `windowing.js` / `help-data.js`; the §129 versions row + auto-cull switch and the §129b scroll guard present in the payload AND in the file the page actually requests; `/api/control/layouts` answers `keep=5 max=10` and the switch writes through it; `/api/control/windows` answers the §128 `stranded` + `open_geometry`; 0 client errors; port released.
+- **Frozen payload markers** (this pass's own additions, served from the artifact): `/desktop/index.html` carries the instrument selector's tooltip, `/desktop/ui.js` carries `CHART_RETRY_MAX` + `refreshLiveChip(payload)`, `/desktop/help-data.js` carries the pick-starts-engine sentence.
+- **Frozen guard probe** (the release audit's battery, re-run on this artifact): **23/23** — docs 404 ×3, served==packaged for 8 shell files, CSP meta, hostile Host / cross-origin / cross-site 403, loopback 200, WS 101/403, export-traversal name stays inside `exports\`, `app.frozen=true`.
+- **Silent install / uninstall** (`scripts/verify_installer.ps1`): **11/11 PASS** — install exit 0, 899 files, ARP entry + Start Menu entry created, the installed app booted headless (`/healthz` 200, `/desktop` 200, `/docs` 404), port released, uninstall exit 0, install dir + ARP + Start Menu gone, `%APPDATA%\OrderFlowAnalysisPro` untouched, the dev desktop shortcut left as found.

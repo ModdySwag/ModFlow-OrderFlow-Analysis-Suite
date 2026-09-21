@@ -431,6 +431,181 @@ def test_feed_extras_tolerates_sync_and_async_callbacks():
     assert feed.stats["liquidations"] == 1 and feed.stats["block_trades"] == 1
 
 
+def test_the_primary_book_never_double_paints_a_live_extras_book():
+    """§131: ONE book per symbol. The deep extras book supersedes the primary's where it is fresh,
+    and the primary resumes the moment the extras socket dies — a stale map is worse than a
+    shallow one, but two books under one heatmap is worse than either."""
+    from orderflow_system.atlas.hub import FeatureHub
+    from orderflow_system.data.models import OrderbookLevel, OrderbookSnapshot
+
+    class FakeExtras:
+        def __init__(self, age_ms):
+            self._age = age_ms
+
+        def book_age_ms(self, symbol):
+            return self._age
+
+        def stats_for(self, symbol=None):
+            return {}
+
+    hub = FeatureHub()
+    snap = OrderbookSnapshot(timestamp_ms=T0, bids=[OrderbookLevel(price=100.0, quantity=1.0)], asks=[])
+    before = hub.counters["orderbooks"]
+
+    hub._feeds["X"] = FakeExtras(1_000)                 # a live extras book for X
+    hub.on_orderbook("X", snap)
+    assert hub.counters["orderbooks"] == before, "the primary book must not paint over a fresh deep book"
+    assert hub.counters.get("orderbooks_primary_skipped") == 1
+
+    hub._feeds["X"] = FakeExtras(10 ** 6)               # the extras socket has gone quiet
+    hub.on_orderbook("X", snap)
+    assert hub.counters["orderbooks"] == before + 1, "with the extras stale the primary book resumes"
+
+    hub.on_orderbook("Z", snap)                          # Z has no extras at all
+    assert hub.counters["orderbooks"] == before + 2
+
+
+def test_the_extras_book_feeds_every_consumer_once():
+    """The deep book goes through the same funnel as the primary's — heatmap AND the intent and
+    refill detectors — counted once, not once per connection."""
+    import asyncio as _asyncio
+    from orderflow_system.atlas.hub import FeatureHub
+
+    hub = FeatureHub()
+    calls: list = []
+    feats = hub.ensure("X")
+    feats.heatmap.on_orderbook = lambda snap: (calls.append(("heatmap", len(snap.bids))), [])[1]
+    feats.intent.on_orderbook = lambda snap: (calls.append(("intent", len(snap.bids))), {})[1]
+    feats.detector.on_orderbook = lambda snap: (calls.append(("detector", len(snap.bids))), {})[1]
+    n0 = hub.counters["orderbooks"]
+
+    _asyncio.run(hub._on_ext_orderbook("X", "snapshot", {"b": [["100", "2"]], "a": [["101", "3"]]}, T0))
+
+    assert calls == [("heatmap", 1), ("intent", 1), ("detector", 1)], (
+        "every book consumer reads the deep book, and each exactly once")
+    assert hub.counters["orderbooks"] == n0 + 1, "one book update, one count"
+
+
+def test_extras_subscribes_every_topic_on_connect(monkeypatch):
+    """§131: the subscribe must ride the connection. A session built without its connect hook opens
+    a socket that never subscribes — the venue answers pings so it looks alive, and no error is
+    ever raised while zero market data arrives (measured live: 2 frames in 25 s, no book updates)."""
+    import asyncio as _asyncio
+    import json as _json
+
+    from orderflow_system.atlas import feed_extras
+    from orderflow_system.atlas.feed_extras import BybitExtras
+
+    sent: list = []
+
+    class FakeConn:
+        async def send(self, payload):
+            sent.append(payload)
+
+        async def close(self):
+            return None
+
+        def __aiter__(self):
+            async def gen():
+                while True:
+                    await _asyncio.sleep(0.02)
+                    yield '{"topic":"orderbook.200.AAA","type":"delta","ts":1,"data":{"b":[["1","1"]],"a":[]}}'
+            return gen()
+
+    async def fake_connect(url, **kw):
+        return FakeConn()
+
+    monkeypatch.setattr(feed_extras.websockets, "connect", fake_connect)
+
+    feed = BybitExtras(["AAA", "BBB"], on_liquidation=lambda **k: None,
+                       on_orderbook=lambda *a, **k: None, on_block_trade=lambda **k: None)
+
+    async def drive():
+        task = _asyncio.create_task(feed.start())
+        for _ in range(80):
+            if any('"op": "subscribe"' in s or '"op":"subscribe"' in s for s in sent):
+                break
+            await _asyncio.sleep(0.05)
+        await feed.stop()
+        task.cancel()
+        try:
+            await task
+        except _asyncio.CancelledError:
+            pass
+
+    _asyncio.run(drive())
+    subs = [_json.loads(s) for s in sent if "subscribe" in s]
+    assert subs, "the extras session never subscribed — `on_connected` must be passed to FeedSession"
+    assert subs[0]["args"] == [
+        "allLiquidation.AAA", "orderbook.200.AAA", "publicTrade.AAA",
+        "allLiquidation.BBB", "orderbook.200.BBB", "publicTrade.BBB",
+    ], subs[0]["args"]
+    assert feed.stats["book_updates"] >= 1, "frames arriving through the session must reach routing"
+
+
+def test_extras_routes_frames_by_their_own_symbol():
+    """§131: one connection, many symbols — a frame reaches its own symbol's callbacks ONLY."""
+    import asyncio as _asyncio
+    from orderflow_system.atlas.feed_extras import BybitExtras
+
+    seen: list[tuple] = []
+    feed = BybitExtras(
+        ["AAA", "BBB"],
+        on_liquidation=lambda **kw: seen.append(("liq", kw["symbol"], kw["price"])),
+        on_orderbook=lambda sym, typ, data, ts: seen.append(("book", sym, typ)),
+        on_block_trade=lambda **kw: seen.append(("block", kw["symbol"], kw["size"])),
+    )
+    msgs = [
+        {"topic": "orderbook.200.BBB", "type": "delta", "ts": T0, "data": {"b": [["1", "2"]], "a": []}},
+        {"topic": "publicTrade.AAA", "ts": T0, "data": [{"T": T0, "p": "5", "v": "3", "S": "Buy", "BT": True}]},
+        {"topic": "allLiquidation.AAA", "ts": T0, "data": [{"T": T0, "S": "Sell", "v": "2", "p": "4"}]},
+        {"topic": "orderbook.200.ZZZ", "type": "delta", "ts": T0, "data": {"b": [["1", "1"]], "a": []}},
+        {"op": "pong", "success": True},
+    ]
+    results = [_asyncio.run(feed._handle(m)) for m in msgs]
+
+    assert seen == [("book", "BBB", "delta"), ("block", "AAA", 3.0), ("liq", "AAA", 4.0)], (
+        "each frame goes to its own symbol's callback — never to another instrument's")
+    assert results[:3] == [True, True, True], "parsed market data resets the reconnect ladder"
+    assert results[3:] == [False, False], (
+        "another symbol's topic and a pong are not data — the ladder must keep escalating")
+    assert feed.stats_for("AAA")["block_trades"] == 1 and feed.stats_for("BBB")["book_updates"] == 1
+    assert feed.stats["liquidations"] == 1
+
+
+def test_extras_start_one_connection_for_many_symbols(monkeypatch):
+    """§131: a multi-symbol start opens ONE extras connection, and stops it once."""
+    import asyncio as _asyncio
+    from orderflow_system.atlas import feed_extras
+    from orderflow_system.atlas.hub import FeatureHub  # NB: the package's `hub` name is an INSTANCE
+
+    made: list[list[str]] = []
+
+    class StubFeed:
+        def __init__(self, symbols, **kw):
+            made.append(list(symbols) if isinstance(symbols, list) else [symbols])
+            self.stats: dict = {}
+
+        async def start(self):
+            return None
+
+        async def stop(self):
+            return None
+
+        def stats_for(self, symbol=None):
+            return {}
+
+    monkeypatch.setattr(feed_extras, "BybitExtras", StubFeed)
+    h = FeatureHub()
+    h.extras_enabled = True
+
+    result = _asyncio.run(h.start_feeds({"BTCUSDT": 0.1, "ETHUSDT": 0.01, "SOLUSDT": 0.001}))
+    assert len(made) == 1, "five instruments used to mean five sockets; one connection carries them all"
+    assert made[0] == ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    assert result["feeds"] == 1 and result["symbols"] == ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    assert _asyncio.run(h.stop_feeds())["ok"] is True
+
+
 def test_liquidation_routes_into_hub_and_tracker():
     hub = FeatureHub()
     hub.on_liquidation("X", price=100.0, size=5.0, side="Sell", ts_ms=T0)

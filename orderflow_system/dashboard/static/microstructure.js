@@ -28,8 +28,8 @@ class MicrostructurePanel {
             exhaustionStrength: 0,
             deltaDirection: 'neutral',
             session: {
-                name: '--',
-                remaining: '--'
+                name: '—',
+                remaining: '—'
             },
             patterns: []
         };
@@ -47,7 +47,7 @@ class MicrostructurePanel {
                         <span class="micro-state-label">UNKNOWN</span>
                     </div>
                     <div class="micro-session" id="microSession">
-                        <span class="micro-session-name">--</span>
+                        <span class="micro-session-name">—</span>
                         <span class="micro-session-time">--:--</span>
                     </div>
                 </div>
@@ -61,7 +61,7 @@ class MicrostructurePanel {
                     <div class="micro-absorption">
                         <div class="micro-abs-level" id="microAbsLevel">
                             <span class="micro-abs-label">Level:</span>
-                            <span class="micro-abs-value">--</span>
+                            <span class="micro-abs-value">—</span>
                         </div>
                         <div class="micro-abs-attempts" id="microAbsAttemptsBar">
                             <div class="micro-abs-dot"></div>
@@ -112,8 +112,8 @@ class MicrostructurePanel {
                         </div>
                         <div class="micro-cvd-status" id="microCVD">
                             <span class="micro-cvd-label">CVD:</span>
-                            <span class="micro-cvd-value">--</span>
-                            <span class="micro-cvd-trend">--</span>
+                            <span class="micro-cvd-value">—</span>
+                            <span class="micro-cvd-trend">—</span>
                         </div>
                     </div>
                 </div>
@@ -223,7 +223,7 @@ class MicrostructurePanel {
 
         // Level display
         this.els.absLevel.querySelector('.micro-abs-value').textContent = 
-            level ? this._formatPrice(level) : '--';
+            level ? this._formatPrice(level) : '—';
 
         // Attempts badge
         this.els.absAttempts.textContent = attempts || 0;
@@ -295,7 +295,7 @@ class MicrostructurePanel {
 
         // CVD value
         const cvdValueEl = this.els.cvd.querySelector('.micro-cvd-value');
-        cvdValueEl.textContent = cumulative ? this._formatVolume(cumulative) : '--';
+        cvdValueEl.textContent = cumulative ? this._formatVolume(cumulative) : '—';
         cvdValueEl.className = 'micro-cvd-value ' + 
             (cumulative > 0 ? 'bullish' : cumulative < 0 ? 'bearish' : '');
 
@@ -394,7 +394,7 @@ class MicrostructurePanel {
     }
 
     _formatPrice(price) {
-        if (!price) return '--';
+        if (!price) return '—';
         if (price >= 1000) return price.toFixed(1);
         if (price >= 1) return price.toFixed(2);
         return price.toFixed(4);

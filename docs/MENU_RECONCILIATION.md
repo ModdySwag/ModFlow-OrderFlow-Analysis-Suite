@@ -7,6 +7,9 @@ which injects its own view); the menu inventory from `ui/menubar.js` (`menus()`,
 `atlas/api.py` and `edgar.py`, normalises template literals in every `ui/*.js`, and lists routes
 with **no UI caller**. Re-run by re-extracting the same way.
 **Date of extraction: 2026-09-18 (session §93). State: nothing committed; HEAD `110c568`.**
+**Companion audit (2026-09-19): the dropdown and input surfaces — every select, number input and
+menu stub re-checked with live probes — lives in `docs/CONTROL_SURFACE_AUDIT.md`; its §3 re-runs
+this document's stub classification against today's tree (15 stubs remain, six promotable).**
 
 ---
 
@@ -42,6 +45,10 @@ with **no UI caller**. Re-run by re-extracting the same way.
 | 26 | News | poll | — | — | headlines |
 | 27 | Fundamentals | snapshot | — | — | EDGAR/CoinGecko |
 | 28 | Options | snapshot | — | — | Deribit chain |
+| 29 | GEX | 20 s poll (registered) | ✔ | — | dealer gamma, walls, zero-gamma line (§137) |
+| 30 | Volatility | 20 s poll (registered) | ✔ | — | IV smile, 25Δ wings, term structure (§137) |
+| 31 | Option flow | 20 s poll (registered) | ✔ | — | Deribit tape: sweeps/blocks/unusual (§137) |
+| 32 | Market read | 5 s poll (registered) | ✔ | — | deterministic read of the engine's live state (§137) |
 | + | Setup wizard (rail top) | flow | n/a | — | writes config, never source |
 
 Also in the rail's own footer/top: **Terminal mode** (Ctrl+Alt+T), Classic-terminal link,

@@ -4,7 +4,8 @@
  * The numbers all come from `GET /api/control/storage` (server-side 30 s cache). Every control
  * saves through `POST /api/control/storage/settings` and shows the clamped values the server
  * returns, because those are the ones the jobs will use; the one-shot actions go through
- * `/storage/{prune,vacuum,cleanup,backup,report}`. The SMTP block is the alerts' own email config
+ * `/storage/{prune,vacuum,cleanup,clear_cache,clear_archive,backup,report}`. The SMTP block is
+ * the alerts' own email config
  * (`notify.email`), saved through the ordinary config route — one mailbox, one set of credentials,
  * used by both the alert channel and this report.
  *
@@ -16,6 +17,7 @@
 
     var POLL_MS = 20000;
     var timer = null;
+    var lastUsage = null;                 // the newest usage block, for the delete confirmation
 
     function $(id) { return document.getElementById(id); }
 
@@ -60,6 +62,7 @@
     function render(d) {
         d = d || {};
         var usage = d.usage || {};
+        lastUsage = usage;
         var growth = d.growth || {};
         var st = d.storage_settings || {};
         var rt = d.retention || {};
@@ -79,6 +82,8 @@
                 tile('Database', mb(dbBytes), mb(usage.wal_bytes) + ' in the WAL') +
                 tile('Logs', mb(usage.log_bytes), 'rotating ring') +
                 tile('Exports', mb(usage.exports_bytes), 'your saved files') +
+                tile('App cache', mb(usage.webview2_bytes), 'WebView2') +
+                tile('Archives', mb(usage.archive_bytes), 'backfill + quarantine') +
                 tile('Backups', mb(usage.backups_bytes), backups.length + ' set(s)') +
                 tile('Total on disk', mb(usage.total_bytes), shortTime(d.generated || ''));
         }
@@ -191,6 +196,27 @@
                 if (!res || res.ok === false) return;
                 say('stActionResult', 'removed ' + (res.cache_files_removed || 0) + ' cache file(s) and ' +
                     (res.exports_removed || []).length + ' old export(s)');
+            });
+        };
+        if ((b = $('btnStClearCache'))) b.onclick = function () {
+            action('/api/control/storage/clear_cache', {}, 'stActionResult', 'clearing the app cache').then(function (res) {
+                if (!res || res.ok === false) return;
+                say('stActionResult', res.scheduled
+                    ? ('freed ' + mb(res.freed_bytes) + ' now — the rest (' + mb(res.remaining_bytes) + ') goes at the next start: the open window holds those files')
+                    : ('cleared ' + mb(res.freed_bytes) + ' — the cache rebuilds itself as you use the suite'));
+            });
+        };
+        if ((b = $('btnStArchOpen'))) b.onclick = function () {
+            window.api('/api/control/folder/open', { method: 'POST', body: { folder: 'archive' } })
+                .catch(function (err) { say('stArchResult', 'could not open the folder: ' + err, 'err'); });
+        };
+        if ((b = $('btnStArchClear'))) b.onclick = function () {
+            var size = (lastUsage && lastUsage.archive_bytes) ? mb(lastUsage.archive_bytes) : 'its contents';
+            if (window.confirm && !window.confirm('Delete ' + size + ' of quarantined data from the archive folder?\n\nIt is never needed to run the app, and this cannot be undone.')) return;
+            action('/api/control/storage/clear_archive', {}, 'stArchResult', 'deleting the quarantine').then(function (res) {
+                if (!res || res.ok === false) return;
+                var n = (res.removed || []).length;
+                say('stArchResult', 'removed ' + n + ' entr' + (n === 1 ? 'y' : 'ies') + ' — ' + mb(res.freed_bytes) + ' freed');
             });
         };
         if ((b = $('btnDataImport'))) b.onclick = function () {

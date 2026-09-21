@@ -16,7 +16,8 @@ function payload(over) {
 }
 
 check('the module exposes the surface the view wires', () => {
-    ['chip', 'title', 'actions', 'primary', 'rows', 'state', 'emptyNote', 'panelText', 'pickerRows'].forEach((name) => {
+    ['chip', 'title', 'actions', 'primary', 'rows', 'state', 'emptyNote', 'panelText', 'pickerRows',
+     'ninjatraderNames'].forEach((name) => {
         assert.strictEqual(typeof I[name], 'function', name + ' is a function');
     });
     assert(I.ACTIONS.length === 6, 'the closed action set');
@@ -39,6 +40,19 @@ check('the picker groups streaming → enabled → off, without duplicates', () 
     assert(rows[2].label.indexOf('ADAUSDT') === 0 && rows[2].label.indexOf('Crypto') > 0,
         'the label carries the class: ' + rows[2].label);
     assert.deepStrictEqual(I.pickerRows({ instruments: [] }), [], 'empty config → no options');
+});
+
+check('the NinjaTrader probe names come from the config mapping, deduped and trimmed', () => {
+    const names = I.ninjatraderNames([
+        { symbol: 'NAS100USDT', ninjatrader_symbol: 'NQ' },
+        { symbol: 'SP500', ninjatrader_symbol: 'ES' },
+        { symbol: 'DJ30', ninjatrader_symbol: ' nq ' },
+        { symbol: 'BTCUSDT', ninjatrader_symbol: '' },
+        null,
+    ]);
+    assert.deepStrictEqual(names, ['NQ', 'ES'], 'names deduped case-insensitively, blanks dropped');
+    assert.deepStrictEqual(I.ninjatraderNames([]), [], 'nothing mapped → no options, not an invention');
+    assert.deepStrictEqual(I.ninjatraderNames(null), [], 'a junk payload is an empty list');
 });
 
 check('every action the server may send has a label and a place in the order', () => {

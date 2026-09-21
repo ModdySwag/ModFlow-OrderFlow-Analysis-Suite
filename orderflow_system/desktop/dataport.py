@@ -323,7 +323,10 @@ def export_rows(db_path: str | Path, kind: str, dest_dir: str | Path, *, symbol:
     folder = _Path(dest_dir)
     folder.mkdir(parents=True, exist_ok=True)
     stamp = _time.strftime("%Y%m%d-%H%M%S", _time.gmtime(now if now is not None else _time.time()))
-    tag = (symbol or "all").upper()
+    # RA-02: the tag is a filename component — clamp it like the paper export does, or a
+    # symbol carrying a path separator builds a bogus subpath (receipt: ticks-BTC/USDT-….csv).
+    tag = "".join(ch for ch in str(symbol or "all").upper()
+                  if ch.isalnum() or ch in "._-")[:24] or "all"
     csv_path = folder / f"{kind}-{tag}-{stamp}.csv"
 
     where: list[str] = []

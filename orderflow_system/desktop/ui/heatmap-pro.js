@@ -9,7 +9,10 @@
 (function () {
     'use strict';
 
-    const P = { last: null, sel: null, mode: 'inspect', markers: [], hud: null, dragging: false, symbol: null };
+    const P = { last: null, sel: null, mode: 'inspect', markers: [], hud: null, dragging: false, symbol: null, anchor: null };
+    /* §120: a selection box is born only after the pointer really moves this far (css px) — so a
+       plain click can never leave a zero-size box whose outside-dim darkens the whole map. */
+    const DRAG_PX = 4;
 
     const $ = (s) => document.querySelector(s);
     /* SEC-18: the apostrophe is escaped too — `title='…'` contexts exist. */
@@ -23,6 +26,34 @@
             return d.toTimeString().slice(0, 8);
         }
         return String(b);
+    };
+
+    /* Price decimals follow the instrument's own tick, never the price's magnitude: a half-tick
+       instrument prints one decimal, a cent tick two, a whole-number tick none, and a tick nobody
+       stated falls back to two rather than guessing a scale from the size of the number. */
+    const dpFor = (tick) => {
+        const t = Number(tick);
+        if (!isFinite(t) || t <= 0) return 2;
+        const text = String(t);
+        const dec = text.indexOf('.') >= 0 ? text.split('.')[1].replace(/0+$/, '').length : 0;
+        return Math.min(8, Math.max(0, dec));
+    };
+
+    /* How much of the colour scale one cell fills, in percent — the number that ties a hovered
+       cell to the legend. Null when the payload carries no cap: no percentage is invented. */
+    const shareOfScale = (size, scaleMax) => {
+        const s = Number(size), cap = Number(scaleMax);
+        if (!isFinite(s) || !isFinite(cap) || cap <= 0 || s <= 0) return null;
+        return Math.round(Math.min(100, (s / cap) * 100) * 10) / 10;
+    };
+
+    /* A level's change against the bucket before it, as a share of that bucket: +14% is an
+       absorption read, +0.42 is a number without a scale. Null when there was nothing to move
+       from. */
+    const deltaPct = (delta, prev) => {
+        const d = Number(delta), p = Number(prev);
+        if (!isFinite(d) || !isFinite(p) || p <= 0) return null;
+        return Math.round((d / p) * 100 * 10) / 10;
     };
 
     /* Canvas colours cannot be `var(--of-...)`; read the token instead of hard-coding a colour the
@@ -45,6 +76,10 @@
     const overlay = () => document.querySelector('[data-hm-pro-overlay]');
     const cols = () => parseInt((($('#hmColumns') || {}).value) || 240, 10);
     const rows = () => parseInt((($('#hmRows') || {}).value) || 200, 10);
+    /* §121: the loader-side twin of heatview's params() — the overlay's own fetch respects the
+       pan anchor too, or a relayout pull would silently snap the map back to the live edge. */
+    const untilQ = () => (window.OFAPHEATVIEW && OFAPHEATVIEW.state.until != null)
+        ? '&until=' + Math.round(OFAPHEATVIEW.state.until) : '';
 
     /* The instrument, found without reaching into another module's scope: the app's own state is
        not global, so ask the source of truth the app itself uses, then fall back to the page. */
@@ -87,15 +122,16 @@
             if (!sym) return;
             if (seq !== P.pullSeq) return;
             if (P.markersFor !== sym) { P.markersFor = sym; P.markers = []; void markersLoad(sym); }
-            const payload = await api('/api/atlas/heatmap/' + encodeURIComponent(sym) + '?columns=' + cols() + '&rows=' + rows());
+            const payload = await api('/api/atlas/heatmap/' + encodeURIComponent(sym) + '?columns=' + cols() + '&rows=' + rows() + untilQ());
             if (seq !== P.pullSeq) return;     // a newer pull is in flight: its answer wins
             P.last = payload;
+            if (window.OFAPHEATVIEW) OFAPHEATVIEW.absorb(OFAPHEATVIEW.state, payload);
             if ((!P.last || !(P.last.buckets || []).length) && !P.reResolved) {
                 P.reResolved = true;                 // one retry, then accept the empty map
                 P.symbol = null;
                 const again = await symbol();
                 if (again && again !== sym) {
-                    P.last = await api('/api/atlas/heatmap/' + encodeURIComponent(again) + '?columns=' + cols() + '&rows=' + rows());
+                    P.last = await api('/api/atlas/heatmap/' + encodeURIComponent(again) + '?columns=' + cols() + '&rows=' + rows() + untilQ());
                 }
             }
             /* P1-10: the map's sample clock is its newest depth bucket — a silent feed grows this. */
@@ -308,15 +344,52 @@
         info.innerHTML = 'window <b>' + (d.buckets || []).length + '</b> buckets · <b>' + (d.prices || []).length + '</b> rows' +
             (d.bucket_ms ? ' · <b>' + d.bucket_ms + '</b> ms' : '') +
             (newest ? ' · newest <b>' + esc(fmtBucket(newest)) + '</b>' : '') +
+            (window.OFAPHEATVIEW ? ' · <b>' + esc(OFAPHEATVIEW.state.until == null ? 'live'
+                : OFAPHEATVIEW.label(OFAPHEATVIEW.state, Date.now()).split(' · ').pop()) + '</b>' : '') +
             ' · markers <b>' + (P.markers || []).length + '</b>';
+        chip();
+        /* §122: the labels and the Detail dial follow the payload's true column width. */
+        if (window.OFAPHEATVIEW && P.labelBucket !== OFAPHEATVIEW.state.bucket) {
+            P.labelBucket = OFAPHEATVIEW.state.bucket;
+            relabelWindows();
+            const bsel = $('#hmBucket');
+            if (bsel && parseInt(bsel.value, 10) !== OFAPHEATVIEW.state.bucket
+                && [100, 250, 500, 1000, 2000, 5000].indexOf(OFAPHEATVIEW.state.bucket) >= 0) {
+                bsel.value = String(OFAPHEATVIEW.state.bucket);
+            }
+        }
         if (!tip) return;
         if (!P.hud) { tip.style.display = 'none'; return; }
         const h = P.hud;
         const col = h.delta_depth >= 0 ? '#7ee0a8' : '#ff8f8f';
+        /* §140: a square with nothing recorded is not a square with "undefined" in it. Before the
+           first book updates land — or on a cell the map has no row for — the readout says so
+           instead of printing the absence as data. */
+        const empty = !isFinite(Number(h.price)) || !isFinite(Number(h.size));
         tip.style.display = 'block';
-        tip.innerHTML = '<div><b>' + h.price + '</b> · ' + esc(fmtBucket(h.bucket)) + '</div>' +
-            '<div>resting <b>' + h.size.toFixed(2) + '</b></div>' +
-            '<div>&Delta; vs prev <b style="color:' + col + '">' + (h.delta_depth >= 0 ? '+' : '') + h.delta_depth.toFixed(2) + '</b></div>' +
+        /* §140: the same read in the desk's own terms — the cell's share of the colour scale beside
+           the legend, the change as a share of the level it moved from, and the spread where the
+           payload has a book to quote one. */
+        const share = shareOfScale(h.size, d.scale_max);
+        const pct = deltaPct(h.delta_depth, h.size - h.delta_depth);
+        const dp = dpFor(d.tick);
+        const best = ((d.best || [])[h.ci]) || null;
+        const bid = best ? Number(best.bid) : NaN;
+        const ask = best ? Number(best.ask) : NaN;
+        const bookLine = (isFinite(bid) && isFinite(ask) && bid > 0 && ask >= bid)
+            ? '<div>bid <b>' + bid.toFixed(dp) + '</b> · ask <b>' + ask.toFixed(dp)
+              + '</b> · spread <b>' + (ask - bid).toFixed(dp) + '</b></div>'
+            : '';
+        tip.innerHTML = empty
+            ? '<div class="dim">no resting size recorded in this square yet — the map is still '
+              + 'gathering book updates</div>'
+            : '<div><b>' + h.price + '</b> · ' + esc(fmtBucket(h.bucket)) + '</div>' +
+            '<div>resting <b>' + h.size.toFixed(2) + '</b>'
+            + (share === null ? '' : ' · <b>' + (share >= 10 ? share.toFixed(0) : share.toFixed(1))
+                               + '%</b> of scale') + '</div>' +
+            '<div>&Delta; vs prev <b style="color:' + col + '">' + (h.delta_depth >= 0 ? '+' : '') + h.delta_depth.toFixed(2) + '</b>'
+            + (pct === null ? '' : ' (' + (pct > 0 ? '+' : '') + pct.toFixed(0) + '%)') + '</div>' +
+            bookLine +
             '<div>this price, whole window <b>' + h.row_depth.toFixed(1) + '</b></div>' +
             '<div>whole book, this bucket <b>' + h.bucket_depth.toFixed(1) + '</b></div>' +
             (h.traded ? '<div>executed here <b>' + h.traded.toFixed(2) + '</b></div>' : '') +
@@ -361,6 +434,26 @@
                  heaviest: worst, top_price: top, top_depth: Math.max(0, topDepth), grid: grid, ix: ix };
     }
 
+    /* v2 §7-11b (Bookmap's range-to-table): the book's own record — walls, grows, pulls, spikes —
+       listed for exactly the boxed band, and the boxed time columns when the payload dates them.
+       The map keeps the last 120 events and the payload ships them verbatim; nothing here invents
+       a row. */
+    function regionEvents() {
+        const ix = regionIndex(), d = P.last;
+        if (!ix || !d) return null;
+        const px = d.prices || [];
+        const all = Array.isArray(d.events) ? d.events : [];
+        const lo = Math.min(px[ix.r0], px[ix.r1]);
+        const hi = Math.max(px[ix.r0], px[ix.r1]);
+        const bts = d.buckets || [];
+        const t0 = bts[ix.c0] || 0;
+        const width = (window.OFAPHEATVIEW && OFAPHEATVIEW.state && OFAPHEATVIEW.state.bucket) || 1000;
+        const t1 = bts[ix.c1] ? bts[ix.c1] + width : 0;
+        const evs = all.filter((e) => e && e.price >= lo && e.price <= hi
+            && (!t0 || e.ts_ms >= t0) && (!t1 || e.ts_ms <= t1));
+        return { evs: evs, total: all.length, lo: lo, hi: hi, t0: t0, t1: t1 };
+    }
+
     function markersInRegion() {
         const ix = regionIndex(), d = P.last, out = [];
         if (!d) return out;
@@ -397,6 +490,42 @@
         const rows = [['kind', 'price', 'bucket', 'size', 'note'].join(',')];
         markersInRegion().forEach((m) => rows.push([m.kind, m.price, fmtBucket(m.bucket), Number(m.size || 0).toFixed(3), String(m.note || '').replace(/,/g, ';')].join(',')));
         return rows.join('\n');
+    }
+
+    function csvForEvents() {
+        const r = regionEvents();
+        if (!r) return '';
+        const rows = [['ts_ms', 'time', 'kind', 'price', 'direction', 'size', 'detail'].join(',')];
+        r.evs.slice().sort((a, b) => a.ts_ms - b.ts_ms).forEach((e) => rows.push([
+            e.ts_ms, new Date(e.ts_ms).toISOString(), e.kind, e.price, e.direction || '',
+            Number(e.size || 0).toFixed(3), String(e.detail || '').replace(/,/g, ';'),
+        ].join(',')));
+        return rows.join('\n');
+    }
+
+    function eventsBox() { return document.querySelector('[data-hm-pro-events]'); }
+
+    function paintEvents() {
+        const r = regionEvents();
+        if (!r) { say('box a region first'); return; }
+        let box = eventsBox();
+        if (!box) {
+            box = document.createElement('div');
+            box.setAttribute('data-hm-pro-events', '1');
+            box.className = 'hm-pro-msg';
+            const stats = document.querySelector('[data-hm-pro-stats]');
+            (stats ? stats.parentElement : document.body).appendChild(box);
+        }
+        const rows = r.evs.slice(-100).reverse().map((e) => '<tr><td>' + new Date(e.ts_ms).toLocaleTimeString() + '</td>'
+            + '<td>' + esc(String(e.kind)) + '</td><td>' + e.price + '</td><td>' + esc(String(e.direction || '')) + '</td>'
+            + '<td>' + Number(e.size || 0).toFixed(2) + '</td><td class="dim">' + esc(String(e.detail || '')) + '</td></tr>').join('');
+        box.innerHTML = '<b>Events in region</b> — ' + r.evs.length + ' of ' + r.total + ' level events in the boxed band ('
+            + r.lo + '–' + r.hi + ')'
+            + (rows ? '<table class="data" style="margin-top:6px"><thead><tr><th>Time</th><th>Kind</th><th>Price</th><th>Side</th><th>Size</th><th>Detail</th></tr></thead><tbody>'
+                     + rows + '</tbody></table>'
+                    : '<div class="dim" style="margin-top:6px">no level events in this box — the record holds walls, grows, pulls and spikes as the book makes them.</div>')
+            + ' <button class="btn small" data-hm-pro="export-events">Export events CSV</button>'
+            + ' <button class="btn small" data-hm-pro="close-events">Close</button>';
     }
 
     function say(html) {
@@ -495,7 +624,24 @@
         const fromEl = document.getElementById('rpFrom'), toEl = document.getElementById('rpTo');
         const load = document.getElementById('rpLoad');
         if (!symEl || !fromEl || !toEl || !load) { say('the replay panel is not in this build'); return; }
-        symEl.value = P.symbol || '';
+        void handRegionToReplay(symEl, srcEl, fromEl, toEl, load, start, end, fromMin, toMin);
+    }
+
+    /* The write half, after the picker's list ask: the picker fills its options lazily (view entry,
+       focus), and a bare `sel.value = …` into a list that does not carry the symbol lands on
+       NOTHING — the transport would then replay whatever the fallback resolves, i.e. another
+       instrument than the boxed region. Ask the filler first; if the list still has no such
+       instrument, say so instead of letting the form disagree with the map. */
+    async function handRegionToReplay(symEl, srcEl, fromEl, toEl, load, start, end, fromMin, toMin) {
+        if (window.OFAPREPLAY && typeof OFAPREPLAY.fillSymbols === 'function') {
+            try { await OFAPREPLAY.fillSymbols(); } catch (e) { /* the list keeps its last fill */ }
+        }
+        const wanted = String(P.symbol || '');
+        symEl.value = wanted;
+        if (wanted && String(symEl.value || '').toUpperCase() !== wanted.toUpperCase()) {
+            say('the replay list does not carry <b>' + esc(wanted) + '</b> — enable it on its source first');
+            return;
+        }
         if (srcEl && srcEl.value === 'exchange') {
             const other = [...srcEl.options].map((o) => o.value).find((v) => v !== 'exchange');
             if (other) srcEl.value = other;
@@ -503,7 +649,9 @@
         fromEl.value = String(fromMin);
         toEl.value = String(toMin);
         [symEl, fromEl, toEl].forEach((el) => el.dispatchEvent(new Event('change')));
-        showView('replay');
+        /* rpFrom/rpTo were written programmatically: re-pair their preset chips. */
+        if (window.OFAPPRESETS && OFAPPRESETS.refresh) OFAPPRESETS.refresh();
+        if (window.OFAPNAV) OFAPNAV.jump('replay', 'Heatmap'); else showView('replay');
         setTimeout(() => {
             load.click();
             say('replaying <b>' + esc(fmtBucket(start)) + ' \u2192 ' + esc(fmtBucket(end)) + '</b> (' + fromMin + ' \u2192 ' + toMin + ' min ago)');
@@ -511,29 +659,139 @@
     }
 
     const WINDOWS = [120, 240, 480, 900];
-    function zoom(dir) {
-        const sel = $('#hmColumns');
-        if (!sel) return;
-        const cur = parseInt(sel.value, 10);
-        let i = WINDOWS.indexOf(cur);
+    /* §120: the pure half of stepping a select — the value a step lands on, or null at the end.
+       Pinned by heatmap-pro.selftest.js. */
+    function listStep(cur, dir, list) {
+        const L = (list || []).map((v) => String(v));
+        if (!L.length) return null;
+        let i = L.indexOf(String(cur));
         if (i < 0) i = 1;
-        i = Math.min(WINDOWS.length - 1, Math.max(0, i + dir));
-        if (WINDOWS[i] === cur) return;
-        sel.value = String(WINDOWS[i]);
-        sel.dispatchEvent(new Event('change'));
-        setTimeout(() => pull(true), 280);
+        const ni = Math.min(L.length - 1, Math.max(0, i + dir));
+        return L[ni] === String(cur) ? null : L[ni];
     }
+    /* §121/§122: the Window labels are TIME = columns x column width, so they follow the Detail
+       dial; a width change tells the hub (a live apply) and refetches on the new grid. */
+    function relabelWindows() {
+        const sel = $('#hmColumns');
+        if (!sel || !window.OFAPHEATVIEW) return;
+        const b = OFAPHEATVIEW.state.bucket;
+        for (let i = 0; i < sel.options.length; i++) {
+            const c = parseInt(sel.options[i].value, 10);
+            if (c) sel.options[i].textContent = OFAPHEATVIEW.minutesOf(c, b);
+        }
+    }
+
+    function wireBucket() {
+        const sel = $('#hmBucket');
+        if (!sel || sel.__wired) return;
+        sel.__wired = true;
+        sel.addEventListener('change', async () => {
+            const ms = parseInt(sel.value, 10) || 1000;
+            if (window.OFAPHEATVIEW) OFAPHEATVIEW.state.bucket = ms;
+            relabelWindows();
+            try {
+                await api('/api/control/params', { method: 'POST', body: { path: 'atlas.heatmap.bucket_ms', value: ms } });
+            } catch (err) { /* the config write is the record; the running width already changed */ }
+            say('detail ' + ms + ' ms — the depth buffer restarts on the new grid');
+            applyView();
+        });
+    }
+
+    /* §121: the view talk. Every zoom/pan ends in applyView(): the selects are the zoom READOUT
+       (written from the state, so the dropdown and the gesture can never disagree), the live chip
+       flips, and ONE change event drives the loader — which the deliberate path forces past the
+       intent gate. That gate is why the zoom read as dead: a wheel leases the surface for 900 ms
+       and the loader deferred its repaint away for the whole of it. */
+    function applyView() {
+        if (!window.OFAPHEATVIEW) return;
+        const V = OFAPHEATVIEW.state;
+        const colsSel = $('#hmColumns');
+        const rowsSel = $('#hmRows');
+        if (colsSel && String(V.cols) !== colsSel.value) colsSel.value = String(V.cols);
+        if (rowsSel && String(V.rows) !== rowsSel.value) rowsSel.value = String(V.rows);
+        chip();
+        const driver = colsSel || rowsSel;
+        if (driver) driver.dispatchEvent(new Event('change'));
+    }
+
+    function chip() {
+        const b = document.querySelector('[data-hm-pro="live"]');
+        if (!b || !window.OFAPHEATVIEW) return;
+        const live = OFAPHEATVIEW.state.until == null;
+        b.textContent = live ? '\u25cf live' : '\u25b6 back to live';
+        b.title = live ? 'The map follows the live edge'
+                       : 'Click (or Home) to snap back to the live edge';
+    }
+
+    /* dir -1 = zoom in = a narrower window; the ends answer out loud. */
+    function zoom(dir) {
+        if (!window.OFAPHEATVIEW) return;
+        const V = OFAPHEATVIEW.state;
+        const out = OFAPHEATVIEW.zoomTime(V, dir, 0.5, Date.now());
+        if (!out.moved) {
+            say(dir < 0 ? 'tightest window already — ' + OFAPHEATVIEW.minutesOf(V.cols, V.bucket)
+                        : 'widest window already — ' + OFAPHEATVIEW.minutesOf(V.cols, V.bucket));
+            return;
+        }
+        V.cols = out.cols;
+        V.until = out.until;
+        applyView();
+    }
+
     function zoomRows(dir) {
-        const sel = $('#hmRows');
-        if (!sel) return;
-        const opts = [...sel.options].map((o) => o.value);
-        let i = opts.indexOf(sel.value);
-        if (i < 0) i = 1;
-        i = Math.min(opts.length - 1, Math.max(0, i + dir));
-        if (opts[i] === sel.value) return;
-        sel.value = opts[i];
-        sel.dispatchEvent(new Event('change'));
-        setTimeout(() => pull(true), 280);
+        if (!window.OFAPHEATVIEW) return;
+        const V = OFAPHEATVIEW.state;
+        const out = OFAPHEATVIEW.zoomRows(V, dir);
+        if (!out.moved) {
+            say(dir > 0 ? 'most rows already — ' + V.rows : 'fewest rows already — ' + V.rows);
+            return;
+        }
+        V.rows = out.rows;
+        applyView();
+    }
+
+    /* §121: keyboard pan — one bucket a press, the shift pair ten (Bookmap's own nudge). */
+    function panStep(n) {
+        if (!window.OFAPHEATVIEW) return;
+        const V = OFAPHEATVIEW.state;
+        const out = OFAPHEATVIEW.panStep(V, n, Date.now());
+        if (!out.moved) return;
+        V.until = out.until;
+        applyView();
+        say(OFAPHEATVIEW.label(V, Date.now()));
+    }
+
+    function liveNow() {
+        if (!window.OFAPHEATVIEW) return;
+        const V = OFAPHEATVIEW.state;
+        if (V.until == null) { say('already at the live edge'); return; }
+        OFAPHEATVIEW.snapLive(V);
+        applyView();
+        say('back to the live edge');
+    }
+
+    /* §119: "fit" in the desk sense — drop the selection and put the view back on its defaults.
+       The panel's two dials ARE the view state, so the reset walks through them (one pipeline).
+       It always answers, even when nothing moved: a button that silently does nothing reads as
+       broken, which is how the old no-op fit was reported. */
+    function fitAll() {
+        P.sel = null;
+        const colsSel = $('#hmColumns');
+        const rowsSel = $('#hmRows');
+        let touched = null;
+        if (colsSel && colsSel.value !== '240') { colsSel.value = '240'; touched = colsSel; }
+        if (rowsSel && rowsSel.value !== '200') { rowsSel.value = '200'; touched = touched || rowsSel; }
+        /* §121: fit means the factory view AND the live edge — a fit that left you panned would
+           be the very trap it was built to end. */
+        const V = window.OFAPHEATVIEW ? OFAPHEATVIEW.state : null;
+        const wasPanned = !!(V && V.until != null);
+        if (V) { V.cols = 240; V.rows = 200; OFAPHEATVIEW.snapLive(V); chip(); }
+        /* One reload for the pair: the loader reads both dials fresh, so a single change suffices. */
+        if (touched) touched.dispatchEvent(new Event('change'));
+        else if (wasPanned) applyView();
+        draw();
+        paintStats();
+        say((touched || wasPanned) ? 'view fitted — 4 min window · 200 rows · live' : 'already fitted — 4 min window · 200 rows · live');
     }
 
     function paintStats() {
@@ -541,12 +799,13 @@
         if (!box) return;
         const st = regionStats();
         if (!st) {
-            box.innerHTML = 'Wheel = zoom window · shift+wheel = price rows · arrows = rows / zoom · drag = box a region · Mark = pin a level · ' +
-                'hover a level then Alert to watch it';
+            box.innerHTML = 'Wheel = zoom (at the cursor when panned) · shift+wheel or wheel on the price gutter = rows · drag middle / shift = pan · ←/→ = pan · ↑/↓ = rows · Home = live · ' +
+                'Detail = column width (100 ms micro → 5 s long history) · drag = box a region · click = clear it · Mark = pin a level · ' +
+                'fit = reset the view · m = minimal · hover a level then Alert to watch it';
             return;
         }
         box.innerHTML = 'selected <b>' + st.buckets + ' &times; ' + st.rows + '</b> cells · resting <b>' + st.total_depth.toFixed(1) +
-            '</b> · heaviest <b>' + (st.heaviest.price == null ? '--' : st.heaviest.price) + '</b> (' + st.heaviest.size.toFixed(2) + ')' +
+            '</b> · heaviest <b>' + (st.heaviest.price == null ? '—' : st.heaviest.price) + '</b> (' + st.heaviest.size.toFixed(2) + ')' +
             '<input class="hm-note" data-hm-pro-tol type="number" step="0.1" min="0" placeholder="± tol" title="Price tolerance for the alert level — leave empty for the default, two drawn price steps">' +
             '<input class="hm-note" data-hm-pro-mins type="number" step="1" min="1" placeholder="min" title="How many minutes the level must hold before the hold-alert fires (default 2)">' +
             ' <button class="btn small" data-hm-pro="alert-heavy">Alert: heaviest level</button>' +
@@ -554,6 +813,7 @@
             ' <button class="btn small" data-hm-pro="alert-stack">Alert: stacking here</button>' +
             ' <button class="btn small" data-hm-pro="to-replay">Send region to replay</button>' +
             ' <button class="btn small" data-hm-pro="export-region">Export region CSV</button>' +
+            ' <button class="btn small" data-hm-pro="events-region">Events in region</button>' +
             ' <button class="btn small" data-hm-pro="export-markers">Export markers CSV</button>' +
             ' <button class="btn small" data-hm-pro="clear-sel">Clear</button>';
     }
@@ -587,23 +847,37 @@
                 if (P.hud) OFAPCURSOR.move(P.hud.price, P.hud.bucket, 'heatmap');
                 else OFAPCURSOR.clear('heatmap');
             }
-            if (P.dragging && P.sel) {
-                const r = geom().rect;
-                P.sel.x1 = Math.max(0, Math.min(ev.clientX - r.left, geom().plotW));
-                P.sel.y1 = Math.max(0, Math.min(ev.clientY - r.top, geom().plotH));
-                draw();
-            }
         });
         c.addEventListener('mouseleave', () => {
             P.hud = null;
             hud();
             if (window.OFAPCURSOR) OFAPCURSOR.clear('heatmap');
         });
+        /* §121: the industry grammar. Wheel up = zoom IN; over the price gutter (or with shift) the
+           wheel zooms the price rows; tilt wheels and shift-converted axes deliver deltaX, so the
+           axis of the delta is read, never assumed. A panned map zooms under the cursor; a live
+           map keeps its right edge on the feed. */
         c.addEventListener('wheel', (ev) => {
             if (!active()) return;
             ev.preventDefault();
-            if (ev.shiftKey) { zoomRows(ev.deltaY > 0 ? -1 : 1); return; }
-            zoom(ev.deltaY > 0 ? -1 : 1);
+            const d = ev.deltaY !== 0 ? ev.deltaY : ev.deltaX;
+            if (!d || !window.OFAPHEATVIEW) return;
+            const g = geom();
+            const overGutter = g ? (ev.clientX - g.rect.left) >= g.plotW : false;
+            const dir = d < 0 ? -1 : 1;                 // -1 = zoom in
+            if (ev.shiftKey || overGutter) { zoomRows(dir); return; }
+            const V = OFAPHEATVIEW.state;
+            const frac = g ? Math.min(1, Math.max(0, (ev.clientX - g.rect.left) / g.plotW)) : 0.5;
+            const out = OFAPHEATVIEW.zoomTime(V, dir, frac, Date.now());
+            if (!out.moved) {
+                say(dir < 0 ? 'tightest window already — ' + OFAPHEATVIEW.minutesOf(V.cols, V.bucket)
+                            : 'widest window already — ' + OFAPHEATVIEW.minutesOf(V.cols, V.bucket));
+                return;
+            }
+            V.cols = out.cols;
+            V.until = out.until;
+            applyView();
+            say(OFAPHEATVIEW.label(V, Date.now()));
         }, { passive: false });
         c.addEventListener('mousedown', (ev) => {
             if (P.mode === 'mark') {
@@ -620,13 +894,84 @@
                 return;
             }
             const r = geom().rect;
+            /* §121: middle-drag (or shift+left-drag) PANs — Bookmap's own grammar; the plain left
+               button stays the region box. This sits before the anchor so a pan is never a box. */
+            if (ev.button === 1 || (ev.button === 0 && ev.shiftKey)) {
+                ev.preventDefault();
+                if (!window.OFAPHEATVIEW) return;
+                P.pan = { x0: ev.clientX, until0: OFAPHEATVIEW.state.until, t: 0 };
+                try { c.style.cursor = 'grabbing'; } catch (err) { /* ignore */ }
+                return;
+            }
+            /* §120: a CLICK is not a selection — anchor here, box on real movement (mousemove).
+               The old code made a zero-size box on mousedown, whose outside-dim covered the
+               whole canvas: "click anywhere and it goes darker". */
             P.dragging = true;
-            P.sel = { x0: Math.max(0, ev.clientX - r.left), y0: Math.max(0, ev.clientY - r.top),
-                      x1: Math.max(0, ev.clientX - r.left), y1: Math.max(0, ev.clientY - r.top) };
+            P.born = false;
+            P.anchor = { x: Math.max(0, Math.min(ev.clientX - r.left, geom().plotW)),
+                         y: Math.max(0, Math.min(ev.clientY - r.top, geom().plotH)) };
+        });
+        /* §120: the drag tracks on the WINDOW — a box that stops extending at the canvas edge
+           (or under the rail/pill) reads as broken; the release and the tracking belong together. */
+        window.addEventListener('mousemove', (ev) => {
+            if (P.pan) {
+                /* §121: live pan — the state follows every move (the chip updates), the fetch is
+                   throttled to ~7 Hz so a drag cannot machine-gun the loader, and the release
+                   always lands a final load. */
+                if (!window.OFAPHEATVIEW) return;
+                const g = geom();
+                if (!g) return;
+                const V = OFAPHEATVIEW.state;
+                const probe = { cols: V.cols, rows: V.rows, bucket: V.bucket,
+                                haveFrom: V.haveFrom, haveTo: V.haveTo, until: P.pan.until0 };
+                const out = OFAPHEATVIEW.panBy(probe, ev.clientX - P.pan.x0, g.plotW, Date.now());
+                if (!out.moved) return;
+                V.until = out.until;
+                const ts = (window.performance && performance.now()) || Date.now();
+                if (ts - (P.pan.t || 0) >= 140) { P.pan.t = ts; applyView(); }
+                else chip();
+                return;
+            }
+            if (!P.dragging || !P.anchor) return;
+            const r = geom().rect;
+            const nx = Math.max(0, Math.min(ev.clientX - r.left, geom().plotW));
+            const ny = Math.max(0, Math.min(ev.clientY - r.top, geom().plotH));
+            if (!P.sel) {
+                if (Math.abs(nx - P.anchor.x) >= DRAG_PX || Math.abs(ny - P.anchor.y) >= DRAG_PX) {
+                    P.sel = { x0: P.anchor.x, y0: P.anchor.y, x1: nx, y1: ny };
+                    P.born = true;
+                    draw();
+                }
+                return;
+            }
+            P.sel.x1 = nx;
+            P.sel.y1 = ny;
             draw();
         });
         window.addEventListener('mouseup', () => {
-            if (P.dragging) { P.dragging = false; paintStats(); }
+            if (P.pan) {
+                /* §121: the release lands the final load; the label says where the map sits. */
+                P.pan = null;
+                try { c.style.cursor = ''; } catch (err) { /* ignore */ }
+                if (window.OFAPHEATVIEW) {
+                    applyView();
+                    say(OFAPHEATVIEW.label(OFAPHEATVIEW.state, Date.now()));
+                }
+                return;
+            }
+            if (P.dragging) {
+                P.dragging = false;
+                P.anchor = null;
+                /* §121: a plain click is the industry's deselect — a box must disappear on the
+                   next click, never linger until a double-click discovers it. */
+                if (P.born) { P.born = false; paintStats(); }
+                else if (P.sel) {
+                    P.sel = null;
+                    draw();
+                    paintStats();
+                    say('selection cleared');
+                }
+            }
         });
         c.addEventListener('dblclick', () => { P.sel = null; draw(); paintStats(); });
     }
@@ -644,8 +989,10 @@
         const b = document.querySelector('[data-hm-pro="minimal"]');
         if (b) {
             b.classList.toggle('on', !!on);
-            b.textContent = on ? 'minimal: on' : 'minimal';
+            b.textContent = on ? 'minimal: on — restore' : 'minimal';
+            b.title = on ? 'Bring the panel back (m)' : 'Heatmap + traded volume only — hide the rest of the chrome';
         }
+        if (on) say('minimal on — this button stays; click it (or press m) to bring the panel back');
         if (persist && typeof api === 'function') {
             /* /api/control/params takes {path, value} — the registry is the gate, which is why
                ui.heatmap_minimal is registered there. */
@@ -663,6 +1010,9 @@
         bar.className = 'hm-pro-bar';
         bar.innerHTML = '<button class="btn small" data-hm-pro="zoom-in">zoom +</button>' +
             '<button class="btn small" data-hm-pro="zoom-out">zoom &minus;</button>' +
+            '<button class="btn small" data-hm-pro="pan-back" title="pan back in time (\u2190)">\u25c0</button>' +
+            '<button class="btn small" data-hm-pro="pan-fwd" title="pan forward in time (\u2192)">\u25b6</button>' +
+            '<button class="btn small" data-hm-pro="live" title="The map follows the live edge">\u25cf live</button>' +
             '<button class="btn small" data-hm-pro="rows-up">rows +</button>' +
             '<button class="btn small" data-hm-pro="rows-down">rows &minus;</button>' +
             '<button class="btn small" data-hm-pro="mark">mark level</button>' +
@@ -674,12 +1024,14 @@
             '<span class="dim" data-hm-pro-info="1"></span>';
         anchor.parentElement.appendChild(bar);
         if (window.OFAPCURSOR) OFAPCURSOR.badge(bar);
+        chip();
         const clearBtn = bar.querySelector('[data-hm-pro="clear-markers"]');
         if (clearBtn) {
             clearBtn.addEventListener('click', () => {
                 P.markers = [];
                 draw(); hud(); paintStats();
                 void markersSave();
+                say('level markers cleared');
             });
         }
         const stats = document.createElement('div');
@@ -692,18 +1044,26 @@
         const b = ev.target.closest('[data-hm-pro]');
         if (!b) return;
         const act = b.dataset.hmPro;
-        if (act === 'zoom-in') return zoom(1);
-        if (act === 'zoom-out') return zoom(-1);
+        if (act === 'zoom-in') return zoom(-1);      // §121: "in" = fewer minutes, more detail
+        if (act === 'zoom-out') return zoom(1);
+        if (act === 'pan-back') return panStep(-1);
+        if (act === 'pan-fwd') return panStep(1);
+        if (act === 'live') { liveNow(); return; }
         if (act === 'rows-up') return zoomRows(1);
         if (act === 'rows-down') return zoomRows(-1);
         if (act === 'mark') {
             P.mode = P.mode === 'mark' ? 'inspect' : 'mark';
             b.style.outline = P.mode === 'mark' ? '1px solid #ffcd5a' : '';
+            say(P.mode === 'mark' ? 'mark mode: on — click a level to pin it' : 'mark mode: off');
             return;
         }
-        if (act === 'fit') { P.sel = null; zoom(0); return; }
+        if (act === 'fit') { fitAll(); return; }
         if (act === 'minimal') { setMinimal(!minimalOn(), true); return; }
-        if (act === 'clear-sel') { P.sel = null; draw(); paintStats(); return; }
+        if (act === 'clear-sel') {
+            P.sel = null; draw(); paintStats();
+            const eb = eventsBox(); if (eb) eb.remove();       /* a stale list never stands over an empty map */
+            return;
+        }
         if (act === 'alert-heavy') {
             const st = regionStats();
             if (st && st.heaviest.price != null) alertOnLevel(st.heaviest.price, st.heaviest.size, 'heat_pull');
@@ -743,6 +1103,9 @@
             return;
         }
         if (act === 'export-markers') { save('heatmap_markers_' + Date.now() + '.csv', csvForMarkers()); return; }
+        if (act === 'events-region') { paintEvents(); return; }
+        if (act === 'export-events') { save('heatmap_events_' + Date.now() + '.csv', csvForEvents()); return; }
+        if (act === 'close-events') { const eb = eventsBox(); if (eb) eb.remove(); return; }
     });
     /* P1-9: the heatmap's own keys, registered into the app's one shortcut map. Each one CLICKS
        the real control (found by its data-hm-pro value), so a key can never take a different
@@ -764,6 +1127,10 @@
             when: () => OFAPKEYS.inView('heatmap') && P.sel != null, why: 'box a region first', run: () => heatAct('export-region') });
         OFAPKEYS.bind({ id: 'alert-from-cursor', keys: ['a'], scope: 'Heatmap', priority: 5,
             label: 'alert on the cursor level', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => heatAct('alert-here') });
+        /* §119: the minimal toggle must never be hard to reach again — 'm' is free, obvious,
+           and rides the same click-the-real-button path as every other Heatmap key. */
+        OFAPKEYS.bind({ id: 'heatmap-minimal', keys: ['m'], scope: 'Heatmap', priority: 5,
+            label: 'minimal chrome — the map alone (and back)', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => heatAct('minimal') });
         /* T5/A12: the keyboard reach for what the bar does — rows on the vertical pair, the
            depth window on the horizontal pair, so a reader can step the map without leaving
            the keys. (Shift variants are deliberately absent: rows and windows are stepped
@@ -772,11 +1139,30 @@
             label: 'more price rows', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => heatAct('rows-up') });
         OFAPKEYS.bind({ id: 'heatmap-rows-fewer', keys: ['arrowdown'], scope: 'Heatmap', priority: 5,
             label: 'fewer price rows', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => heatAct('rows-down') });
-        OFAPKEYS.bind({ id: 'heatmap-window-wider', keys: ['arrowleft'], scope: 'Heatmap', priority: 5,
-            label: 'wider depth window', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => heatAct('zoom-out') });
-        OFAPKEYS.bind({ id: 'heatmap-window-narrower', keys: ['arrowright'], scope: 'Heatmap', priority: 5,
-            label: 'narrower depth window', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => heatAct('zoom-in') });
+        /* §121: the horizontal arrows PAN — the industry grammar (Bookmap moves the chart with
+           them; zoom belongs to the wheel and the +/− pair). The shift pair jumps ten buckets. */
+        OFAPKEYS.bind({ id: 'heatmap-pan-back', keys: ['arrowleft'], scope: 'Heatmap', priority: 5,
+            label: 'pan back in time', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => panStep(-1) });
+        OFAPKEYS.bind({ id: 'heatmap-pan-back-10', keys: ['shift+arrowleft'], scope: 'Heatmap', priority: 5,
+            label: 'pan back ten buckets', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => panStep(-10) });
+        OFAPKEYS.bind({ id: 'heatmap-pan-fwd', keys: ['arrowright'], scope: 'Heatmap', priority: 5,
+            label: 'pan forward in time', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => panStep(1) });
+        OFAPKEYS.bind({ id: 'heatmap-pan-fwd-10', keys: ['shift+arrowright'], scope: 'Heatmap', priority: 5,
+            label: 'pan forward ten buckets', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => panStep(10) });
+        OFAPKEYS.bind({ id: 'heatmap-live', keys: ['home'], scope: 'Heatmap', priority: 5,
+            label: 'return to the live edge', when: () => OFAPKEYS.inView('heatmap'), why: 'acts on the Heatmap panel', run: () => liveNow() });
     }
+
+    /* §120: one fetch per window change. atlas.js's loadHeatmap owns the fetch (and the KPI strip,
+       the rail and the freshness stamp); this overlay adopts the payload that was just painted
+       instead of re-fetching the same endpoint — the old double fetch read as a sluggish wheel,
+       and its unsequenced twin could land stale columns on a fast scroll. */
+    document.addEventListener('ofap:heat-offer', (ev) => {
+        const d = ev && ev.detail && ev.detail.data;
+        if (!d || !active()) return;
+        P.last = d;
+        draw(); hud(); paintStats();
+    });
 
     function refresh() {
         if (!P.minimalSeen) {
@@ -789,7 +1175,11 @@
         const ov = overlay(), c = stage();
         if (ov && c) { ov.style.left = c.offsetLeft + 'px'; ov.style.top = c.offsetTop + 'px'; }
         paintStats();
-        pull(true);
+        /* §120: a click or a relayout repaints from the cache — the map's own auto-refresh keeps
+           the data fresh and the offer event keeps this overlay in step; only a cold overlay
+           (no data yet) fetches here. Every click used to spend a heatmap fetch. */
+        if (P.last) { draw(); hud(); } else { pull(true); }
+        wireBucket();
     }
 
     /* The cursor moving anywhere repaints this overlay only when the drawn level actually changed.
@@ -818,8 +1208,9 @@
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(refresh, 900));
     else setTimeout(refresh, 900);
 
-    window.HEATMAP_PRO = { state: P, refresh: refresh, pull: pull, zoom: zoom, zoomRows: zoomRows,
+    window.HEATMAP_PRO = { state: P, refresh: refresh, pull: pull, zoom: zoom, zoomRows: zoomRows, fitAll: fitAll, listStep: listStep,
                        alertOnLevel: alertOnLevel, sendRegionToReplay: sendRegionToReplay, levelTolerance: levelTolerance,
                            regionStats: regionStats, csvForRegion: csvForRegion, csvForMarkers: csvForMarkers,
-                           cellAt: cellAt };
+                           cellAt: cellAt, dpFor: dpFor, shareOfScale: shareOfScale,
+                           deltaPct: deltaPct };
 })();

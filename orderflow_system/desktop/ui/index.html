@@ -90,6 +90,15 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
         <button class="nav-item" data-view="calendar" title="The economic calendar: this week's releases by impact and currency, with optional alerts ahead of high-impact events (keyless feed)."><span class="nav-icon">▦</span> Calendar</button>
         <button class="nav-item" data-view="fundamentals" title="Filed fundamentals for the active instrument: SEC EDGAR annual filings for US filers, CoinGecko market data for crypto (no key, no account)"><span class="nav-icon">▧</span> Fundamentals</button>
         <button class="nav-item" data-view="options" title="Deribit's public crypto option chain: expiries, strikes, IV and the Greeks (BTC/ETH/SOL by currency; no key, no account)."><span class="nav-icon">◇</span> Options</button>
+        <button class="nav-item" data-view="gex" title="Gamma Exposure: per-strike dealer gamma, zero-gamma line, call/put walls — computed from the active options chain."><span class="nav-icon">Γ</span> GEX</button>
+        <button class="nav-item" data-view="volatility" title="Implied volatility surface: IV smile per expiry, 25Δ skew, term structure."><span class="nav-icon">σ</span> Volatility</button>
+        <button class="nav-item" data-view="option-flow" title="Option flow classification: sweeps, blocks, unusual premium from Deribit's public option tape."><span class="nav-icon">⇄</span> Option Flow</button>
+        <button class="nav-item" data-view="market-read" title="Deterministic market read: regime, conviction score, key levels, confluence from the engine's live state."><span class="nav-icon">◉</span> Market Read</button>
+        <button class="nav-item" data-view="depth-history" title="Resting size by price and time — the depth the heatmap only shows live, with the levels that were pulled or stacked."><span class="nav-icon">▤</span> Depth history</button>
+        <button class="nav-item" data-view="sessions" title="Session clock, session templates and the futures roll calendar — RTH/ETH hours, holidays, breaks, and days to the next roll."><span class="nav-icon">◷</span> Sessions</button>
+        <button class="nav-item" data-view="data-quality" title="How good the stored history is, per instrument: coverage, gaps, duplicate stamps, staleness — one letter each, and the repairs this program can actually do."><span class="nav-icon">▨</span> Data quality</button>
+        <button class="nav-item" data-view="derivatives" title="Crypto derivatives context: per-venue funding and its annualised rate, open interest and its change, and the perp's basis against its index."><span class="nav-icon">%</span> Funding &amp; OI</button>
+        <button class="nav-item" data-view="synthetic" title="Synthetic instruments: ratios, spreads, baskets and basis series composed from each leg's own stored candles."><span class="nav-icon">ƒ</span> Synthetic</button>
         <div class="rail-footer">
             <div id="railPlatform">—</div>
             <button class="rail-term" id="railTerminal" type="button"
@@ -114,21 +123,23 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
       <button id="railToggle" class="chrome-toggle" aria-pressed="false" title="Hide the side rail">⇤</button>
             <div class="symbol-picker">
                 <label for="symbolSelect">Instrument</label>
-                <select id="symbolSelect"></select>
+                <select id="symbolSelect" title="The app-wide instrument — picking one switches every panel, and starts the engine when it is stopped. There may be a brief delay while the panels refresh their data for the new symbol."
+                        data-hint-title="Instrument switch may take a moment"
+                        data-hint-body="Picking a new symbol refreshes every open panel (chart, fundamentals, market read, derivatives, etc.). The output fields update as each panel's data arrives — this can take a few seconds depending on the symbol and data source. The drop-down changes immediately; the panels catch up shortly after."></select>
             </div>
             <span class="pill" id="enginePill"
                   data-hint-title="The engine"
                   data-hint-body="The streaming process behind every panel. It only streams the instruments that are enabled in Instruments; the Engine view’s look-up can add one the venue confirms."
                   data-hint-actions="instruments lookup"><span class="dot"></span> <span id="enginePillText">Stopped</span></span>
-            <span class="pill" id="wsPill"><span class="dot"></span> <span id="wsPillText">WS --</span></span>
+            <span class="pill" id="wsPill"><span class="dot"></span> <span id="wsPillText">WS —</span></span>
             <span class="pill" id="sourcePill"
                   data-hint-title="Data source"
                   data-hint-body="What feeds the panels. An exchange feed (Bybit, Binance, OKX, Hyperliquid) carries crypto perpetuals only — indices, metals, FX and CFDs need MetaTrader 5 on Windows, or Alpaca for US equities."
-                  data-hint-actions="menu lookup">source: --</span>
+                  data-hint-actions="menu lookup">source: —</span>
             <span class="pill" id="livePill" title="What the panels are actually reading: live engine, warming up, or demo data"
                   data-hint-title="What the panels are reading"
                   data-hint-body="live = the engine is streaming. warming = connected, no closed bar yet. demo = no engine running (or this panel has no live data for the symbol) — the demo generator only fills the instruments it models."
-                  data-hint-actions="engine lookup">data: --</span>
+                  data-hint-actions="engine lookup">data: —</span>
             <div class="grow"></div>
             <div class="seg" id="modeSwitch" role="group" aria-label="Workspace: classic layout or widget terminal">
                 <button class="seg-btn on" type="button" data-mode="classic" aria-pressed="true"
@@ -136,11 +147,16 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                 <button class="seg-btn" type="button" data-mode="terminal" aria-pressed="false"
                         title="Terminal: the same panels as widgets, with tabs (Ctrl+Alt+T)">Terminal</button>
             </div>
-            <button class="btn primary" id="btnStart">▶ Start engine</button>
-            <button class="btn danger hidden" id="btnStop">■ Stop engine</button>
-            <button class="btn" id="btnRestart" title="Restart with the saved settings">⟳</button>
+            <div class="engine-ctl" id="engineCtl">
+                <!-- §132: the progress bar mounts here (engine-progress.js) — to the LEFT of the
+                     buttons, in the bar's empty spacer, so nothing shifts when it appears. -->
+                <button class="btn primary" id="btnStart">▶ Start engine</button>
+                <button class="btn danger hidden" id="btnStop">■ Stop engine</button>
+                <button class="btn" id="btnRestart" title="Restart with the saved settings">⟳</button>
+            </div>
             <div id="menuPanel" class="menu-panel" role="menu" aria-label="Main menu">
-      <div class="menu-head"><input id="menuFilter" placeholder="filter panels… (type here)"><button id="menuClose" class="menu-x" title="Close this menu (Esc)">×</button></div>
+      <div class="menu-head"><input id="menuFilter" placeholder="Search panels — a name, or what it does"
+                     aria-label="Search panels, sources and actions"><span class="pal-count" id="menuCount"></span><button id="menuClose" class="menu-x" title="Close this menu (Esc)">×</button></div>
       <div id="menuBody"></div>
     </div>
     <div id="hotkeySheet" class="overlay-sheet" role="dialog" aria-label="Hotkeys">
@@ -168,17 +184,18 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                 <div class="card" id="systemsCard">
                     <div class="card-head"><span class="card-title">Systems</span><div class="spacer"></div>
                         <span class="dim" id="systemsScore">checking&hellip;</span>
-                        <button class="btn small" id="systemsRefresh" title="Re-check every ingest path and capability">Re-check</button></div>
+                        <button class="btn small" id="systemsRefresh" title="Re-check every ingest path and capability">Re-check</button>
+                        <button class="btn small" id="systemsHide" aria-pressed="false" title="Hide the systems board — the card keeps this header and folds away">Hide</button></div>
                     <div class="card-body">
                         <div class="sy-grid" id="systemsGrid"></div>
                         <div class="dim sy-note" id="systemsNote"></div>
                     </div>
                 </div>
                 <div class="grid cols-4">
-                    <div class="kpi" id="kpiPrice"><span class="kpi-label">Last price</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="kpiDelta"><span class="kpi-label">Cumulative delta</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="kpiTicks"><span class="kpi-label">Ticks</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="kpiCandles"><span class="kpi-label">Candles closed</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="kpiPrice"><span class="kpi-label">Last price</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="kpiDelta"><span class="kpi-label">Cumulative delta</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="kpiTicks"><span class="kpi-label">Ticks</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="kpiCandles"><span class="kpi-label">Candles closed</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
                 </div>
                 <div class="grid split">
                     <div class="card">
@@ -214,9 +231,9 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                             <label class="switch"><input type="checkbox" id="ovMarkers" checked> markers</label>
                             <label class="switch"><input type="checkbox" id="ovVP" checked> value area</label></div></div>
                         <div class="field"><label>Bars</label><select id="chartMode" title="Bar expression: delta-tinted body, split candle, heat body, wick-only, or the plain candles. Split candles need at least two pixels per bar — below that the mode falls back and the legend marks it.">
-                            <option value="default">candles</option><option value="delta">delta tint</option>
+                            <option value="default">default</option><option value="delta">delta tint</option>
                             <option value="split">split candle</option><option value="heat">heat body</option>
-                            <option value="wick">wick only</option><option value="candles">candles</option></select></div>
+                            <option value="wick">wick only</option><option value="candles">classic candles</option></select></div>
                         <div class="field"><label>Palette</label><select id="chartPalette" title="Colour vocabulary for the candles and the delta lane: the theme pair, or a two-hue set measured for a colour vision deficiency.">
                             <option value="theme">theme</option><option value="deutan">deutan-safe</option>
                             <option value="protan">protan-safe</option><option value="tritan">tritan-safe</option></select></div>
@@ -237,10 +254,10 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                     </div>
                 </div></div>
                 <div class="grid cols-4">
-                    <div class="kpi" id="chPrice"><span class="kpi-label">Last</span><span class="kpi-value">--</span></div>
-                    <div class="kpi" id="chDelta"><span class="kpi-label">Window delta</span><span class="kpi-value">--</span></div>
-                    <div class="kpi" id="chPoc"><span class="kpi-label">POC</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="chBias"><span class="kpi-label">Daily bias</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="chPrice"><span class="kpi-label">Last</span><span class="kpi-value">—</span></div>
+                    <div class="kpi" id="chDelta"><span class="kpi-label">Window delta</span><span class="kpi-value">—</span></div>
+                    <div class="kpi" id="chPoc"><span class="kpi-label">POC</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="chBias"><span class="kpi-label">Daily bias</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
                 </div>
                 <div class="card"><div class="card-head"><span class="card-title">Price action</span><div class="spacer"></div>
                     <span class="dim" id="chartExpr"></span>
@@ -292,22 +309,22 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                 <div class="view-head"><div class="view-title">Order Flow</div> <button class="btn small surf-pause" data-surf="orderflow" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
                     <div class="view-sub">bid/ask volume per price level, POC and value area</div></div>
                 <div class="grid cols-4">
-                    <div class="kpi" id="ofPoc"><span class="kpi-label">POC</span><span class="kpi-value">--</span></div>
-                    <div class="kpi" id="ofVah"><span class="kpi-label">VAH</span><span class="kpi-value">--</span></div>
-                    <div class="kpi" id="ofVal"><span class="kpi-label">VAL</span><span class="kpi-value">--</span></div>
-                    <div class="kpi" id="ofShape"><span class="kpi-label">Profile shape</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="ofPoc"><span class="kpi-label">POC</span><span class="kpi-value">—</span></div>
+                    <div class="kpi" id="ofVah"><span class="kpi-label">VAH</span><span class="kpi-value">—</span></div>
+                    <div class="kpi" id="ofVal"><span class="kpi-label">VAL</span><span class="kpi-value">—</span></div>
+                    <div class="kpi" id="ofShape"><span class="kpi-label">Profile shape</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
                 </div>
                 <div id="ofBanner"></div>
                 <div class="card"><div class="card-head"><span class="card-title">Footprint</span>
                     <div class="spacer"></div>
-                    <span class="dim" id="ofProfileStatus">profile: --</span>
+                    <span class="dim" id="ofProfileStatus">profile: —</span>
                     <select class="btn small" id="ofImbMode" title="Imbalance convention — same price row (the reference layout style) or diagonal (the DTC platform Numbers Bars: a row's ask against the bid one tick below)">
                         <option value="same_price">imbalance: same price</option>
                         <option value="diagonal">imbalance: diagonal</option>
                     </select>
                     <input class="btn small" id="ofImbThresh" type="number" min="1" max="50" step="0.5" value="3"
                            style="width:72px" title="Imbalance ratio (3 = three times the opposing side)">
-                    <span class="dim" id="ofCalc" title="Numbers-Bars calculated values for the last bar">calc: --</span>
+                    <span class="dim" id="ofCalc" title="Numbers-Bars calculated values for the last bar">calc: —</span>
                     <button class="btn small" id="btnRebuildProfile">Rebuild profile</button>
                     <span class="dim">drag to pan · scroll to zoom</span></div>
                     <div class="card-body" style="padding:0"><div id="footprintChart" style="height:600px"></div></div>
@@ -319,8 +336,12 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                 <div class="view-head"><div class="view-title">Order-flow engine</div> <button class="btn small surf-pause" data-surf="ofx" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
                     <div class="view-sub">DOM liquidity behind a split-candle footprint matrix; execution sweeps, crosshair HUD and a CVD ribbon locked to the same X transform</div></div>
                 <div class="row ofx-bar">
-                    <label>symbol <input id="ofxSymbol" size="10" value="BTCUSDT"></label>
-                    <select id="ofxSymPick" class="ofx-sym-pick" title="Quick-pick a configured instrument — streaming first, then enabled, then off"></select>
+                    <label>symbol <input id="ofxSymbol" size="10" value="BTCUSDT"
+                        data-hint-title="Switching instruments"
+                        data-hint-body="The Engine's panels reload for the new instrument; its output can lag the selection while the switch settles. The fields ring blue until it does."></label>
+                    <select id="ofxSymPick" class="ofx-sym-pick" title="Quick-pick a configured instrument — streaming first, then enabled, then off"
+                        data-hint-title="Switching instruments"
+                        data-hint-body="Picking here re-points the Engine at the instrument; the output below can lag the pick while the switch settles. The fields ring blue until it does."></select>
                     <span id="ofxSymbolState" class="ofx-sym-chip" title="What the server says this symbol is: streaming, enabled, off or unknown."
                           data-hint-title="Instrument look-up"
                           data-hint-body="Hover or right-click for what the server makes of this symbol — and the button that fixes it."
@@ -329,12 +350,12 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                         data-hint-title="Look the symbol up"
                         data-hint-body="Any name works: a market name (NQ1!), your broker’s spelling (USTEC), or one of the suite’s own rows (NAS100USDT)."
                         data-hint-actions="instruments">find</button>
-                    <label>R <input id="ofxR" type="number" step="0.5" min="1.5" max="20" style="width:64px"></label>
-                    <label>stack <input id="ofxStack" type="number" step="1" min="2" max="8" style="width:52px"></label>
-                    <label>lambda ms <input id="ofxLambda" type="number" step="50" min="100" max="5000" style="width:76px"></label>
+                    <label>R <input id="ofxR" data-presets="2,4,8" type="number" step="0.5" min="1.5" max="20" style="width:64px"></label>
+                    <label>stack <input id="ofxStack" data-presets="2,3,5,8" data-why="footprint.stacked" type="number" step="1" min="2" max="8" style="width:52px"></label>
+                    <label>lambda ms <input id="ofxLambda" data-presets="100,250,500,1000,2000" type="number" step="50" min="100" max="5000" style="width:76px"></label>
                     <button id="ofxApply">Apply</button>
-                    <label>min block <input id="ofxMinBlock" type="number" step="5" min="0" style="width:70px" title="Hide execution blocks smaller than this size (contracts; 0 shows every block)."><span class="ofx-hidden" id="ofxHiddenBlocks"></span></label>
-                    <label>VA % <input id="ofxVaPct" type="number" step="0.05" min="0.5" max="0.95" style="width:70px" title="Share of the candle’s volume that counts as the value area (default 70%)."></label>
+                    <label>min block <input id="ofxMinBlock" data-presets="0,10,50,100" type="number" step="0.01" min="0" max="1000" style="width:70px" title="Hide execution blocks smaller than this size (contracts; 0 shows every block)."><span class="ofx-hidden" id="ofxHiddenBlocks"></span></label>
+                    <label>VA % <input id="ofxVaPct" data-presets="0.6,0.68,0.7,0.8,0.9" type="number" step="0.05" min="0.5" max="0.95" style="width:70px" title="Share of the candle’s volume that counts as the value area (default 70%)."></label>
                     <label title="How each bar is expressed: the footprint default, a delta-tinted body, a split candle (sell left / buy right), a heat-gradient body, or wick + footprint only. The legend under the stage names whichever is active.">bars <select id="ofxMode" title="Bar expression mode">
                         <option value="default">default</option><option value="delta">delta tint</option>
                         <option value="split">split candle</option><option value="heat">heat body</option>
@@ -385,7 +406,7 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                         <div id="ofxTip" class="ofx-tip"></div>
                         <div id="ofxSnapFloat" class="ofx-snap-float">⟲ Snap to present<canvas id="ofxSpark2" width="88" height="18"></canvas></div>
                     </div>
-                    <div id="ofxReadout" class="ofx-readout"></div>
+                    <div id="ofxReadout" data-why="footprint.imbalance" class="ofx-readout"></div>
                 </div>
                 <canvas id="ofxRibbon" class="ofx-ribbon"></canvas>
                 <section id="ofxLegendPanel" class="ofx-legend-panel">
@@ -402,9 +423,9 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                 <div class="view-head"><div class="view-title">Market depth</div> <button class="btn small surf-pause" data-surf="depth" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
                     <div class="view-sub">L2 ladder with imbalance and spread</div></div>
                 <div class="grid cols-3">
-                    <div class="kpi" id="dpBid"><span class="kpi-label">Best bid</span><span class="kpi-value">--</span></div>
-                    <div class="kpi" id="dpAsk"><span class="kpi-label">Best ask</span><span class="kpi-value">--</span></div>
-                    <div class="kpi" id="dpImb"><span class="kpi-label">Imbalance</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="dpBid"><span class="kpi-label">Best bid</span><span class="kpi-value">—</span></div>
+                    <div class="kpi" id="dpAsk"><span class="kpi-label">Best ask</span><span class="kpi-value">—</span></div>
+                    <div class="kpi" id="dpImb"><span class="kpi-label">Imbalance</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
                 </div>
                 <div class="card"><div class="card-head"><span class="card-title">Order book</span></div>
                     <div class="card-body" style="padding:0"><div id="orderbookLadder" style="height:560px"></div></div></div>
@@ -480,11 +501,15 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                     <div class="view-sub">resting liquidity over time · bubbles = executed aggression · purple = pulled, cyan = stacked</div>
                     <div class="grow"></div>
                     <div class="row">
-                        <div class="field"><label>Window</label><select id="hmColumns">
-                            <option value="120">2 min</option><option value="240" selected>4 min</option>
-                            <option value="480">8 min</option><option value="900">15 min</option></select></div>
-                        <div class="field"><label>Rows</label><select id="hmRows">
-                            <option value="120">120</option><option value="200" selected>200</option><option value="300">300</option></select></div>
+                        <div class="field"><label>Window</label><select id="hmColumns" title="The depth window — how far back the map looks (the wheel zooms this)">
+                            <option value="60">1 min</option><option value="120">2 min</option><option value="180">3 min</option><option value="240" selected>4 min</option>
+                            <option value="360">6 min</option><option value="480">8 min</option><option value="720">12 min</option><option value="900">15 min</option></select></div>
+                        <div class="field"><label>Rows</label><select id="hmRows" title="Price rows — shift+wheel (or the wheel on the price gutter) zooms this">
+                            <option value="60">60</option><option value="100">100</option><option value="140">140</option><option value="200" selected>200</option>
+                            <option value="260">260</option><option value="320">320</option><option value="400">400</option></select></div>
+                        <div class="field"><label>Detail</label><select id="hmBucket" title="Column width — how much book time each depth column holds. Finer = deep microstructure, coarser = longer history (a width change restarts the buffer on the new grid)">
+                            <option value="100">100 ms</option><option value="250">250 ms</option><option value="500">500 ms</option>
+                            <option value="1000" selected>1 s</option><option value="2000">2 s</option><option value="5000">5 s</option></select></div>
                         <div class="field"><label>Overlays</label><div class="row">
                             <label class="switch"><input type="checkbox" id="hmTrades" checked> trades</label>
                             <label class="switch" title="Tint levels the engine has seen held past its wall-age threshold (2 min by default)."><input type="checkbox" id="hmAgeTint"> wall age</label>
@@ -509,19 +534,21 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                     </div>
                 </div>
                 <div class="grid cols-4">
-                    <div class="kpi" id="hmWalls"><span class="kpi-label">Wall levels tracked</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="hmStack"><span class="kpi-label">Stacking events</span><span class="kpi-value">--</span><span class="kpi-sub">liquidity added</span></div>
-                    <div class="kpi" id="hmPull"><span class="kpi-label">Pulled near price</span><span class="kpi-value">--</span><span class="kpi-sub">spoof candidates</span></div>
-                    <div class="kpi" id="hmSpan"><span class="kpi-label">Depth</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="hmWalls"><span class="kpi-label">Wall levels tracked</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="hmStack"><span class="kpi-label">Stacking events</span><span class="kpi-value">—</span><span class="kpi-sub">liquidity added</span></div>
+                    <div class="kpi" id="hmPull" data-why="heatmap.pull"><span class="kpi-label">Pulled near price</span><span class="kpi-value">—</span><span class="kpi-sub">spoof candidates</span></div>
+                    <div class="kpi" id="hmSpan"><span class="kpi-label">Depth</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
                 </div>
                 <div class="card"><div class="card-head"><span class="card-title">Liquidity map</span><div class="spacer"></div>
+                    <span class="hm-legend" id="hmScaleLegend" title="How the map’s colours read: each cell is the resting size at that price in that bucket, brightness rises to the scale cap, and the top share of sizes saturates at it. The cap is the number on the legend.">
+                        <span class="hm-legend-bar" id="hmScaleBar"></span><span class="dim" id="hmScaleText">scale —</span></span>
                     <span class="dim" id="hmStatus">waiting for data…</span></div>
                     <div class="card-body hm-split" style="padding:0"><canvas id="heatmapCanvas" class="heat-canvas" title="Market depth heatmap: resting order size by price over time — brighter cells are bigger levels."></canvas><div class="hm-rail" id="hmColRail">
-                        <div class="hm-rail-head"><span class="hm-rail-title">Columns <span class="dim" id="hmColNote">—</span></span></div>
+                        <div class="hm-rail-head"><span class="hm-rail-title">Columns <span class="dim" id="hmColNote" data-why="depth.history">—</span></span></div>
                         <div class="hm-rail-ctl">
                             <select id="hmColMetric" title="What each column accumulates between resets."><option value="traded">traded since reset</option><option value="resting">resting Δ since reset</option></select>
                             <select id="hmColReset" title="The reset policy: manual (button / double-click), scheduled (every 30 s) or conditional (when a row crosses the threshold)."><option value="manual">reset: manual</option><option value="scheduled">reset: every 30 s</option><option value="conditional">reset: on threshold</option></select>
-                            <input type="number" id="hmColThreshold" min="0" step="50" style="width:70px" title="The threshold a column must cross for its conditional reset to fire.">
+                            <input type="number" id="hmColThreshold" data-presets="0,500,1000,5000" min="0" step="50" style="width:70px" title="The threshold a column must cross for its conditional reset to fire.">
                             <button class="btn small" id="hmColResetAll" title="Reset every column’s accumulation now.">↺ all</button>
                         </div>
                         <div class="hm-rail-rows" id="hmColRows"><div class="dim">waiting for a snapshot…</div></div>
@@ -532,7 +559,7 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                         <div class="card-body" style="padding:0"><table class="data" id="hmEventTable">
                             <thead><tr><th>Time</th><th>Kind</th><th>Price</th><th>Size</th><th>Detail</th></tr></thead><tbody></tbody></table></div></div>
                     <div class="card"><div class="card-head"><span class="card-title">Fresh walls</span></div>
-                        <div class="card-body" style="padding:0"><table class="data" id="hmWallTable">
+                        <div class="card-body" style="padding:0"><table class="data" id="hmWallTable" data-why="heatmap.wall">
                             <thead><tr><th>Price</th><th>Resting size</th><th>Held</th><th>Distance</th></tr></thead><tbody></tbody></table></div></div>
                 </div>
             </section>
@@ -540,13 +567,13 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
             <!-- ── Trackers (MBO-style detections) ── -->
             <section class="view" data-view="trackers" data-surface="trackers">
                 <div class="view-head"><div class="view-title">Order-flow trackers</div> <button class="btn small surf-pause" data-surf="trackers" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
-                    <div class="view-sub">iceberg · sweeps · stop runs · liquidations · big trades · speed of tape</div></div>
+                    <div class="view-sub">iceberg · sweeps · stop runs · liquidations · big trades · speed of tape · cross-venue · correlation · clusters · intent</div></div>
                 <div id="tkBanner"></div>
                 <div class="grid cols-4">
-                    <div class="kpi" id="tkBig"><span class="kpi-label">Big trades</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="tkSweeps"><span class="kpi-label">Sweeps (inferred)</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="tkIcebergs"><span class="kpi-label">Icebergs (inferred)</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="tkSpeed"><span class="kpi-label">Speed of tape</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="tkBig"><span class="kpi-label">Big trades</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="tkSweeps" data-why="tape.sweep"><span class="kpi-label">Sweeps (inferred)</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="tkIcebergs" data-why="tape.iceberg"><span class="kpi-label">Icebergs (inferred)</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="tkSpeed"><span class="kpi-label">Speed of tape</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
                 </div>
                 <div class="grid cols-2">
                     <div class="card"><div class="card-head"><span class="card-title">Iceberg tracker</span><div class="spacer"></div>
@@ -560,7 +587,7 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                 </div>
                 <div class="grid cols-2">
                     <div class="card"><div class="card-head"><span class="card-title">Imbalance ladder</span><div class="spacer"></div>
-                        <span class="dim" id="tkImbStats">--</span></div>
+                        <span class="dim" id="tkImbStats">—</span></div>
                         <div class="card-body" style="padding:0"><table class="data" id="tkImbTable">
                             <thead><tr><th>Price</th><th>Side</th><th>Volume here</th><th>vs other side</th><th>Ratio</th></tr></thead><tbody></tbody></table></div></div>
                     <div class="card"><div class="card-head"><span class="card-title">Stacked imbalances</span><div class="spacer"></div>
@@ -569,24 +596,50 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                             <thead><tr><th>Side</th><th>From</th><th>To</th><th>Levels</th><th>Volume</th><th>Peak ratio</th></tr></thead><tbody></tbody></table></div></div>
                 </div>
                 <div class="card"><div class="card-head"><span class="card-title">Big-trade zones</span><div class="spacer"></div>
-                    <span class="dim" id="tkZoneStats">--</span></div>
+                    <span class="dim" id="tkZoneStats">—</span></div>
                     <div class="card-body" style="padding:0"><table class="data" id="tkZoneTable">
                         <thead><tr><th>Zone</th><th>Buy</th><th>Sell</th><th>Total</th><th>Delta</th><th>Trades</th><th>Last</th></tr></thead><tbody></tbody></table></div></div>
                 <div class="grid cols-2">
                     <div class="card"><div class="card-head"><span class="card-title">Stop runs</span><div class="spacer"></div>
                         <span class="tag warn" title="A stop run is inferred from a fast move plus clustered prints at one side — “confirmed” means liquidations corroborated it">inferred</span><div class="spacer"></div>
                         <span class="tag warn" title="Inferred from fast range expansion + volume burst, confirmed by liquidation clusters">inferred</span></div>
-                        <div class="card-body" style="padding:0"><table class="data" id="tkStopTable">
+                        <div class="card-body" style="padding:0"><table class="data" id="tkStopTable" data-why="tape.stop_run">
                             <thead><tr><th>Time</th><th>Dir</th><th>Ticks</th><th>Volume</th><th>Stops</th><th>Liquidations</th></tr></thead><tbody></tbody></table></div></div>
                     <div class="card"><div class="card-head"><span class="card-title">Big trades</span><div class="spacer"></div>
-                        <span class="dim" id="tkThreshold">threshold: --</span></div>
+                        <span class="dim" id="tkThreshold" data-why="tape.big_trade">threshold: —</span></div>
                         <div class="card-body" style="padding:0"><table class="data" id="tkBigTable">
                             <thead><tr><th>Time</th><th>Side</th><th>Price</th><th>Size</th><th>×threshold</th></tr></thead><tbody></tbody></table></div></div>
                 </div>
                 <div class="card"><div class="card-head"><span class="card-title">Liquidations</span><div class="spacer"></div>
-                    <span class="dim" id="tkLiqStats">--</span></div>
+                    <span class="dim" id="tkLiqStats">—</span></div>
                     <div class="card-body" style="padding:0"><table class="data" id="tkLiqTable">
                         <thead><tr><th>Time</th><th>Price</th><th>Size</th><th>Side</th></tr></thead><tbody></tbody></table></div></div>
+                <!-- F1 (control-surface audit): the four reads the view's menu copy always promised —
+                     cross-venue book, correlation, trade clusters, venue feed history — plus the
+                     participants' intent read. All five routes had no caller before this pass. -->
+                <div class="grid cols-2">
+                    <div class="card"><div class="card-head"><span class="card-title">Cross-venue book</span><div class="spacer"></div>
+                        <span class="dim" id="tkCvStats">—</span></div>
+                        <div class="card-body" style="padding:0"><table class="data" id="tkCvTable">
+                            <thead><tr><th>Venue</th><th>Bid</th><th>Bid size</th><th>Ask</th><th>Ask size</th><th>Age</th><th></th></tr></thead><tbody></tbody></table></div></div>
+                    <div class="card"><div class="card-head"><span class="card-title">Correlation</span><div class="spacer"></div>
+                        <span class="dim" id="tkCorrStats">—</span></div>
+                        <div class="card-body" style="padding:0"><table class="data" id="tkCorrTable">
+                            <thead><tr><th>Pair</th><th>r</th><th>Shared buckets</th></tr></thead><tbody></tbody></table></div></div>
+                </div>
+                <div class="grid cols-2">
+                    <div class="card"><div class="card-head"><span class="card-title">Trade clusters</span><div class="spacer"></div>
+                        <span class="dim" id="tkDotsStats">—</span></div>
+                        <div class="card-body" style="padding:0"><table class="data" id="tkDotsTable">
+                            <thead><tr><th>Time</th><th>Price</th><th>Side</th><th>Size</th></tr></thead><tbody></tbody></table></div></div>
+                    <div class="card"><div class="card-head"><span class="card-title">Feed history — recent trades</span><div class="spacer"></div>
+                        <span class="dim" id="tkRtStats">—</span></div>
+                        <div class="card-body" style="padding:0"><table class="data" id="tkRtTable">
+                            <thead><tr><th>Time</th><th>Price</th><th>Size</th><th>Side</th></tr></thead><tbody></tbody></table></div></div>
+                </div>
+                <div class="card" id="tkIntentCard"><div class="card-head"><span class="card-title">Participants' intent</span><div class="spacer"></div>
+                    <span class="dim" id="tkIntentLine">—</span></div>
+                    <div class="card-body"><div class="grid cols-4" id="tkIntentGrid"></div></div></div>
             </section>
 
             <!-- ── CVD ── -->
@@ -596,17 +649,17 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                     <div class="grow"></div>
                     <button class="btn small" id="cvdReanchor">Re-anchor</button></div>
                 <div class="grid cols-4">
-                    <div class="kpi" id="cvdValue"><span class="kpi-label">CVD (session)</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="cvd1m"><span class="kpi-label">Δ 1m</span><span class="kpi-value">--</span></div>
-                    <div class="kpi" id="cvd5m"><span class="kpi-label">Δ 5m</span><span class="kpi-value">--</span></div>
-                    <div class="kpi" id="cvdSlope"><span class="kpi-label">Slope / bucket</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="cvdValue" data-why="cvd.value"><span class="kpi-label">CVD (session)</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="cvd1m"><span class="kpi-label">Δ 1m</span><span class="kpi-value">—</span></div>
+                    <div class="kpi" id="cvd5m"><span class="kpi-label">Δ 5m</span><span class="kpi-value">—</span></div>
+                    <div class="kpi" id="cvdSlope" data-why="cvd.value"><span class="kpi-label">Slope / bucket</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
                 </div>
                 <div class="card"><div class="card-head"><span class="card-title">CVD vs price</span><div class="spacer"></div>
-                    <span class="dim" id="cvdStatus">--</span></div>
+                    <span class="dim" id="cvdStatus">—</span></div>
                     <div class="card-body" style="padding:0"><canvas id="cvdCanvas" class="series-canvas"></canvas></div>
                 </div>
                 <div class="card"><div class="card-head"><span class="card-title">Divergences</span></div>
-                    <div class="card-body" style="padding:0"><table class="data" id="cvdDivTable">
+                    <div class="card-body" style="padding:0"><table class="data" id="cvdDivTable" data-why="cvd.divergence">
                         <thead><tr><th>Time</th><th>Kind</th><th>Strength</th><th>Note</th></tr></thead><tbody></tbody></table></div></div>
             </section>
 
@@ -615,14 +668,14 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                 <div class="view-head"><div class="view-title">Market profile (TPO)</div> <button class="btn small surf-pause" data-surf="profile" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
                     <div class="view-sub">30-minute brackets · POC / value area / initial balance / range extension / single prints</div></div>
                 <div class="grid cols-4">
-                    <div class="kpi" id="mpPoc"><span class="kpi-label">POC</span><span class="kpi-value">--</span></div>
-                    <div class="kpi" id="mpVa"><span class="kpi-label">Value area</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="mpIb"><span class="kpi-label">Initial balance</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="mpExt"><span class="kpi-label">Range extension</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="mpPoc" data-why="profile.poc"><span class="kpi-label">POC</span><span class="kpi-value">—</span></div>
+                    <div class="kpi" id="mpVa" data-why="profile.value_area"><span class="kpi-label">Value area</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="mpIb"><span class="kpi-label">Initial balance</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="mpExt"><span class="kpi-label">Range extension</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
                 </div>
                 <div class="grid split">
                     <div class="card"><div class="card-head"><span class="card-title">TPO ladder</span><div class="spacer"></div>
-                        <span class="dim" id="mpStatus">--</span></div>
+                        <span class="dim" id="mpStatus">—</span></div>
                         <div class="card-body" style="padding:0"><div class="tpo-grid" id="tpoGrid"></div></div></div>
                     <div class="card"><div class="card-head"><span class="card-title">Session reads</span></div>
                         <div class="card-body" id="mpReads"><div class="dim">no data yet</div></div></div>
@@ -632,15 +685,16 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
             <!-- ── Frames ── -->
             <section class="view" data-view="frames" data-surface="frames">
                 <div class="view-head"><div class="view-title">Frames</div> <button class="btn small surf-pause" data-surf="frames" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
-                    <div class="view-sub">non-time bars: Range · Renko · Reversal · Tick · Volume</div>
+                    <div class="view-sub">non-time bars: Range · Renko · Reversal · Tick · Volume · Delta</div>
                     <div class="grow"></div>
                     <div class="field"><label>Frame</label><select id="frameSelect">
                         <option value="range">Range</option><option value="renko">Renko</option>
                         <option value="reversal">Reversal</option><option value="tick" selected>Tick</option>
-                        <option value="volume">Volume</option></select></div>
+                        <option value="volume">Volume</option>
+                        <option value="delta">Delta</option></select></div>
                 </div>
                 <div class="card"><div class="card-head"><span class="card-title">Closed bars</span><div class="spacer"></div>
-                    <span class="dim" id="frameStatus">--</span></div>
+                    <span class="dim" id="frameStatus">—</span></div>
                     <div class="card-body"><canvas id="frameCanvas" class="series-canvas"></canvas></div>
                 </div>
                 <div class="card"><div class="card-head"><span class="card-title">Recent bars</span></div>
@@ -657,14 +711,15 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                     <div class="card"><div class="card-head"><span class="card-title">Source</span></div>
                         <div class="card-body">
                             <div class="row">
-                                <div class="field"><label>Instrument</label><input type="text" id="rpSymbol" placeholder="BTCUSDT"></div>
+                                <div class="field"><label>Instrument</label><select id="rpSymbol"
+                                    title="Instrument to replay — every configured instrument, streaming first; the session needs local ticks, or replay the exchange tape"></select></div>
                                 <div class="field"><label>Source</label><select id="rpSource">
                                     <option value="db">Recorded ticks (SQLite)</option>
                                     <option value="exchange">Exchange tape (last 1000)</option></select></div>
                             </div>
                             <div class="row">
-                                <div class="field"><label>From (minutes ago)</label><input type="number" id="rpFrom" value="60" min="1"></div>
-                                <div class="field"><label>To (minutes ago)</label><input type="number" id="rpTo" value="0" min="0"></div>
+                                <div class="field"><label>From (minutes ago)</label><input type="number" id="rpFrom" data-presets="15,60,240,1440" value="60" min="1"></div>
+                                <div class="field"><label>To (minutes ago)</label><input type="number" id="rpTo" data-presets="0,15,60,240" value="0" min="0"></div>
                             </div>
                             <button class="btn primary" id="rpLoad">Load session</button>
                             <span class="dim" id="rpLoadResult"></span>
@@ -682,14 +737,14 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                                 <input type="range" id="rpSpeed" min="0.5" max="500" step="0.5" value="10"></div>
                             <div class="field"><label>Position</label>
                                 <input type="range" id="rpSeek" min="0" max="1000" step="1" value="0"></div>
-                            <div class="dim" id="rpProgress">--</div>
+                            <div class="dim" id="rpProgress">—</div>
                         </div></div>
                 </div>
                 <div class="grid cols-4">
-                    <div class="kpi" id="rpTotal"><span class="kpi-label">Events loaded</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="rpIndex"><span class="kpi-label">Position</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="rpClock"><span class="kpi-label">Replay clock</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
-                    <div class="kpi" id="rpMode"><span class="kpi-label">Mode</span><span class="kpi-value">--</span><span class="kpi-sub">--</span></div>
+                    <div class="kpi" id="rpTotal"><span class="kpi-label">Events loaded</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="rpIndex"><span class="kpi-label">Position</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="rpClock"><span class="kpi-label">Replay clock</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
+                    <div class="kpi" id="rpMode"><span class="kpi-label">Mode</span><span class="kpi-value">—</span><span class="kpi-sub">—</span></div>
                 </div>
                 <div class="card"><div class="card-head"><span class="card-title">Simulated account</span>
                     <div class="spacer"></div><span class="pill" id="ppPill"><span class="dot"></span> <span id="ppPillText">no session</span></span></div>
@@ -718,14 +773,14 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                             <button class="btn small" id="ppxApply" title="Replace the open position&#39;s exits with these two values &mdash; a bracket is one pair, so both travel together.">Apply exits</button>
                             <button class="btn small" id="ppxBreakeven" title="Move the stop to the fill price &mdash; the classic free-roll move.">Stop to entry</button>
                             <button class="btn small" id="ppxClear" title="Remove both exits &mdash; the position then only leaves on flatten or a manual close.">Clear exits</button>
-                            <span class="dim" id="ppExitsHint">exits attach to an open position &mdash; fill first, then set or move them here</span>
+                            <span class="dim" id="ppExitsHint" data-why="atm.bracket">exits attach to an open position &mdash; fill first, then set or move them here</span>
                         </div>
                         <div class="row danger-row">
                             <button class="btn" id="ppFlatten">Flatten</button>
                             <button class="btn" id="ppCancelAll">Cancel working</button>
                             <button class="btn" id="ppEnd">End &amp; save to journal</button>
                             <button class="btn small" id="ppLock" aria-pressed="false" title="Lock order placement — Buy/Sell and the armed keys stop placing orders; flatten and cancel stay live">Lock trading</button>
-                            <span class="dim" id="ppResult">—</span>
+                            <span class="dim" id="ppResult" data-why="risk.daily_cap">—</span>
                         </div>
                         <div class="grid cols-4">
                             <div class="kpi" id="ppPosition"><span class="kpi-label">Position</span><span class="kpi-value">flat</span><span class="kpi-sub">—</span></div>
@@ -752,6 +807,11 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
 
             <!-- ── Alerts ── -->
             <section class="view" data-view="alerts" data-surface="alerts">
+                <!-- §147 W5: the condition builder — AND/OR readings, cooldowns, and the evidence snapshot. -->
+                <div class="card" id="alertBuilderPanel">
+                    <div class="card-head"><span class="card-title">Condition builder</span><div class="spacer"></div>
+                        <span class="dim" id="alertBuilderPill">—</span></div>
+                    <div class="card-body" id="alertBuilderBody"></div></div>
                 <div class="view-head"><div class="view-title">Order-flow alerts</div>
                     <div class="view-sub">rules over every detection · what each one watches, in words, and where it goes</div>
                     <div class="grow"></div>
@@ -760,18 +820,18 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                     <button class="btn small" id="alClear">Clear log</button></div>
                 <div id="alBanner"></div>
                 <div class="card"><div class="card-head"><span class="card-title">Alert log</span><div class="spacer"></div>
-                    <span class="dim" id="alStats">--</span></div>
+                    <span class="dim" id="alStats">—</span></div>
                     <div class="card-body" style="padding:0"><table class="data" id="alertTable">
                         <thead><tr><th>Time</th><th>Severity</th><th>Kind</th><th>Symbol</th><th>Level</th><th>Size</th><th>Why</th></tr></thead><tbody></tbody></table></div></div>
                 <div class="card"><div class="card-head"><span class="card-title">Rules</span><div class="spacer"></div>
                     <label class="switch" title="Rules the depth map's alert buttons created — their id always starts with hm-."><input type="checkbox" id="alOnlyHm"> created from heatmap</label>
                     <label class="switch"><input type="checkbox" id="alOnlyOn"> enabled only</label>
-                    <span class="dim" id="alRuleCount">--</span>
+                    <span class="dim" id="alRuleCount">—</span>
                     <button class="btn small" id="alNewRule" title="Start a rule by hand — opens the same editor the Heatmap's rules use.">+ New rule</button></div>
                     <div class="card-body" style="padding:0"><table class="data" id="ruleTable">
                         <thead><tr><th>On</th><th>Rule</th><th>Fired</th><th></th></tr></thead><tbody></tbody></table></div></div>
                 <div class="card"><div class="card-head"><span class="card-title">Persisted history</span><div class="spacer"></div>
-                    <span class="dim" id="histStats">--</span>
+                    <span class="dim" id="histStats">—</span>
                     <button class="btn small" id="histReload">Reload</button></div>
                     <div class="card-body" style="padding:0"><table class="data" id="histTable">
                         <thead><tr><th>When</th><th>Kind</th><th>Price</th><th>Size</th><th>Detail</th></tr></thead><tbody></tbody></table></div></div>
@@ -854,6 +914,7 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                     <button class="btn small" id="jnStatement">Export HTML statement</button></div>
                 <div id="jnBanner"></div>
                 <div class="grid cols-4" id="jnStats"></div>
+                <div id="jnStrip" class="hint">—</div>
                 <div class="card"><div class="card-head"><span class="card-title">Trades</span>
                     <div class="spacer"></div><span class="dim" id="jnCount">—</span></div>
                     <div class="card-body">
@@ -864,8 +925,21 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                         </div>
                         <div id="jnTable" class="hint">no trades yet — a simulated session can be saved here from the Replay view · <a class="help-link" href="#" data-helptopic="view.journal">about the journal</a></div>
                     </div></div>
-                <div class="card"><div class="card-head"><span class="card-title">Daily P&amp;L</span></div>
+                <div class="card"><div class="card-head"><span class="card-title">Daily P&amp;L</span>
+                    <div class="spacer"></div><span class="dim">exit day, UTC</span></div>
                     <div class="card-body"><div id="jnDaily" class="hint">—</div></div></div>
+                <!-- §147 W4: the deep read — per-setup and per-session stats, and the P&L calendar. -->
+                <div class="card"><div class="card-head"><span class="card-title">Setup stats</span>
+                    <div class="spacer"></div><span class="dim">per setup tag</span></div>
+                    <div class="card-body"><div id="jnSetup" class="hint">—</div></div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Session stats</span>
+                    <div class="spacer"></div><span class="dim">entry hour, UTC</span></div>
+                    <div class="card-body"><div id="jnSessions" class="hint">—</div></div></div>
+                <div class="card"><div class="card-head"><span class="card-title">P&amp;L calendar</span>
+                    <button class="btn small" id="jnCalPrev" title="The previous month">‹</button>
+                    <span class="dim" id="jnCalMonth">—</span>
+                    <button class="btn small" id="jnCalNext" title="The next month">›</button></div>
+                    <div class="card-body"><div id="jnCalendar" class="hint">—</div></div></div>
             </section>
 
             <!-- ── Calendar (R11: the economic calendar) ── -->
@@ -874,17 +948,20 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                     <div class="view-sub">this week's releases by impact and currency — keyless feed, cached</div>
                     <div class="grow"></div>
                     <label class="switch"><input type="checkbox" id="calAlerts"> alerts ahead of high-impact events</label>
-                    <div class="field"><label>Lead (minutes)</label><input type="number" id="calLead" min="1" max="240" step="5" value="15"></div>
+                    <div class="field"><label>Lead (minutes)</label><input type="number" id="calLead" data-presets="5,15,30,60,240" min="1" max="240" step="5" value="15"></div>
                     <div class="field"><label>Currencies</label><input type="text" id="calCurrencies" placeholder="all — e.g. USD,EUR"></div>
                     <button class="btn small" id="calRefresh">Refresh</button></div>
                 <div id="calBanner"></div>
                 <div class="card"><div class="card-head"><span class="card-title">Upcoming</span>
                     <div class="spacer"></div><span class="dim" id="calSource">—</span></div>
-                    <div class="card-body"><div id="calTable" class="hint">loading…</div></div></div>
+                    <div class="card-body">
+                        <div class="chip-row" id="calCurrencyChips" role="group"
+                             aria-label="Currency filters — the codes this window holds"></div>
+                        <div id="calTable" class="hint">loading…</div></div></div>
                 <div class="card"><div class="card-head"><span class="card-title">Watch filter</span></div>
                     <div class="card-body">
                         <div class="row">
-                            <div class="field"><label>Window (hours)</label><input type="number" id="calHours" min="1" max="720" step="1" value="48"></div>
+                            <div class="field"><label>Window (hours)</label><input type="number" id="calHours" data-presets="12,24,48,72,168" min="1" max="720" step="1" value="48"></div>
                             <div class="field"><label>Minimum impact</label><select id="calImpact">
                                 <option value="high">High only</option>
                                 <option value="medium">Medium and up</option>
@@ -1007,6 +1084,9 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                                 <div class="field"><label>UI scale</label><input type="number" id="setScale" min="0.75" max="1.5" step="0.05" style="width:76px" title="Scales the whole interface (Ctrl+= / Ctrl+- step, Ctrl+0 resets)."></div>
                             </div>
                             <div class="hint">Every colour in the shell reads from the token block in atlas.css: these three switches swap the tokens, never the layout.</div>
+                            <div class="hint">Phone or second screen: <a href="/desktop/monitor.html" target="_blank" rel="noopener">/desktop/monitor.html</a>
+                                is a read-only companion page — alerts, the simulated account, the watchlist quotes and one order-flow read.
+                                It only reads: nothing on it places an order, saves a setting or clears an alert.</div>
                         </div></div>
 
                     <div class="card"><div class="card-head"><span class="card-title">Data &amp; engine</span></div>
@@ -1019,10 +1099,30 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                                 <option value="all">All of them</option></select>
                                 <div class="hint" id="sourceHint"></div></div>
                             <div class="row">
-                                <div class="field"><label>Signal cooldown (s)</label><input type="number" id="setCooldown" min="0" step="5"></div>
-                                <div class="field"><label>Min composite score</label><input type="number" id="setScore" min="0" max="100" step="5"></div>
+                                <div class="field"><label>Signal cooldown (s)</label><input type="number" id="setCooldown" data-presets="0,15,30,60,300" min="0" step="5"></div>
+                                <div class="field"><label>Min composite score</label><input type="number" id="setScore" data-presets="20,40,60,80" min="0" max="100" step="5"></div>
                                 <div class="field"><label>Log level</label><select id="setLogLevel">
                                     <option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option></select></div>
+                            </div>
+                        </div></div>
+
+                    <!-- §146: the optional REST feeds' keys (Tradier / Market Data / Finnhub). The rows are
+                         drawn by feedkeys.js from GET /api/control/feedkeys — credentials arrive masked, a
+                         blank field keeps what is stored, and every field says what a key buys. -->
+                    <div class="card"><div class="card-head"><span class="card-title">Feed keys</span><div class="spacer"></div>
+                        <span class="pill" id="fkPill"><span class="dot"></span> <span id="fkPillText">—</span></span></div>
+                        <div class="card-body">
+                            <div class="hint">Keys for the optional REST feeds: the GEX / Volatility / Option-flow panels can read US equity OPRA chains from Tradier or Market Data, and the calendar and news lanes can read Finnhub. Stored in your user config file, never in the repo — every read of them over the API is masked.</div>
+                            <div id="fkRows" class="fk-rows"><div class="dim">loading…</div></div>
+                            <div class="row" style="margin-top:10px">
+                                <div class="field"><label>Economic calendar feed</label><select id="fkCalLane">
+                                    <option value="builtin">Built-in (keyless weekly JSON)</option>
+                                    <option value="finnhub">Finnhub (your key)</option></select>
+                                    <div class="hint">The Calendar view reads this lane; the alert line keeps reading the built-in feed.</div></div>
+                                <div class="field"><label>News headlines</label><select id="fkNewsLane">
+                                    <option value="feeds">Built-in RSS feeds</option>
+                                    <option value="finnhub">Finnhub news (your key)</option></select>
+                                    <div class="hint">Which source the News panel reads.</div></div>
                             </div>
                         </div></div>
 
@@ -1070,8 +1170,8 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                         <div class="grid cols-3" id="stUsage"></div>
                         <div class="hint" id="stGrowth">—</div>
                         <div class="row">
-                            <div class="field"><label>Keep ticks (days)</label><input type="number" id="stRetention" min="0" max="3650" step="1"></div>
-                            <div class="field"><label>Prune every (hours)</label><input type="number" id="stPruneInterval" min="1" max="168" step="1"></div>
+                            <div class="field"><label>Keep ticks (days)</label><input type="number" id="stRetention" data-presets="0,7,14,30,90,365" min="0" max="3650" step="1"></div>
+                            <div class="field"><label>Prune every (hours)</label><input type="number" id="stPruneInterval" data-presets="1,6,12,24" min="1" max="168" step="1"></div>
                             <div class="field"><label>Session start (UTC hour)</label><input type="number" id="stSessionHour" min="0" max="23" step="1"></div>
                         </div>
                         <div class="hint">Retention deletes tick rows older than the window, then reclaims the freed pages. 0 keeps everything; the numbers save as you change them and apply on the next pass.</div>
@@ -1079,7 +1179,9 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                             <button class="btn" id="btnStPrune">Prune now</button>
                             <button class="btn" id="btnStVacuum">Reclaim space</button>
                             <button class="btn" id="btnStCleanup">Sweep caches</button>
+                            <button class="btn" id="btnStClearCache">Clear app cache</button>
                         </div>
+                        <div class="hint">Sweeps and cache clears never touch the database, the config or your backups. The app cache is WebView2's own folder — what the open window holds is cleared at the next start.</div>
                         <div class="hint" id="stLastPrune">—</div>
                         <hr>
                         <!-- R8: your history out, other people's history in. The reader takes the
@@ -1093,6 +1195,13 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                         </div>
                         <div class="hint" id="dataActionResult">import: the active instrument's symbol is assumed unless the file names one · export: written to your exports folder</div>
                         <div class="dim" id="stActionResult"></div>
+                        <hr>
+                        <div class="row">
+                            <button class="btn" id="btnStArchOpen">Open archive folder</button>
+                            <button class="btn danger" id="btnStArchClear">Delete quarantine…</button>
+                            <span class="dim" id="stArchResult"></span>
+                        </div>
+                        <div class="hint">The archive holds quarantined copies — data moved out of the program folder in past sessions. Nothing in it is needed to run the app; deleting is permanent.</div>
                     </div></div>
 
                 <div class="card"><div class="card-head"><span class="card-title">Backup &amp; reports</span>
@@ -1104,8 +1213,8 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                              drive, synced folder — and it is proved by writing before a backup starts. -->
                         <label class="switch" style="margin-bottom:10px"><input type="checkbox" id="stAutoBackup"> automatic backups while the engine runs</label>
                         <div class="row">
-                            <div class="field"><label>Every (hours)</label><input type="number" id="stBackupInterval" min="1" max="720" step="1"></div>
-                            <div class="field"><label>Keep sets</label><input type="number" id="stBackupKeep" min="1" max="60" step="1"></div>
+                            <div class="field"><label>Every (hours)</label><input type="number" id="stBackupInterval" data-presets="6,12,24,72" min="1" max="720" step="1"></div>
+                            <div class="field"><label>Keep sets</label><input type="number" id="stBackupKeep" data-presets="3,5,10,20" min="1" max="60" step="1"></div>
                             <div class="field"><label>Contents</label><select id="stBackupFormat">
                                 <option value="sqlite+csv">Database + CSV</option>
                                 <option value="sqlite">Database only</option>
@@ -1124,11 +1233,11 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                         <label class="switch"><input type="checkbox" id="stEmailReport"> email the report after each automatic backup</label>
                         <label class="switch" style="margin-bottom:8px"><input type="checkbox" id="stEmailThreshold"> email when the database passes the size budget</label>
                         <div class="row">
-                            <div class="field"><label>Size budget (MB, 0 = off)</label><input type="number" id="stMaxDb" min="0" max="1000000" step="100"></div>
+                            <div class="field"><label>Size budget (MB, 0 = off)</label><input type="number" id="stMaxDb" data-presets="0,500,1000,2000" min="0" max="1000000" step="100"></div>
                         </div>
                         <div class="row">
                             <div class="field"><label>SMTP host</label><input type="text" id="stSmtpHost" placeholder="smtp.example.com"></div>
-                            <div class="field"><label>Port</label><input type="number" id="stSmtpPort" min="1" max="65535" step="1" value="587"></div>
+                            <div class="field"><label>Port</label><input type="number" id="stSmtpPort" data-presets="25,465,587,2525" min="1" max="65535" step="1" value="587"></div>
                             <div class="field"><label>Username</label><input type="text" id="stSmtpUser" placeholder="you@example.com"></div>
                         </div>
                         <div class="row">
@@ -1182,7 +1291,7 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                             <div class="field"><label>When a newer build exists</label><select id="updMode">
                                 <option value="check">Tell me — download when I ask</option>
                                 <option value="download">Fetch the installer automatically</option></select></div>
-                            <div class="field"><label>Check every (hours)</label><input type="number" id="updInterval" min="1" max="720" step="1"></div>
+                            <div class="field"><label>Check every (hours)</label><input type="number" id="updInterval" data-presets="1,6,12,24" min="1" max="720" step="1"></div>
                             <div class="field"><label>Channel</label><select id="updChannel">
                                 <option value="stable">Stable releases</option>
                                 <option value="prerelease">Pre-releases (beta)</option></select></div>
@@ -1271,9 +1380,9 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
             <!-- ── Logs ── -->
             <section class="view" data-view="logs">
                 <div class="view-head"><div class="view-title">Logs</div>
-                    <div class="view-sub" id="logSub">--</div></div>
+                    <div class="view-sub" id="logSub">—</div></div>
                 <div class="card"><div class="card-head"><span class="card-title">Engine log</span><div class="spacer"></div>
-                    <select id="logLevel"><option value="">all levels</option><option>INFO</option><option>WARNING</option><option>ERROR</option></select>
+                    <select id="logLevel"><option value="">all levels</option><option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option></select>
                     <label class="switch"><input type="checkbox" id="logAuto" checked> auto-refresh</label>
                     <button class="btn small" id="btnLogClear">Clear</button><span class="dim" id="logStorage" style="margin-left:8px" title="Database size, retention and the last prune — Settings ▸ Data owns the numbers.">storage: —</span></div>
                     <div class="card-body" style="padding:0"><div class="log-list" id="logList"><div class="dim">No log lines yet.</div></div></div>
@@ -1328,17 +1437,257 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
                 </div>
             </section>
 
+            <!-- ── GEX (Gamma Exposure: dealer gamma, zero-gamma line, call/put walls) ── -->
+            <section class="view" data-view="gex">
+                <div class="view-head"><div class="view-title">Gamma Exposure</div>
+                    <div class="view-sub" id="gexSub">Per-strike dealer gamma — zero-gamma line, call/put walls, DEX/VEX totals</div>
+                    <div class="grow"></div>
+                    <div class="field"><label>Chain source</label>
+                        <select id="gexSource" title="Which venue's chain to read. Deribit is public and keyless (crypto); Tradier and Market Data need a key in the app's config, and only a chain that carries gammas can answer here.">
+                            <option value="deribit">Deribit (crypto — BTC/ETH/SOL)</option>
+                            <option value="tradier">Tradier (US equities — OPRA)</option>
+                            <option value="marketdata">Market Data (US equities — OPRA + greeks)</option>
+                        </select></div>
+                    <div class="field"><label>Symbol</label><input type="text" id="gexSymbol" placeholder="the active instrument" maxlength="24" value="" title="Empty follows the app's active instrument; type a name here to read another one."></div>
+                    <button class="btn small" id="gexRefresh">Refresh</button></div>
+                <div id="gexBanner" class="hint"></div>
+                <div class="card"><div class="card-head"><span class="card-title">Levels</span><div class="spacer"></div>
+                    <span class="dim" id="gexUnits"></span>
+                    <span class="dim" id="gexSpot">—</span></div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="field"><label>Zero γ</label><input type="text" id="gexZeroGamma" data-why="gex.zero_gamma" readonly></div>
+                            <div class="field"><label>Call wall</label><input type="text" id="gexCallWall" readonly></div>
+                            <div class="field"><label>Put wall</label><input type="text" id="gexPutWall" readonly></div>
+                        </div>
+                        <div class="row">
+                            <div class="field"><label>Σ DEX</label><input type="text" id="gexDex" readonly></div>
+                            <div class="field"><label>Σ VEX</label><input type="text" id="gexVex" readonly></div>
+                            <div class="field"><label>Σ Θ</label><input type="text" id="gexTheta" readonly></div>
+                        </div>
+                        <div class="row">
+                            <div class="field"><label>Σ Vanna</label><input type="text" id="gexVanna" readonly></div>
+                            <div class="field"><label>Σ Charm</label><input type="text" id="gexCharm" readonly></div>
+                            <div class="field"><label>P/C OI</label><input type="text" id="gexPcoi" readonly></div>
+                        </div>
+                    </div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Gamma by strike</span><div class="spacer"></div>
+                    <span class="dim" id="gexRows">0 strikes</span></div>
+                    <div class="card-body" style="padding:0;overflow:auto;max-height:320px">
+                        <table class="data" id="gexTable">
+                            <thead><tr><th>Strike</th><th>Type</th><th>IV</th><th>γ</th><th id="gexGammaExpHead" data-why="gex.gamma">ΓEX</th><th>OI</th><th>Vol</th></tr></thead>
+                            <tbody id="gexBody"><tr><td colspan="7" class="dim">loading…</td></tr></tbody>
+                        </table></div></div>
+            </section>
+
+            <!-- ── Volatility surface (IV smile, skew, term structure) ── -->
+            <section class="view" data-view="volatility">
+                <div class="view-head"><div class="view-title">Volatility surface</div>
+                    <div class="view-sub" id="volSub">Implied volatility smile per expiry, 25Δ skew, term structure</div>
+                    <div class="grow"></div>
+                    <div class="field"><label>Chain source</label>
+                        <select id="volSource" title="Which venue's chain to read. Every source here carries implied volatility, so this view answers for all three; only the expiries on offer differ.">
+                            <option value="deribit">Deribit (crypto — BTC/ETH/SOL)</option>
+                            <option value="tradier">Tradier (US equities — OPRA)</option>
+                            <option value="marketdata">Market Data (US equities — OPRA + greeks)</option>
+                        </select></div>
+                    <div class="field"><label>Symbol</label><input type="text" id="volSymbol" placeholder="the active instrument" maxlength="24" value="" title="Empty follows the app's active instrument; type a name here to read another one."></div>
+                    <button class="btn small" id="volRefresh">Refresh</button></div>
+                <div id="volBanner" class="hint"></div>
+                <div class="card"><div class="card-head"><span class="card-title">Surface</span><div class="spacer"></div>
+                    <span class="dim" id="volSpot">—</span></div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="field"><label>ATM IV</label><input type="text" id="volAtmIv" readonly></div>
+                            <div class="field"><label>25Δ put</label><input type="text" id="volSkew25dPut" readonly></div>
+                            <div class="field"><label>25Δ call</label><input type="text" id="volSkew25dCall" readonly></div>
+                            <div class="field"><label>25Δ skew</label><input type="text" id="volSkew25d" data-why="vol.skew" readonly></div>
+                        </div>
+                        <div class="row">
+                            <div class="field"><label>P/C OI</label><input type="text" id="volPcoi" readonly></div>
+                            <div class="field"><label>Total OI</label><input type="text" id="volTotalOi" readonly></div>
+                            <div class="field"><label>IV range</label><input type="text" id="volIvRange" readonly></div>
+                            <div class="field"><label>Days to expiry</label><input type="text" id="volDte" readonly></div>
+                        </div>
+                        <div class="row">
+                            <div class="field"><label>Term structure</label><input type="text" id="volTerm" readonly></div>
+                        </div>
+                    </div></div>
+                <div class="card"><div class="card-head"><span class="card-title">IV smile</span><div class="spacer"></div>
+                    <span class="dim" id="volSmileRows">0 strikes</span></div>
+                    <div class="card-body" style="padding:0;overflow:auto;max-height:280px">
+                        <table class="data" id="volTable">
+                            <thead><tr><th>Expiry</th><th class="num">Strike</th><th>Type</th><th class="num">IV</th><th class="num" title="The venue's own delta where it publishes one; a linear proxy otherwise.">Δ</th><th class="num">OI</th></tr></thead>
+                            <tbody id="volBody"><tr><td colspan="6" class="dim">loading…</td></tr></tbody>
+                        </table></div></div>
+            </section>
+
+            <!-- ── Option flow (sweeps, blocks, unusual premium) ── -->
+            <section class="view" data-view="option-flow">
+                <div class="view-head"><div class="view-title">Option flow</div>
+                    <div class="view-sub" id="ofSub">Sweeps, blocks, unusual premium — classified from Deribit's public option tape</div>
+                    <div class="grow"></div>
+                    <div class="field"><label>Feed</label>
+                        <select id="ofFeed" title="Deribit publishes a keyless public option-print stream and it is the one print source this build reads; the equity venues' chains carry quotes, not prints.">
+                            <option value="deribit">Deribit (crypto option tape)</option>
+                        </select></div>
+                    <div class="field"><label>Symbol</label><input type="text" id="ofSymbol" placeholder="the active instrument" maxlength="12" value="" title="Empty follows the app's active instrument; type a name here to read another one."></div>
+                    <button class="btn small" id="ofRefresh">Refresh</button></div>
+                <div id="ofvBanner" class="hint"></div>
+                <div class="card"><div class="card-head"><span class="card-title">Summary</span><div class="spacer"></div>
+                    <span class="dim" id="ofWindow">—</span></div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="field"><label>Total trades</label><input type="text" id="ofTotal" readonly></div>
+                            <div class="field"><label>Sweeps</label><input type="text" id="ofSweeps" data-why="optflow.sweep" readonly></div>
+                            <div class="field"><label>Blocks</label><input type="text" id="ofBlocks" readonly></div>
+                            <div class="field"><label>Unusual premium</label><input type="text" id="ofUnusual" readonly></div>
+                            <div class="field"><label>Routine</label><input type="text" id="ofRoutine" readonly></div>
+                        </div>
+                        <div class="row">
+                            <div class="field"><label>Call premium</label><input type="text" id="ofCallPremium" readonly title="Call premium over the prints in the tape; in money when the underlying is known."></div>
+                            <div class="field"><label>Put premium</label><input type="text" id="ofPutPremium" readonly title="Put premium over the prints in the tape; in money when the underlying is known."></div>
+                            <div class="field"><label>Net premium</label><input type="text" id="ofNetPremium" readonly title="Call premium minus put premium: positive means calls paid more than puts over this window."></div>
+                            <div class="field"><label>Largest print</label><input type="text" id="ofLargest" readonly title="The single biggest print in the window, by premium."></div>
+                        </div>
+                        <div class="row" id="ofSweepRows" style="display:none">
+                            <div class="field"><label>Sweep ID</label><input type="text" id="ofSweepId" readonly></div>
+                            <div class="field"><label>Strikes</label><input type="text" id="ofSweepStrikes" readonly></div>
+                            <div class="field"><label>Total size</label><input type="text" id="ofSweepSize" readonly></div>
+                            <div class="field"><label>Total premium</label><input type="text" id="ofSweepPremium" readonly></div>
+                        </div>
+                    </div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Tape</span><div class="spacer"></div>
+                    <span class="dim" id="ofRows">0 prints</span></div>
+                    <div class="card-body" style="padding:0;overflow:auto;max-height:320px">
+                        <table class="data" id="ofTable">
+                            <thead><tr><th>Time</th><th>Expiry</th><th class="num">Strike</th><th>Type</th><th class="num">Size</th><th class="num">Price</th><th class="num">Premium</th><th>Side</th><th>Class</th></tr></thead>
+                            <tbody id="ofBody"><tr><td colspan="9" class="dim">loading…</td></tr></tbody>
+                        </table></div></div>
+            </section>
+
+            <!-- ── Market read (regime, conviction, levels, confluence) ── -->
+            <!-- §147 (upgrade package): depth over time — the record the live heatmap cannot keep. -->
+            <section class="view" data-view="depth-history" data-surface="depth-history">
+                <div class="view-head"><div class="view-title">Depth history</div>
+                    <button class="btn small surf-pause" data-surf="depth-history" title="Park this panel for study — updates queue and snap current on resume">Pause</button>
+                    <div class="view-sub">Resting size over time, with the liquidity that was pulled or stacked</div></div>
+            </section>
+
+            <!-- §147: session clock, templates and the roll calendar. -->
+            <section class="view" data-view="sessions">
+                <div class="view-head"><div class="view-title">Sessions</div>
+                    <div class="view-sub" id="sessionsSub">Is the session open, when does it close, and when does the contract roll</div>
+                    <div class="grow"></div></div>
+                <div id="sessionsBanner" class="hint"></div>
+                <div id="sessionsBody"></div>
+            </section>
+
+            <!-- §147: the data-quality cockpit — the store is the judge. -->
+            <section class="view" data-view="data-quality">
+                <div class="view-head"><div class="view-title">Data quality</div>
+                    <div class="view-sub" id="dataQualitySub">stored history, per instrument · the store is the judge</div>
+                    <div class="grow"></div>
+                    <span class="dim" id="dataQualitySince">—</span>
+                    <button class="btn small" id="dataQualityRecheck">Recheck</button></div>
+                <div class="card"><div class="card-head"><span class="card-title" id="dataQualityDetail">—</span><div class="spacer"></div>
+                    <span class="dim" id="dataQualitySummary">—</span></div></div>
+            </section>
+
+            <!-- §147: crypto derivatives context (funding, open interest, basis). -->
+            <section class="view" data-view="derivatives">
+                <div class="view-head"><div class="view-title">Funding &amp; open interest</div>
+                    <div class="view-sub" id="derivativesSub">Funding, open interest and basis per venue for the active instrument</div>
+                    <div class="grow"></div>
+                    <div class="field"><label>Venues</label><input type="text" id="derivativesVenues" maxlength="64" value="" title="Comma-separated. Only bybit, binance, okx and hyperliquid are covered; anything else is refused by name."></div>
+                    <button class="btn small" id="derivativesVenuesApply">Apply</button>
+                    <div class="field"><label>Symbol</label><input type="text" id="derivativesSymbolBox" placeholder="the active instrument" maxlength="24" value="" title="Empty follows the app's active instrument; type a name here to read another one."></div>
+                    <button class="btn small" id="derivativesRefresh">Refresh</button></div>
+                <div id="derivativesBanner" class="hint"></div>
+                <div class="card"><div class="card-head"><span class="card-title">The read</span><div class="spacer"></div>
+                    <span class="dim" id="derivativesAt">—</span></div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="field"><label>Summary</label><input type="text" id="derivativesSummary" readonly data-why="derivatives.funding"></div>
+                            <div class="field"><label>Verdict</label><input type="text" id="derivativesCount" readonly></div>
+                        </div>
+                        <div class="row" id="derivativesStrip"></div>
+                        <div class="row">
+                            <div class="field"><label>Open interest</label><input type="text" id="derivativesOiTotal" readonly data-why="derivatives.oi"></div>
+                            <div class="field"><label>OI change</label><input type="text" id="derivativesOiChange" readonly></div>
+                            <div class="field"><label>Basis (median)</label><input type="text" id="derivativesBasis" readonly data-why="derivatives.basis"></div>
+                        </div>
+                        <div class="dim" id="derivativesOiNote"></div>
+                    </div></div>
+                <div class="card" id="derivativesTable"><div class="card-head"><span class="card-title">Per venue</span><div class="spacer"></div>
+                    <span class="dim" id="derivativesSymbol"></span></div>
+                    <div class="card-body" style="padding:0;overflow:auto;max-height:320px">
+                        <table class="data"><thead><tr><th>Venue</th><th>Funding</th><th>Annualised</th><th>Next</th><th>Open interest</th><th>OI change</th><th>Mark</th><th>Index</th><th>Basis</th><th>Basis (annualised)</th></tr></thead>
+                            <tbody id="derivativesRows"><tr><td colspan="10" class="dim">loading…</td></tr></tbody>
+                        </table></div></div>
+                <div class="dim" id="derivativesNotes"></div>
+            </section>
+
+            <!-- §147: synthetic instruments — ratios, spreads, baskets, basis series. -->
+            <section class="view" data-view="synthetic">
+                <div class="view-head"><div class="view-title">Synthetic</div>
+                    <div class="view-sub" id="syntheticSub">Ratios, spreads, baskets and basis series composed from each leg's own stored candles</div>
+                </div>
+            </section>
+
+            <section class="view" data-view="market-read">
+                <div class="view-head"><div class="view-title">Market read</div>
+                    <div class="view-sub" id="mrSub">Deterministic regime, conviction score, key levels, confluence — no AI required</div>
+                    <div class="grow"></div>
+                    <button class="btn small" id="mrRefresh">Refresh</button></div>
+                <div id="mrBanner" class="hint"></div>
+                <div class="card"><div class="card-head"><span class="card-title">Read</span><div class="spacer"></div>
+                    <span class="dim" id="mrSymbol">—</span></div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="field"><label>Regime</label><input type="text" id="mrRegime" data-why="marketread.regime" readonly></div>
+                            <div class="field"><label>Conviction</label><input type="text" id="mrConviction" readonly></div>
+                            <div class="field"><label>Trend score</label><input type="text" id="mrTrend" readonly></div>
+                            <div class="field"><label>Imbalance</label><input type="text" id="mrImbalance" readonly></div>
+                        </div>
+                        <div class="row">
+                            <div class="field"><label>Absorption</label><input type="text" id="mrAbsorption" readonly></div>
+                            <div class="field"><label>Liquidity</label><input type="text" id="mrLiquidity" data-why="heatmap.liquidity" readonly></div>
+                            <div class="field"><label>Levels score</label><input type="text" id="mrLevelsScore" readonly></div>
+                            <div class="field"><label>Profile / VWAP</label><input type="text" id="mrProfileVwap" readonly></div>
+                        </div>
+                        <div class="row">
+                            <div class="field"><label>Buyer-led</label><input type="text" id="mrBuyerImpulse" readonly></div>
+                            <div class="field"><label>Seller-led</label><input type="text" id="mrSellerImpulse" readonly></div>
+                            <div class="field"><label>Absorbing</label><input type="text" id="mrAbsorbing" readonly></div>
+                        </div>
+                    </div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Key levels</span><div class="spacer"></div>
+                    <span class="dim" id="mrLevels">0 levels</span></div>
+                    <div class="card-body" style="padding:0;overflow:auto;max-height:240px">
+                        <table class="data" id="mrTable">
+                            <thead><tr><th>Price</th><th>Type</th><th>Source</th><th>Strength</th></tr></thead>
+                            <tbody id="mrBody"><tr><td colspan="4" class="dim">loading…</td></tr></tbody>
+                        </table></div></div>
+                <div class="card"><div class="card-head"><span class="card-title">Summary</span></div>
+                    <div class="card-body" id="mrSummary"><div class="dim">refresh to generate</div></div></div>
+            </section>
+
+
         </main>
     </div>
 </div>
 
 <script src="/desktop/vendor/lightweight-charts.js"></script>
 <script src="/static/footprint.js"></script>
+<!-- §147 W2: wraps window.FootprintChart, so it must load after the chart itself. -->
+<script src="/desktop/orderflow.js"></script>
 <script src="/static/orderbook.js"></script>
 <script src="/static/tape.js"></script>
 <script src="/static/signals.js"></script>
 <script src="/static/performance.js"></script>
 <script src="/static/microstructure.js"></script>
+<script src="/desktop/engine-progress.js"></script>
 <script src="/desktop/ui.js"></script>
 <script src="/desktop/theme.js"></script>
 <script src="/desktop/keys.js"></script>
@@ -1354,6 +1703,7 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
 <!-- alert-format.js is pure (a rule in, words out) and atlas.js reads OFAPALERTS when it renders the
      Alerts card, so this tag must stay ahead of atlas.js. test_alert_format.py pins the order. -->
 <script src="/desktop/alert-format.js"></script>
+<script src="/desktop/alert-builder.js"></script>
 <script src="/desktop/expression.js"></script>
 <!-- B2: the heat-scheme vocabulary both heat surfaces read (OFAPRAMP). Parsed before atlas.js —
      the Heatmap's painter reads it at paint time, the Engine's colour table at build time, and
@@ -1371,6 +1721,9 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
 <script src="/desktop/pause.js"></script>
 <script src="/desktop/menu.js"></script>
 <script src="/desktop/scale.js"></script>
+<!-- §121: the heatmap's viewport state (window, rows, the pan anchor) — heatmap-pro's gestures and
+     atlas.js's loader both read it; keep this tag ahead of heatmap-pro.js. -->
+<script src="/desktop/heatview.js"></script>
 <script src="/desktop/heatmap-pro.js"></script>
 <script src="/desktop/cursor-link.js"></script>
 <script src="/desktop/strips.js"></script>
@@ -1378,6 +1731,8 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
 <script src="/desktop/instrument.js"></script>
 <script src="/desktop/lookup.js"></script>
 <script src="/desktop/hint.js"></script>
+<!-- §147: the metric-explanation registry feeds hint.js’s cards, so it loads after hint.js. -->
+<script src="/desktop/why.js"></script>
 <script src="/desktop/systems.js"></script>
 <script src="/desktop/ofx-view.js"></script>
 <script src="/desktop/marketwatch.js"></script>
@@ -1406,6 +1761,19 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
 <script src="/desktop/news.js"></script>
 <script src="/desktop/fundamentals.js"></script>
 <script src="/desktop/options.js"></script>
+<!-- §136: the options-analytics family — GEX, the volatility surface, option flow, and the
+     deterministic market read. Each one is a read-only panel over /api/options/* and
+     /api/atlas/market-read/*; gex.js, volatility.js and option-flow.js share the "chain source"
+     idea, market-read.js reads the engine's own live state through the atlas hub. -->
+<script src="/desktop/gex.js"></script>
+<script src="/desktop/volatility.js"></script>
+<script src="/desktop/option-flow.js"></script>
+<script src="/desktop/market-read.js"></script>
+<script src="/desktop/depth-history.js"></script>
+<script src="/desktop/sessions.js"></script>
+<script src="/desktop/data-quality.js"></script>
+<script src="/desktop/derivatives.js"></script>
+<script src="/desktop/synthetic.js"></script>
 <script src="/desktop/profiles.js"></script>
 <!-- §79: the Help Centre. help-data.js is the topic corpus (pure data), help-search.js the search
      engine (pure, pinned by help-search.selftest.js under node) and help.js the panel itself: the
@@ -1414,6 +1782,10 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
 <script src="/desktop/help-data.js"></script>
 <script src="/desktop/help-search.js"></script>
 <script src="/desktop/help.js"></script>
+<script src="/desktop/navreturn.js"></script>
+<script src="/desktop/presets.js"></script>
+<script src="/desktop/tips.js"></script>
+<script src="/desktop/feedkeys.js"></script>
   <div class="statusbar">
     <span>source: <b id="statusSource">—</b></span>
     <span>workspace: <b id="statusWorkspace">default</b></span>
@@ -1423,6 +1795,7 @@ if (v.scale && v.scale !== 1) { d.style.setProperty('--ui-scale', String(v.scale
     <span id="statusDelay" class="status-delay" hidden>market data delayed</span>
     <span id="statusPause" class="dim" hidden>feeds paused</span>
     <span id="statusProfileHold" class="dim" style="cursor:pointer" hidden></span>
+    <span id="statusProfileChip" class="dim" style="cursor:pointer" hidden></span>
     <span>tab: <b id="statusTab">—</b></span>
     <span>widgets: <b id="statusWidgets">0</b></span>
     <span>feed: <b id="statusFeed">—</b></span>

@@ -33,6 +33,17 @@ APP_DIR_NAME = "OrderFlowAnalysisPro"
 #: Module identifiers for studies (`name` in a the suite's definition).
 _STUDY_NAME_RE = __import__("re").compile(r"^[A-Za-z][A-Za-z0-9_-]{1,40}$")
 
+def _clean_symbol(raw: Any) -> str:
+    """A symbol the app can render and request: A-Z, 0-9, dot, underscore, hyphen (max 24).
+
+    RA-01: symbols reach `innerHTML` in the Engine readout, so the character set is the store's
+    job, not each renderer's. Broker-side names keep their own case-preserving fields
+    (`mt5_symbol`, `ninjatrader_symbol`) and are deliberately not touched here.
+    """
+    return "".join(ch for ch in str(raw or "").strip().upper()
+                   if ch.isalnum() or ch in "._-")[:24]
+
+
 def _clean_study_list(raw: Any) -> list[dict[str, Any]]:
     """One study list, clamped: identifier names, scalar params, a visible flag, capped at 40.
 
@@ -90,8 +101,10 @@ LAYOUT_MAX_ITEMS = 24
 # A profile is a named bundle of the blocks that define HOW you read a market. Everything in
 # PROFILE_BLOCKS is analysis state, so a profile is safe to export, share and import by
 # construction. Deliberately NOT in a profile: telegram/notify/platforms/alpaca/mt5 (credentials),
-# dashboard (host/port — per machine), storage (paths), updates, logging, data, drawings/markers
-# (working annotations), search (history), help and version. `profile_capture()` reads only from
+# Dashboard (host/port — per machine), storage (paths), updates, logging, data, drawings/markers
+# (working annotations), search (history), help and version. Deliberately NOT in a profile either:
+# the REST feed blocks (tradier/marketdata/finnhub) — their keys are credentials, and a shared
+# profile must never carry one. `profile_capture()` reads only from
 # this tuple and the sanitiser drops anything else, so no path into a snapshot can carry a secret.
 PROFILE_BLOCKS = ("data_source", "instruments", "atlas", "ofx", "studies", "expression",
                   "ui", "layouts", "workspaces", "watchlist", "risk", "audio", "calendar")
@@ -99,7 +112,7 @@ PROFILE_BLOCKS = ("data_source", "instruments", "atlas", "ofx", "studies", "expr
 #: UI can say "takes effect on the next engine start" exactly the way the settings view does.
 PROFILE_RESTART_BLOCKS = ("data_source", "instruments", "atlas", "ofx")
 #: Feed names a rules.sources entry may name (the values data_source accepts).
-PROFILE_SOURCES = ("mt5", "bybit", "binance", "hyperliquid", "okx", "alpaca", "ninjatrader")
+PROFILE_SOURCES = ("mt5", "bybit", "binance", "hyperliquid", "okx", "alpaca", "ninjatrader", "tradier", "marketdata", "finnhub")
 PROFILE_ID_RE = __import__("re").compile(r"^pf[0-9a-f]{8}$")
 PROFILE_TIME_RE = __import__("re").compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
 PROFILE_NAME_MAX = 32
@@ -127,7 +140,8 @@ VIEW_DEFAULT_MAP: dict[str, tuple[str, ...]] = {
 #: `_sanitise` clamps `ui.chart.tf` to this set so the file and the dropdown agree on what is legal.
 CHART_TFS: tuple[int, ...] = (60, 300, 900, 3600, 14400, 86400)
 
-LAYOUT_VERSIONS_MAX = 10                             # previous versions kept per layout
+LAYOUT_VERSIONS_MAX = 10                             # the hard ceiling on previous versions per layout
+LAYOUT_VERSIONS_KEEP = 5                             # what auto-cull keeps (the default depth)
 LAYOUT_MAX_TABS = 12
 LAYOUT_MAX_WIDGETS = 24
 
@@ -328,6 +342,64 @@ ASSET_CLASS = {
 ASSET_CLASS.update({sym: "Crypto" for sym in BYBIT_FALLBACK_SYMBOLS})
 
 
+def _feature_defaults(dotted: str) -> dict[str, Any]:
+    """§147: a feature block's default dict, imported from the module that owns it.
+
+    A copy is returned — the config is mutated in place all over the app, and a module's own
+    DEFAULTS must never learn from it. A module that cannot be imported contributes an empty
+    block rather than taking the whole config down with it.
+    """
+    try:
+        import importlib
+
+        module = importlib.import_module(dotted)
+        block = getattr(module, "DEFAULTS", None)
+    except Exception:
+        return {}
+    try:
+        return json.loads(json.dumps(block)) if isinstance(block, dict) else {}
+    except Exception:
+        return {}
+
+
+def _feature_sanitise(cfg: dict[str, Any], dotted_block: str, dotted_module: str) -> None:
+    """§147: run one feature module's own `clean()` over its block, in place.
+
+    The block is created when missing, and every key the module knows is written back coerced and
+    clamped. A module that cannot be imported (or raises) leaves the block exactly as it found it:
+    saving a config must never fail because a feature moved.
+    """
+    try:
+        import importlib
+
+        module = importlib.import_module(dotted_module)
+        cleaner = getattr(module, "clean", None)
+        if not callable(cleaner):
+            return
+        node: dict[str, Any] = cfg
+        parts = dotted_block.split(".")
+        for part in parts[:-1]:
+            child = node.get(part)
+            if not isinstance(child, dict):
+                child = {}
+                node[part] = child
+            node = child
+        block = node.get(parts[-1])
+        if not isinstance(block, dict):
+            block = {}
+        # Seed from the module's shipped defaults first: a clean() that only clamps the keys it is
+        # handed would otherwise leave a fresh config without the feature's own keys at all.
+        defaults = getattr(module, "DEFAULTS", None)
+        seeded = dict(defaults) if isinstance(defaults, dict) else {}
+        seeded.update(block)
+        cleaned = cleaner(seeded)
+        if isinstance(cleaned, dict):
+            block.update(cleaned)
+            node[parts[-1]] = block
+    except Exception:
+        return
+
+
 def default_config() -> dict[str, Any]:
     """Build the default config straight from the repo's settings module."""
     from orderflow_system.config.settings import get_all_configs, MT5, ALPACA as ALPACA_SETTINGS
@@ -384,7 +456,11 @@ def default_config() -> dict[str, Any]:
         # Free market context (no keys): venue funding/open interest/long-short
         # ratio, Fear & Greed, and RSS headlines.
         "context": {"enabled": True, "positioning": True, "fear_greed": True,
-                    "news": True, "news_url": "", "news_limit": 8},
+                    "news": True, "news_url": "", "news_limit": 8,
+                    # Which headlines the News panel reads: "feeds" = the built-in RSS set (or
+                    # `news_url` when set), "finnhub" = Finnhub's news API (your key, from
+                    # Settings ▸ Feed keys).
+                    "news_source": "feeds"},
         "dashboard": {"host": "127.0.0.1", "port": 8080},
         # Third-party platform bridge. the DTC platform is reachable over its DTC server, so its
         # connection details live here (like the Alpaca keys: per-user config, never in the
@@ -494,9 +570,10 @@ def default_config() -> dict[str, Any]:
             "vwap": {"window_s": 86400, "bands": [1, 2, 3], "cross_min_ticks": 1.0},
             # Numbers-Bars pack: the imbalance convention, its ratio, and the print-size
             # filter applied while building bars (0 = keep every print).
-            "footprint": {"min_print_size": 0.0, "imbalance_mode": "same_price",
-                          "imbalance_threshold": 3.0, "equal_tolerance": 0.0,
-                          "show_equal": True, "show_extremes": True},
+            # §147 W2: the footprint block is the module's own DEFAULTS now — its original six
+            # keys plus the fifteen the settings drawer owns, so the registry can name every one
+            # and the store clamps them all through the same clean().
+            "footprint": _feature_defaults("orderflow_system.atlas.footprint_config"),
             # Level reads (fold-in plan §3): unfinished-business magnets drawn until price
             # revisits them, and node runs (consecutive bars sharing one high-volume price).
             # Both are fed from closed bars; a disabled row stops feeding and dispatching.
@@ -516,6 +593,11 @@ def default_config() -> dict[str, Any]:
             # 60 s; atlas/freshness.py is the table of record and test_freshness.py keeps the JS
             # copy equal). Display-only: the server's own windows are unchanged.
             "freshness": {"depth_s": 0, "quote_s": 0, "trades_s": 0, "candles_s": 0},
+            # §147 (upgrade package): atlas-side feature blocks; their defaults live with the
+            # module that owns them, so there is only ever one copy of a shipped default.
+            "depth_history": _feature_defaults("orderflow_system.atlas.depth_history"),
+            "alert_builder": _feature_defaults("orderflow_system.atlas.alerts"),
+            "synthetic": _feature_defaults("orderflow_system.atlas.synthetic"),
             # scanner: cross-instrument ranking window (seconds)
             "scanner_window_s": 900,
             # participants' intent: DOM pressure weighting + training window (sensible defaults)
@@ -535,6 +617,29 @@ def default_config() -> dict[str, Any]:
             "feed": "iex",                 # iex | sip | delayed_sip (entitlement)
             "snapshot_seconds": 5.0,
             "view_symbols": ["AAPL", "MSFT", "NVDA", "SPY", "QQQ"],
+        },
+        # Tradier (optional): real-time OPRA options chains for US equities.
+        # A free brokerage account is enough; keys are per-environment.
+        "tradier": {
+            "enabled": False, "key_id": "", "secret": "",
+            "chain_width": 6,              # strikes around forward per expiry
+            "sandbox": False,              # sandbox.tradier.com when True
+            "view_symbols": ["SPY", "QQQ", "IWM", "AAPL", "TSLA"],
+        },
+        # Market Data (optional): OPRA chains with server-side greeks.
+        # Requires a Market Data account (~$30/mo); key is per-environment.
+        "marketdata": {
+            "enabled": False, "api_key": "",
+            "view_symbols": ["SPY", "QQQ", "IWM"],
+        },
+        # Finnhub (optional): economic calendar + news headlines.
+        # Free tier allows 60 calls/minute; key is per-environment.
+        "finnhub": {
+            "enabled": False, "api_key": "",
+            "calendar_category": "all",   # all | forex | crypto | indices | stocks
+            "calendar_days": 7,
+            "news_category": "general",
+            "view_symbols": ["SPY", "QQQ", "NVDA"],
         },
         "mt5": {
             "login": 0, "password": "", "server": "", "path": "",
@@ -561,6 +666,12 @@ def default_config() -> dict[str, Any]:
             "alerts": False,           # tell me before high-impact events
             "lead_minutes": 15,        # how long before
             "currencies": "",          # "USD,EUR" — empty = every currency
+            "hours": 48,               # the view's window (hours ahead)
+            "impact": "high",          # the view's minimum impact (high | medium | low)
+            # Which feed the VIEW reads: "builtin" = the keyless weekly JSON (Forex Factory via
+            # nfs.faireconomy.media), "finnhub" = the Finnhub economic calendar (your key, from
+            # Settings ▸ Feed keys). The alert line keeps reading the built-in feed either way.
+            "source": "builtin",
         },
         # R7: program updates. The app ships from a public repo; a check costs one keyless API
         # call, so the only real decisions are how often, which channel, and whether to fetch the
@@ -586,6 +697,12 @@ def default_config() -> dict[str, Any]:
             "email_report": False,         # email a report after every automatic backup
             "email_threshold": True,       # email when the size budget is passed
         },
+        # §147 (upgrade package): top-level feature blocks, the same shape as "storage".
+        "data_quality": _feature_defaults("orderflow_system.atlas.dataquality"),
+        "derivatives": _feature_defaults("orderflow_system.atlas.derivatives"),
+        "sessions": _feature_defaults("orderflow_system.atlas.sessions"),
+        "atm": _feature_defaults("orderflow_system.desktop.atm"),
+        "orders": _feature_defaults("orderflow_system.desktop.orders"),
         # GUI-only flags. The engine never reads these; they exist so the front end
         # can remember what the user already saw without a second storage file.
         "ui": {
@@ -593,6 +710,13 @@ def default_config() -> dict[str, Any]:
             # reload, and cleared at the next start while the account is unlinked
             "banner_dismissed_alpaca": False,
             "layout_lock": False,
+            # §129: auto-cull for a layout's previous versions. ON (the default) keeps the 5 most
+            # recent and drops the rest as you save; OFF keeps up to LAYOUT_VERSIONS_MAX (10).
+            # Every version is a full copy of the layout, so the file grows with the depth.
+            "layout_versions_autocull": True,
+            # §149b: the Overview's systems board folded to its header (ui.js, #systemsHide)
+            # — a ui setting so the fold survives reloads and cleared caches alike
+            "systems_hidden": False,
             "heatmap_minimal": False,    # T5/A10: the heatmap’s chrome-lite mode
             "view_defaults": {},          # T6/A15: remembered per-view settings (view → path → subtree)
             "paper_lock": False,
@@ -608,6 +732,8 @@ def default_config() -> dict[str, Any]:
             "scale": 1.0,                # 0.75–1.5, step 0.05
             # T11/B17: link-group colours (A–D) — the group letter always rides beside the colour.
             "link_colors": {"A": "#6ec1ff", "B": "#ffb454", "C": "#7fe0a8", "D": "#d49bff"},
+            # File ▸ Recent: the last handful of workspaces / profiles / layouts opened.
+            "recent": [],
             # §117: the user’s own chords — binding id → canonical chords (keys.js is the
             # authority on what an id means; the store guards the shape only). The sanitiser
             # REBUILDS this block on every save, so an override the sheet removed (posted as [])
@@ -759,6 +885,14 @@ SECRET_PATHS = (
     "alpaca.key_id",
     "alpaca.secret",
     "mt5.password",
+    # The optional REST feeds (OPRA chains + Finnhub): added to the store with their blocks, and
+    # every one of these must be listed here or GET /config answers the key in plain text — the
+    # masking contract is a list, so a new feed is a new line. Pinned by test_security_fixes.py
+    # (a sweep that walks the feed blocks and fails on any credential-looking leaf left uncovered).
+    "tradier.key_id",
+    "tradier.secret",
+    "marketdata.api_key",
+    "finnhub.api_key",
 )
 
 
@@ -1179,6 +1313,16 @@ def _sanitise_layouts(cfg: dict[str, Any]) -> None:
     block["versions"] = versions
 
 
+def layout_versions_autocull(cfg: dict[str, Any]) -> bool:
+    """Is a layout's previous-version ring culled to LAYOUT_VERSIONS_KEEP as it grows? (§129)
+
+    Reading it here keeps the ONE rule in one place: the route that pushes a version, the route
+    that culls on demand and the UI's own labels all ask this function.
+    """
+    ui = cfg.get("ui") if isinstance(cfg.get("ui"), dict) else {}
+    return bool(ui.get("layout_versions_autocull", True))
+
+
 def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     """Clamp/coerce user input so a bad value can never kill the engine."""
     cfg["data_source"] = str(cfg.get("data_source", "bybit")).lower()
@@ -1360,6 +1504,7 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
                 "view": str(entry.get("view") or "")[:24],
                 "hidden": bool(entry.get("hidden")),
                 "single": bool(entry.get("single")),
+                "snap45": bool(entry.get("snap45")),
                 "style": {
                     "line": _colour(default_style_in.get("line"), "#4f8cff"),
                     "fill": _colour(default_style_in.get("fill"), "rgba(79,140,255,.14)"),
@@ -1425,7 +1570,7 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
         node["mode"] = node.get("mode") if node.get("mode") in EXPRESSION_MODES else "default"
         node["palette"] = node.get("palette") if node.get("palette") in EXPRESSION_PALETTES else "theme"
     if cfg["data_source"] not in ("mt5", "bybit", "binance", "hyperliquid", "okx", "both", "alpaca",
-                                  "ninjatrader", "all"):
+                                  "ninjatrader", "all", "tradier", "marketdata", "finnhub"):
         cfg["data_source"] = "bybit"
 
     sierra_block = (cfg.get("platforms") or {}).get("sierra")
@@ -1460,7 +1605,7 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     # a hand-edited file could hold anything here; the engine needs a list of mappings
     cfg["instruments"] = [i for i in (cfg.get("instruments") or []) if isinstance(i, dict)]
     for inst in cfg["instruments"]:
-        inst["symbol"] = str(inst.get("symbol", "")).upper()
+        inst["symbol"] = _clean_symbol(inst.get("symbol", ""))
         inst["enabled"] = bool(inst.get("enabled", False))
         # SEC-05: 0 or NaN here divided the tick path by zero (candle builder, volume profile).
         # Bounded like every other number the store keeps.
@@ -1468,6 +1613,10 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
         if inst.get("ninjatrader_symbol"):
             # Case is the terminal's: "NQ 12-26" is a name, not a ticker — never fold it.
             inst["ninjatrader_symbol"] = str(inst["ninjatrader_symbol"]).strip()[:48]
+
+    # RA-01: a symbol that cleans to nothing (junk, or every character outside the set) is
+    # dropped — a nameless row would confuse the engine, the picker and the look-up alike.
+    cfg["instruments"] = [i for i in cfg["instruments"] if i["symbol"]]
 
     risk = _block(cfg, "risk")
     for key, default in (("signal_cooldown_seconds", 30.0), ("min_composite_score", 40.0)):
@@ -1491,13 +1640,36 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     audio["overlap_window_ms"] = int(_clamp(audio.get("overlap_window_ms", 10), 0, 5000, 10))
     audio["overlap_floor"] = round(_clamp(audio.get("overlap_floor", 0.25), 0.01, 1.0, 0.25), 3)
 
+    # F-7 (control-surface audit): the calendar view's window and impact filters are user-visible
+    # state — saved on change and restored at boot like the rest of the block (§83's rule).
+    cal = _block(cfg, "calendar")
+    cal["alerts"] = bool(cal.get("alerts", False))
+    cal["lead_minutes"] = int(_clamp(cal.get("lead_minutes", 15), 1.0, 240.0, 15.0))
+    cal["currencies"] = str(cal.get("currencies") or "")[:64]
+    cal["hours"] = int(_clamp(cal.get("hours", 48), 1.0, 720.0, 48.0))
+    cal["impact"] = cal.get("impact") if cal.get("impact") in ("high", "medium", "low") else "high"
+    # Which feed the VIEW reads (the route's whitelist mirrored here, so a junk value can never
+    # reach it): "builtin" is the keyless weekly JSON, "finnhub" the Finnhub calendar.
+    cal["source"] = cal.get("source") if cal.get("source") in ("builtin", "finnhub") else "builtin"
+
+    # The market-context news lane. Only the lane is claimed here — the rest of the block is the
+    # context module's own business and is left exactly as stored.
+    ctx_block = _block(cfg, "context")
+    news_src = str(ctx_block.get("news_source", "feeds") or "feeds").lower()
+    ctx_block["news_source"] = news_src if news_src in ("feeds", "finnhub") else "feeds"
+
     search = _block(cfg, "search")
     search["recents"] = [str(s).strip().upper() for s in (search.get("recents") or [])
                          if isinstance(s, str) and s.strip()][:12]
     search["pins"] = [str(s).strip().upper() for s in (search.get("pins") or [])
                       if isinstance(s, str) and s.strip()][:30]
     view = str(search.get("default_view") or "orderflow")
-    search["default_view"] = view if view in ("orderflow", "chart", "tape", "heatmap", "cvd", "profile") else "orderflow"
+    # The palette's "Enter lands on" control offers the registry's 13 landing views (param_registry
+    # `search.default_view`); the store must keep every one of them — the generic enum round-trip
+    # pin in test_param_registry.py holds the two lists equal from here on.
+    search["default_view"] = view if view in ("overview", "chart", "heatmap", "orderflow", "ofx",
+                                              "depth", "tape", "cvd", "profile", "frames", "scanner",
+                                              "trackers", "signals") else "orderflow"
 
     fresh = _block(_block(cfg, "atlas"), "freshness")
     _fresh_clean: dict[str, float] = {}
@@ -1535,10 +1707,25 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     _acols["reset"] = _acols.get("reset") if _acols.get("reset") in ("manual", "scheduled", "conditional") else "manual"
     _acols["threshold"] = _clamp(_acols.get("threshold", 500), 0.0, 1e9, 500.0)
     _acols["reset_s"] = _clamp(_acols.get("reset_s", 30), 5.0, 600.0, 30.0)
+    # The list kind's first editable variable: VWAP sigma bands, plus the two numbers beside them
+     # — the registry's bounds are the authority and the store is the last word (F-4's rule).
+    _vwap = _block(_block(cfg, "atlas"), "vwap")
+    _vwap["window_s"] = int(_clamp(_vwap.get("window_s", 86400), 300.0, 604800.0, 86400.0))
+    _bands_in = _vwap.get("bands") if isinstance(_vwap.get("bands"), list) else [1, 2, 3]
+    _bands_out: list[float] = []
+    for _band in _bands_in[:8]:
+        try:
+            _band_v = float(_band)
+        except (TypeError, ValueError):
+            continue
+        if _band_v == _band_v and 0.0 < _band_v < 1e6:          # NaN guard; a sigma multiplier is positive
+            _bands_out.append(round(_band_v, 4))
+    _vwap["bands"] = _bands_out or [1, 2, 3]
+    _vwap["cross_min_ticks"] = round(_clamp(_vwap.get("cross_min_ticks", 1.0), 0.0, 100.0, 1.0), 3)
     fp = _block(_block(cfg, "atlas"), "footprint")
     fp["min_print_size"] = max(0.0, float(fp.get("min_print_size", 0.0) or 0.0))
     mode = str(fp.get("imbalance_mode", "same_price") or "same_price").lower()
-    fp["imbalance_mode"] = mode if mode in ("same_price", "diagonal") else "same_price"
+    fp["imbalance_mode"] = mode if mode in ("same_price", "diagonal", "both") else "same_price"
     try:
         fp["imbalance_threshold"] = min(50.0, max(1.0, float(fp.get("imbalance_threshold", 3.0) or 3.0)))
     except (TypeError, ValueError):
@@ -1576,6 +1763,8 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     ui = _block(cfg, "ui")
     ui["banner_dismissed_alpaca"] = bool(ui.get("banner_dismissed_alpaca", False))
     ui["layout_lock"] = bool(ui.get("layout_lock", False))
+    ui["layout_versions_autocull"] = bool(ui.get("layout_versions_autocull", True))
+    ui["systems_hidden"] = bool(ui.get("systems_hidden", False))
     ui["heatmap_minimal"] = ui.get("heatmap_minimal") is True
     _vd = ui.get("view_defaults")
     _vdc: dict[str, dict[str, Any]] = {}
@@ -1634,6 +1823,20 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
         if _ky_keep:
             _ky_out[_ky_id] = _ky_keep
     ui["keys"] = {"version": 1, "overrides": _ky_out}
+    # File ▸ Recent — whitelisted kinds, short names, capped; anything else is dropped silently.
+    _rec_in = ui.get("recent") if isinstance(ui.get("recent"), list) else []
+    _rec_out = []
+    for _rec in _rec_in[:8]:
+        if not isinstance(_rec, dict):
+            continue
+        _rec_kind = _rec.get("kind")
+        _rec_name = str(_rec.get("name") or "").strip()[:40]
+        if _rec_kind not in ("workspace", "profile", "layout") or not _rec_name:
+            continue
+        _rec_out.append({"kind": _rec_kind, "name": _rec_name,
+                         "id": str(_rec.get("id") or "").strip()[:40],
+                         "at": int(_clamp(_rec.get("at", 0), 0.0, 4102444800000.0, 0.0))})
+    ui["recent"] = _rec_out
     # T12/B9: per-instrument display blocks — known paths only, values the params gate would
     # take, at most 40 instruments, symbols in the same shape the instruments block uses.
     _isx_in = ui.get("instrument_scopes") if isinstance(ui.get("instrument_scopes"), dict) else {}
@@ -1660,7 +1863,7 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     # T14/B6: the look-up overlay’s filters — small, known shapes, nothing that can break a paint.
     _lk = ui.get("lookup") if isinstance(ui.get("lookup"), dict) else {}
     ui["lookup"] = {
-        "source": _lk.get("source") if _lk.get("source") in ("all", "bybit", "mt5", "alpaca") else "all",
+        "source": _lk.get("source") if _lk.get("source") in ("all", "bybit", "mt5", "alpaca", "tradier", "marketdata", "finnhub") else "all",
         "type": (str(_lk.get("type") or "all")[:24] or "all"),
         "text": str(_lk.get("text") or "")[:120],
     }
@@ -1741,6 +1944,48 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     help_cfg["dismissed"] = ([str(t).strip() for t in dismissed if isinstance(t, str) and t.strip()][:24]
                              if isinstance(dismissed, list) else [])
 
+    # Tradier: keys, chain width, sandbox flag, view symbols.
+    trd = _block(cfg, "tradier")
+    trd["enabled"] = bool(trd.get("enabled", False))
+    trd["key_id"] = str(trd.get("key_id", "") or "").strip()
+    trd["secret"] = str(trd.get("secret", "") or "").strip()
+    try:
+        trd["chain_width"] = min(max(int(trd.get("chain_width", 6)), 1), 20)
+    except (TypeError, ValueError):
+        trd["chain_width"] = 6
+    trd["sandbox"] = bool(trd.get("sandbox", False))
+    syms = trd.get("view_symbols", []) or []
+    if not isinstance(syms, list):
+        syms = []
+    trd["view_symbols"] = [s.strip().upper() for s in syms if isinstance(s, str) and s.strip()][:30]
+
+    # Market Data: API key, view symbols.
+    mda = _block(cfg, "marketdata")
+    mda["enabled"] = bool(mda.get("enabled", False))
+    mda["api_key"] = str(mda.get("api_key", "") or "").strip()
+    syms = mda.get("view_symbols", []) or []
+    if not isinstance(syms, list):
+        syms = []
+    mda["view_symbols"] = [s.strip().upper() for s in syms if isinstance(s, str) and s.strip()][:30]
+
+    # Finnhub: API key, calendar category, calendar days, news category, view symbols.
+    fnh = _block(cfg, "finnhub")
+    fnh["enabled"] = bool(fnh.get("enabled", False))
+    fnh["api_key"] = str(fnh.get("api_key", "") or "").strip()
+    cat = str(fnh.get("calendar_category", "all") or "all").lower()
+    fnh["calendar_category"] = cat if cat in ("all", "forex", "crypto", "indices", "stocks") else "all"
+    try:
+        fnh["calendar_days"] = min(max(int(fnh.get("calendar_days", 7)), 1), 30)
+    except (TypeError, ValueError):
+        fnh["calendar_days"] = 7
+    ncat = str(fnh.get("news_category", "general") or "general").lower()
+    fnh["news_category"] = ncat if ncat in ("general", "federalReserve", "economic", "company", "markets") else "general"
+    syms = fnh.get("view_symbols", []) or []
+    if not isinstance(syms, list):
+        syms = []
+    fnh["view_symbols"] = [s.strip().upper() for s in syms if isinstance(s, str) and s.strip()][:30]
+
+    # Alpaca: (existing sanitisation below — do not remove)
     alp = _block(cfg, "alpaca")
     feed = str(alp.get("feed", "iex") or "iex").lower()
     alp["feed"] = feed if feed in ("iex", "sip", "delayed_sip") else "iex"
@@ -1756,6 +2001,18 @@ def _sanitise(cfg: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(syms, list):
         syms = []
     alp["view_symbols"] = [s.strip().upper() for s in syms if isinstance(s, str) and s.strip()][:30]
+    # §147 (upgrade package): each feature cleans its own block — coerce and clamp, never raise.
+    # A block whose module cannot be imported is left exactly as it was.
+    _feature_sanitise(cfg, "atm", "orderflow_system.desktop.atm")
+    _feature_sanitise(cfg, "orders", "orderflow_system.desktop.orders")
+    _feature_sanitise(cfg, "data_quality", "orderflow_system.atlas.dataquality")
+    _feature_sanitise(cfg, "derivatives", "orderflow_system.atlas.derivatives")
+    _feature_sanitise(cfg, "sessions", "orderflow_system.atlas.sessions")
+    _feature_sanitise(cfg, "atlas.footprint", "orderflow_system.atlas.footprint_config")
+    _feature_sanitise(cfg, "atlas.depth_history", "orderflow_system.atlas.depth_history")
+    _feature_sanitise(cfg, "atlas.alert_builder", "orderflow_system.atlas.alerts")
+    _feature_sanitise(cfg, "atlas.synthetic", "orderflow_system.atlas.synthetic")
+
     return cfg
 
 

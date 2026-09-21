@@ -58,6 +58,18 @@ def test_ui_values_are_coerced(store):
         assert clean["ui"]["wizard_resume_step"] == 0, f"{bad!r} must fall back to the start"
 
 
+def test_the_systems_board_fold_is_a_ui_setting(store):
+    """§149b: the Overview's Systems board folds via #systemsHide; the choice persists as
+    ui.systems_hidden (the banner flag's pattern) — off by default, coerced from junk."""
+    assert store.default_config()["ui"]["systems_hidden"] is False
+    cfg = store.load_config()
+    cfg["ui"]["systems_hidden"] = True
+    store.save_config(cfg)
+    assert store.load_config()["ui"]["systems_hidden"] is True
+    clean = store.save_config({"ui": {"systems_hidden": "yes"}})
+    assert clean["ui"]["systems_hidden"] is True
+
+
 def test_wizard_alpaca_block_round_trips(store):
     """The exact shape the wizard's Alpaca step writes into the config."""
     clean = store.save_config({"alpaca": {"enabled": True, "paper": False, "key_id": " PK123 ",

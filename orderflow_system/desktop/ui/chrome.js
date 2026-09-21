@@ -67,9 +67,10 @@
     }
     function wire() {
         restore();
-        /* §92: the physical controls — a hide button on each bar, a reveal button for each that
-           exists only while its bar is hidden (never a dead control). */
-        [['#mbHide', 'menubar'], ['#menubarToggle', 'menubar'],
+        /* §92/§119: the physical controls — the rail's own hide button, the rail's edge reveal
+           (visible only while hidden), and the persistent topbar toggle for the menu bar. The
+           bar's in-bar "hide" was removed (§119): one action, one control. */
+        [['#menubarToggle', 'menubar'],
          ['#railToggle', 'rail'], ['#railHide', 'rail'], ['#railReveal', 'rail']].forEach(function (pair) {
             var el = document.querySelector(pair[0]);
             if (el) el.addEventListener('click', function () { toggle(pair[1]); });
@@ -81,7 +82,19 @@
             if (!head) return;
             if (ev.target.closest('button, input, select, a')) return;   // controls keep their clicks
             var card = head.closest('.card');
-            if (card) card.classList.toggle('card-collapsed');
+            if (card) {
+                card.classList.toggle('card-collapsed');
+                /* §119: a fold with no stated way back reads as a dead header — the title says it,
+                   and the original title comes back on unfold. */
+                var folded = card.classList.contains('card-collapsed');
+                if (folded) {
+                    if (head.dataset.ofapFoldTitle === undefined) head.dataset.ofapFoldTitle = head.title || '';
+                    head.title = 'Double-click to unfold this card';
+                } else if (head.dataset.ofapFoldTitle !== undefined) {
+                    head.title = head.dataset.ofapFoldTitle;
+                    delete head.dataset.ofapFoldTitle;
+                }
+            }
         });
         if (window.OFAPKEYS && OFAPKEYS.annotate) OFAPKEYS.annotate();
         if (window.OFAPKEYS) {

@@ -549,8 +549,11 @@ def chain(symbol: Any = "", expiry: str = "", width: int = DEFAULT_WIDTH) -> dic
     ladder, centre_strike = build_ladder(window_rows, fetched_rows, forward, span)
 
     quoted = sum(1 for entry in ladder for side in ("call", "put") if entry[side] is not None)
+    # "0 read" is not "nothing there": a warm ticker cache answers the whole window without a
+    # request, and the note has to say so or it reads like an empty chain.
+    warm = "" if (fetched or ticker_errors) else " — all of them from the 3 s ticker cache"
     note = (f"bid, ask, IV, open interest, volume and the Greeks come from Deribit's per-instrument "
-            f"ticker ({fetched} read, {ticker_errors} failed); the ladder is the +/-{span} strikes "
+            f"ticker ({fetched} read, {ticker_errors} failed{warm}); the ladder is the +/-{span} strikes "
             f"around {centre_strike:g}. Deribit's spacing is not uniform, so strikes are listed as "
             f"the venue publishes them.")
     if probe_error:

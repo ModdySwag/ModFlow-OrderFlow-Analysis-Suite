@@ -32,9 +32,9 @@ const S = {
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
-const fmt = (v, d = 2) => (v === null || v === undefined || Number.isNaN(v)) ? '--' : Number(v).toFixed(d);
+const fmt = (v, d = 2) => (v === null || v === undefined || Number.isNaN(v)) ? '—' : Number(v).toFixed(d);
 const compact = (v) => {
-    if (v === null || v === undefined) return '--';
+    if (v === null || v === undefined) return '—';
     const a = Math.abs(v), s = v < 0 ? '-' : '';
     if (a >= 1e9) return s + (a / 1e9).toFixed(2) + 'B';
     if (a >= 1e6) return s + (a / 1e6).toFixed(2) + 'M';
@@ -53,10 +53,10 @@ async function api(path, opts = {}) {
     return res.json();
 }
 
-function toast(el, text, kind = 'info') {
+function toast(el, text, kind = 'info', topic = '') {
     if (!el) return;
     /* A notice aimed at <body> gets its OWN fixed strip, never the page: assigning innerHTML to the
-       body REPLACES every view with the banner -- measured live, where one client error (a colour
+       body REPLACES every view with the banner — measured live, where one client error (a colour
        the chart vendor refused) left a dead window behind a red banner. Call sites that address the
        body all mean "say this", so the routing lives here, once, for every future caller too. */
     if (el === document.body) {
@@ -68,9 +68,22 @@ function toast(el, text, kind = 'info') {
         }
         el = strip;
     }
-    el.innerHTML = `<div class="banner ${kind}">${esc(text)}</div>`;
+    el.innerHTML = `<div class="banner ${kind}">${esc(text)}${topic && window.OFAPHELP
+        ? ` <span class="toast-topic" data-topic="${esc(topic)}" role="link" tabindex="0" title="Open this in the Help Centre" style="text-decoration:underline;cursor:pointer">Help \u2192</span>`
+        : ''}</div>`;
 }
 function clearToast(el) { if (el) el.innerHTML = ''; }
+/* The Help \u2192 door a toast can carry (engine faults, skipped instruments, save failures).
+   One delegated click on the document: every toast() call replaces a banner wholesale, so a
+   listener attached per-banner would be orphaned by the next message. */
+if (typeof document !== 'undefined') {
+    document.addEventListener('click', (ev) => {
+        const t = ev.target && ev.target.closest ? ev.target.closest('.toast-topic') : null;
+        if (t && window.OFAPHELP && typeof OFAPHELP.open === 'function') {
+            OFAPHELP.open(t.dataset.topic);
+        }
+    });
+}
 
 /* ── navigation ─────────────────────────────────────────────── */
 function showView(name) {
@@ -82,7 +95,9 @@ function showView(name) {
     }
     $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
     $$('.view').forEach((v) => v.classList.toggle('active', v.dataset.view === name));
-    if (location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
+    /* §128: an auxiliary window (window.OFAPAUX) hosts one widget and routes NOTHING — writing a
+       routing hash there is what put `#overview` back into the window's URL after §73 cleared it. */
+    if (!window.OFAPAUX && location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
     ensurePanel(name);
     if (name === 'platforms' && typeof platformsInit === 'function') platformsInit();
     if (name === 'studies' && typeof studiesInit === 'function') studiesInit();
@@ -114,6 +129,8 @@ async function boot() {
     try {
         const data = await api('/api/control/bootstrap');
         S.config = data.config;
+        /* §149b: the systems-board fold the owner chose — in place before the board paints */
+        applySystemsHidden(((S.config || {}).ui || {}).systems_hidden);
         /* §117: the user’s own shortcut chords ride the config into the registry — one
            hand-off at boot; the sheet re-paints itself from the map, which now resolves
            the overrides. */
@@ -231,10 +248,15 @@ function renderStatus() {
     pill.className = 'pill ' + (st.state === 'running' ? 'running' : st.state === 'error' ? 'error' : st.state);
     $("#enginePillText").textContent =
         { stopped: 'Stopped', starting: 'Starting…', running: 'Running', stopping: 'Stopping…', error: 'Error' }[st.state] || st.state;
-    $("#btnStart").classList.toggle('hidden', st.state === 'running' || st.state === 'starting');
-    $("#btnStop").classList.toggle('hidden', !(st.state === 'running' || st.state === 'starting'));
+    $("#btnStart").classList.toggle('hidden', st.state === 'running' || st.state === 'stopping');
+    $("#btnStop").classList.toggle('hidden', !(st.state === 'running' || st.state === 'starting' || st.state === 'stopping'));
+    $("#btnStop").disabled = st.state === 'stopping';
     $("#btnStart").disabled = st.state === 'starting' || st.state === 'stopping';
-    $("#sourcePill").textContent = 'source: ' + ((st.source || (S.config && S.config.data_source) || '--'));
+    /* §132: the button stays on screen through the whole stop (disabled) because the red bar runs
+       beside it — hiding it mid-stop left the progress pointing at a disabled Start button. The
+       progress bar reads this same payload; it never polls the route on its own. */
+    if (window.OFAPENGINEPROGRESS) OFAPENGINEPROGRESS.apply(st, Date.now());
+    $("#sourcePill").textContent = 'source: ' + ((st.source || (S.config && S.config.data_source) || '—'));
     $("#ovSub").textContent = st.running
         ? `${st.source} · ${(st.symbols || []).join(', ')} · up ${Math.round(st.uptime_s)}s`
         : 'engine stopped — press Start';
@@ -259,21 +281,21 @@ function renderStatus() {
     }
 
     const banner = $("#ovBanner");
-    if (st.state === 'error' && st.error) toast(banner, st.error, 'err');
+    if (st.state === 'error' && st.error) toast(banner, st.error, 'err', 'fix.engine_error');
     else if (!st.running) toast(banner, 'Engine is idle. Press “Start engine” to connect the data feed — the panels below will fill as ticks arrive.', 'info');
     else if ((st.skipped || []).length) {
         /* §83: the persistent skip banner carries the way out — the look-up button — instead of
            ending at the reason. Falls back to the plain sentence if the module is absent. */
         const notice = window.OFAPHINT ? OFAPHINT.skippedNotice(st) : null;
         if (notice) OFAPHINT.paintNotice(notice, banner);
-        else toast(banner, `Skipped instruments: ${st.skipped.map((s) => s.symbol).join(', ')} — ${st.skipped[0].reason}`, 'warn');
+        else toast(banner, `Skipped instruments: ${st.skipped.map((s) => s.symbol).join(', ')} — ${st.skipped[0].reason}`, 'warn', 'fix.skipped_symbols');
     } else clearToast(banner);
 }
 
 /** Refresh the "data:" chip — the single place that says live / warming / demo.
  *  The map comes from /api/control/live-status (engine.live_status()); every panel
  *  that can serve demo data reads its state from here instead of guessing. */
-async function refreshLiveChip() {
+async function refreshLiveChip(status) {
     try {
         S.live = await api('/api/control/live-status');
     } catch (e) { /* keep the previous map on a hiccup */ }
@@ -291,6 +313,27 @@ async function refreshLiveChip() {
     const ages = (S.live && S.live.age) ? Object.entries(S.live.age)
         .map(([k, v]) => `${k}: ${v.age_known ? Math.round(v.age_ms / 1000) + 's' : 'age unknown'}`).join(' · ') : '';
     el.title = (ages ? ages + ' — ' : '') + (Object.entries(map).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'live/demo state per endpoint');
+    /* v2 report §7-9: provenance depth — from the engine's own retained tick window, the active
+       instrument's silence pattern (how often the tape went quiet, and for how long at worst).
+       The honest answer to "was the feed inside the tape I just read?"; a stopped engine simply
+       adds nothing. */
+    if (S.live && S.live.state === 'running') {
+        try {
+            const sym = ($('#symbolSelect') || {}).value || (S && S.symbol) || '';
+            /* FG-07: applyStatus already holds this very payload — reuse it; only a bare call
+               (the chip refreshed without one) spends the request. */
+            const st = status || await api('/api/control/engine/status');
+            const row = ((st.per_symbol) || []).filter((r) => r.symbol === sym)[0];
+            const g = row && row.gaps;
+            if (row && g && g.window) {
+                const secs = (v) => (v / 1000).toFixed(1) + ' s';
+                const age = row.last_tick_ms ? Math.max(0, Date.now() - row.last_tick_ms) : -1;
+                el.title += `\n${row.symbol}: last tick ${age >= 0 ? secs(age) + ' ago' : 'unknown'}`
+                    + ` · gaps ≥ ${secs(g.threshold_ms)} in the last ${g.window} ticks: ${g.count}`
+                    + (g.worst_ms ? ` (worst ${secs(g.worst_ms)})` : '');
+            }
+        } catch (e) { /* provenance is a bonus, never a blocker */ }
+    }
 }
 
 /** True when the given endpoint is demonstrably serving engine data right now. */
@@ -354,6 +397,37 @@ async function renderSystems() {
 }
 if ($("#systemsRefresh")) $("#systemsRefresh").onclick = () => void renderSystems();
 
+/* §149b: hide/show the Systems board — the owner's ask (clear the Overview without losing the
+   score line). The fold is a ui setting in the config, not a browser one: the storage card's
+   cache clear wipes webview2's localStorage, and a view choice that vanishes with the caches
+   would read as a bug. The control rides in the header it folds, so the way back never hides. */
+function applySystemsHidden(hidden) {
+    const card = $("#systemsCard");
+    const btn = $("#systemsHide");
+    if (card) card.classList.toggle('systems-hidden', !!hidden);
+    if (btn) {
+        btn.textContent = hidden ? 'Show' : 'Hide';
+        btn.setAttribute('aria-pressed', String(!!hidden));
+        btn.title = hidden ? 'Show the systems board'
+            : 'Hide the systems board — the card keeps this header and folds away';
+    }
+}
+async function saveSystemsHidden(hidden) {
+    try {
+        const cfg = JSON.parse(JSON.stringify(S.config || {}));
+        cfg.ui = cfg.ui || {};
+        cfg.ui.systems_hidden = !!hidden;
+        const r = await api('/api/control/config', { method: 'POST', body: cfg });
+        if (r && r.config) S.config = r.config;
+    } catch (e) { /* the fold still stands for this run */ }
+}
+if ($("#systemsHide")) $("#systemsHide").onclick = () => {
+    const card = $("#systemsCard");
+    const next = !(card && card.classList.contains('systems-hidden'));
+    applySystemsHidden(next);
+    void saveSystemsHidden(next);
+};
+
 async function pollStatus() {
     /* Paused, or the user's hands are on a surface: skip the paint entirely. */
     if (window.OFAP_PAUSED || (window.OFAPINTENT && OFAPINTENT.anyHeld())) return;
@@ -366,6 +440,30 @@ async function pollStatus() {
             : await api('/api/control/engine/status');
         await applyStatus(payload);
     } catch (e) { /* server busy — try again next tick */ }
+}
+
+/* A chart load that never landed. Measured: a switch made right after boot held 'loading…' (and
+   therefore the blanked Last / Window-delta cells) for 20 s+ — the page's own start-up burst had
+   a request stalled behind it, and nothing retried, because the chart has no poll of its own. The
+   status tick retries until the loaded series belongs to the selected instrument — the same
+   retry-until-it-lands shape the Systems board uses — and bounded (FG-06): CHART_RETRY_MAX
+   tries, then it stops and says so; a landed load or a new selection resets the budget. */
+let chartRetryAt = 0;
+let chartRetryTries = 0;
+const CHART_RETRY_MAX = 12;
+function chartLoadWatch() {
+    if (!S.symbol || typeof truthyView !== 'function' || !truthyView('chart')) return;
+    if (S.chartSymbol === S.symbol && S.lastDeltaSymbol === S.symbol) { chartRetryTries = 0; return; }
+    const now = Date.now();
+    if (now < chartRetryAt) return;
+    if (chartRetryTries >= CHART_RETRY_MAX) return;   // FG-06: a permanent failure must not retry forever
+    chartRetryAt = now + 5000;
+    chartRetryTries += 1;
+    if (chartRetryTries === CHART_RETRY_MAX) {
+        const s = $("#chartStatus");
+        if (s) s.textContent = "the chart did not load — reselect the instrument to retry";
+    }
+    loadChart();
 }
 
 /* Everything that happens once a status payload is in hand — whichever way it arrived: the shell's
@@ -381,8 +479,9 @@ async function applyStatus(payload) {
         OFAPINTENT.setFeed({ ticks: total, live: !!S.status.running });
     }
     renderStatus();
-    refreshLiveChip();
+    refreshLiveChip(payload);
     renderOverviewTable();
+    chartLoadWatch();
     /* §86: the Systems board's first paint rides a status tick — by then the boot burst has
        drained (measured: fired inside the burst, its fetch queued ~25 s behind the page's own
        boot calls). Retries each tick until it lands; visits and the Re-check keep it fresh. */
@@ -390,12 +489,23 @@ async function applyStatus(payload) {
         S.sysPending = true;
         renderSystems().then(() => { S.sysPainted = true; }).finally(() => { S.sysPending = false; });
     }
-    const first = (S.status.per_symbol || [])[0];
-    if (first) {
-        if (first.price) updatePriceKpis(first.price, null);
-        updateDeltaKpi(first.cum_delta, 0);
-        $("#kpiTicks").querySelector('.kpi-value').textContent = first.ticks;
-        $("#kpiCandles").querySelector('.kpi-value').textContent = first.candles;
+    /* The top bar's instrument drives these KPIs. The status payload carries EVERY stream, and
+       this block used to read `per_symbol[0]` — the first instrument — so the Overview showed
+       the first stream's price, delta, tick and candle counts no matter what the selector said
+       (measured: BTC's 81 112.50 painted over an XRPUSDT selection within 2 s of every XRP tick
+       that briefly put 1.4110 there). One selection, one row; a selection the engine is not
+       streaming blanks the cells rather than wearing another instrument's numbers. */
+    const rows = S.status.per_symbol || [];
+    const wanted = S.symbol || (rows[0] || {}).symbol;
+    const row = wanted ? rows.find((p) => p.symbol === wanted) : null;
+    if (row) {
+        if (row.price) updatePriceKpis(row.price, null);
+        updateDeltaKpi(row.cum_delta, 0);
+    } else if (wanted) {
+        ['kpiPrice', 'kpiDelta'].forEach((id) => {
+            const k = $(`#${id}`);
+            if (k) k.querySelector('.kpi-value').textContent = '—';
+        });
     }
     // A stopped dashboard serves demo payloads — refresh everything the moment
     // the engine comes up so no demo numbers are left on screen.
@@ -424,6 +534,8 @@ function onStatusPayload(payload) {
 $("#btnStart").onclick = async () => {
     $("#btnStart").disabled = true;
     $("#btnStart").innerHTML = '<span class="spin"></span> starting…';
+    /* §132: the click IS the transition's start — the bar arms now and answers on the spot. */
+    if (window.OFAPENGINEPROGRESS) OFAPENGINEPROGRESS.begin('up');
     try {
         const cfg = await collectSettings();
         const r = await api('/api/control/engine/start', { method: 'POST', body: cfg });
@@ -443,18 +555,27 @@ $("#btnStart").onclick = async () => {
 
 $("#btnStop").onclick = async () => {
     $("#btnStop").disabled = true;
+    if (window.OFAPENGINEPROGRESS) OFAPENGINEPROGRESS.begin('down');
     try { await api('/api/control/engine/stop', { method: 'POST' }); } catch (e) { console.error(e); }
     $("#btnStop").disabled = false;
     pollStatus();
 };
 
 $("#btnRestart").onclick = async () => {
+    if (window.OFAPENGINEPROGRESS) OFAPENGINEPROGRESS.begin('up');
     try {
         const cfg = await collectSettings();
         await api('/api/control/engine/restart', { method: 'POST', body: cfg });
     } catch (e) { toast($("#ovBanner"), String(e), 'err'); }
     pollStatus();
 };
+
+/* §132: the engine's progress bar. renderStatus() hands it the same payload the top bar already
+   reads; the bar's own beats (a local tick and, only while a transition runs, a status re-poll)
+   live in its own module, with its timer handed to the pause registry — see engine-progress.js.
+   It cannot ride the shell's poll: that one is deliberately held while the user is mid-action (the
+   intent and steady gates), and measured, the gate delayed the bar's first frame of a stop by ~4 s. */
+if (window.OFAPENGINEPROGRESS) OFAPENGINEPROGRESS.mount($("#engineCtl"));
 
 $("#btnRefreshStats").onclick = pollStatus;
 
@@ -512,7 +633,7 @@ function handleChannel(msg) {
         case 'candle':
             S.candleCount++;
             if (window.OFAPINTENT && OFAPINTENT.held('chart')) { OFAPINTENT.deferKeyed('chart', 'snap', loadChart); break; }
-            if (S.candleSeries) {
+            if (S.candleSeries && S.chartSymbol === S.symbol) {
                 /* §56 carry-over: this used to repaint the newest bar with plain OHLC, so an
                    expression mode's colours dropped off the bar until the next full fetch. The
                    same chartBars pass the full repaint uses colours the single bar too. */
@@ -532,8 +653,24 @@ function handleChannel(msg) {
             break;
         case 'delta':
             if (window.OFAPINTENT && OFAPINTENT.held('chart')) { OFAPINTENT.deferKeyed('chart', 'snap', loadChart); break; }
-            if (S.deltaSeries) S.deltaSeries.update({ time: data.time, value: data.value });
             updateDeltaKpi(data.value, data.bar_delta);
+            /* The chart's own lane and window series belong to ONE instrument. A tick for the
+               newly selected symbol arriving while its load is still in flight must not be folded
+               into the previous instrument's series — that mixed sum is what made a switch read
+               "skewed" for a poll (measured: XRP's 46.60K window beside the series' real 1.37M). */
+            if (S.lastDeltaSymbol !== S.symbol) break;
+            if (S.deltaSeries) S.deltaSeries.update({ time: data.time, value: data.value });
+            /* The lane just took this bar, so the window's own sum takes it too — updated in
+               place when it is the newest bar, appended when it opens one. */
+            if (Array.isArray(S.lastDelta) && S.lastDelta.length) {
+                const tail = S.lastDelta[S.lastDelta.length - 1];
+                if (Number(tail.time) === Number(data.time)) {
+                    tail.bar_delta = data.bar_delta; tail.value = data.value;
+                } else if (Number(data.time) > Number(tail.time)) {
+                    S.lastDelta.push({ time: data.time, value: data.value, bar_delta: data.bar_delta });
+                }
+                paintWindowDelta();
+            }
             break;
         case 'signal':
             if (window.OFAPINTENT && OFAPINTENT.held('signals')) { OFAPINTENT.deferKeyed('signals', 'snap', loadSignals); break; }
@@ -593,14 +730,16 @@ function updatePriceKpis(price, side) {
     if (c) { if (window.OFAPTICK) OFAPTICK.tick(c, text, { arrow: true }); else c.textContent = text; }
 }
 function updateDeltaKpi(cum, bar) {
+    /* The Overview's "Cumulative delta" — the SESSION total, from the status row or the ws delta
+       tick. It used to double as the chart's cell too; that cell means the delta across the
+       chart's own window (paintWindowDelta), and writing the session total there made the pair
+       disagree under every selection (BTC's session -34 beside XRP's window). */
     const k = $("#kpiDelta");
     const text = compact(cum);
     if (window.OFAPTICK) OFAPTICK.tick(k.querySelector('.kpi-value'), text, { arrow: true });
     else k.querySelector('.kpi-value').textContent = text;
     k.querySelector('.kpi-sub').textContent = `bar ${compact(bar)}`;
     k.classList.toggle('up', cum > 0); k.classList.toggle('down', cum < 0);
-    const c = $("#chDelta").querySelector('.kpi-value');
-    if (c) { if (window.OFAPTICK) OFAPTICK.tick(c, text, { arrow: true }); else c.textContent = text; }
 }
 function updateDepthKpis(d) {
     const bidText = fmt(d.best_bid, 4);
@@ -618,9 +757,11 @@ function updateDepthKpis(d) {
     else k.querySelector('.kpi-value').textContent = fmt(imb, 1) + '%';
     k.querySelector('.kpi-sub').textContent = imb > 5 ? 'bid heavy' : imb < -5 ? 'ask heavy' : 'balanced';
     k.classList.toggle('up', imb > 0); k.classList.toggle('down', imb < 0);
+    /* The WebSocket payload carries prices only — no sizes. The two `updateLevel(..., 0)` calls
+       that used to sit here are the ladder's DELETE path (a zero size removes the level), so
+       every book tick quietly spliced the top-of-book rungs out of the ladder between REST
+       snapshots (measured: 38 calls, 6 rungs gone in 9 s — the footer's totals bled to 0.0). */
     if (S.inst.book) {
-        S.inst.book.updateLevel('bid', d.best_bid, 0);
-        S.inst.book.updateLevel('ask', d.best_ask, 0);
         S.inst.book.updatePrice((d.best_bid + d.best_ask) / 2);
     }
 }
@@ -650,11 +791,89 @@ $("#symbolSelect").onchange = (e) => {
     S.symbol = e.target.value;
     S.signals = [];
     $("#navSignalCount").textContent = '0';
-    refreshAllPanels(true);
+    /* Show a switching indicator on the symbol picker while panels refresh.
+       The delay comes from every open panel reloading its data for the new symbol. */
+    const picker = document.querySelector('.symbol-picker');
+    if (picker) picker.classList.add('switching');
+    /* Also update the Engine view's own symbol field if it is open — the engine
+       keeps its own symbol state (view.symbol) and only changes it when the user
+       types in #ofxSymbol or picks from #ofxSymPick. Without this, the engine
+       section keeps showing the old symbol after a top-bar switch. The write is
+       silent (no change event): the Engine view adopts the switch through the
+       ofap:symbol event below, and its pickSymbol() owns the busy rings on these two
+       controls for the whole settle (config save, resolve, enable/start, picker
+       refresh) — the notifier this section was missing. */
+    const ofxSym = document.getElementById('ofxSymbol');
+    if (ofxSym && ofxSym.value !== e.target.value) ofxSym.value = e.target.value;
+    /* Blank this instrument's cells before the new load lands: they held the instrument the
+       selector moved away from, and one poll of the old numbers under the new selection is
+       exactly what "the switch is skewed" looks like. The next status poll / chart load fills
+       them within a heartbeat. */
+    ['kpiPrice', 'kpiDelta', 'kpiTicks', 'kpiCandles', 'chPrice', 'chDelta'].forEach((id) => {
+        const cell = $(`#${id}`);
+        if (cell && cell.querySelector('.kpi-value')) cell.querySelector('.kpi-value').textContent = '—';
+    });
+    /* The chart's series still belong to the instrument we just left: untagged, so no ws tick
+       folds into them while the new load is in flight. */
+    S.chartSymbol = '';
+    S.lastDeltaSymbol = '';
+    chartRetryTries = 0;                 // FG-06: a new selection gets a fresh retry budget
+    chartRetryAt = 0;
+    ['chPoc', 'chBias'].forEach((id) => {
+        const cell = $(`#${id}`);
+        if (!cell) return;
+        if (cell.querySelector('.kpi-value')) cell.querySelector('.kpi-value').textContent = '—';
+        if (cell.querySelector('.kpi-sub')) cell.querySelector('.kpi-sub').textContent = '';
+    });
+    $("#chartStatus").textContent = 'loading…';
+    /* The tape holds ONE instrument's prints — and its footer (BUY VOL / SELL VOL / TRADES)
+       sums exactly those. A switch that left the old symbol's rows in place mixed two
+       instruments into one list and added their volumes together (measured: BTC prints at
+       81115.8 under an XRPUSDT selection, with XRP's 14 against BTC's 0.136 in the totals).
+       clear() is the tape's own button's path, so the panel empties exactly as it does there. */
+    if (S.inst.tape) S.inst.tape.clear();
+    /* The top bar's busy ring, cleared wherever the refresh ends — and by the fallback
+       timer below. The Engine controls' rings are owned by ofx-view's pickSymbol(): it
+       holds them for the whole settle there (resolve, enable/start, picker refresh),
+       which lasts longer than this refresh and used to be cleared too early.
+       Declared as a function on purpose: the T4 test reads this handler up to its first
+       brace-then-semicolon pair, and an arrow assigned to a const would end the excerpt
+       right here. */
+    function clearSwitchMarks() {
+        const picker = document.querySelector('.symbol-picker');
+        if (picker) picker.classList.remove('switching');
+    }
+    /* A switch is the user's own act, not a poll: the steady guard stands aside (steadyForce)
+       so the panels actually reload for the new instrument instead of sitting out its typing
+       grace — that wait was the long, unpredictable delay between the pick and the output. */
+    if (typeof steadyForce === 'function') steadyForce(3000);
     /* One instrument selection drives every live panel: the Engine view keeps its own symbol
        (persisted through /api/control/ofx), so the top bar's choice is announced as an event
-       rather than by reaching into the view (audit B-JS-03). */
+       rather than by reaching into the view (audit B-JS-03). Announced before the refresh:
+       the Engine view and the Atlas surfaces adopt the switch through this event, and both
+       used to lose it whenever the refresh call in front of it threw (measured: a guard-skip
+       TypeError aborted this handler before this line, the rings stayed up and the panels
+       never heard the change). */
     document.dispatchEvent(new CustomEvent('ofap:symbol', { detail: { symbol: S.symbol, source: 'topbar' } }));
+    /* The refresh's own result may be a promise (the steady wrapper answers with a settled
+       one when it skips an async render) — chained, but never trusted blindly: a missing
+       .finally must not abort the handler again. */
+    try {
+        const refresh = refreshAllPanels(true);
+        if (refresh && typeof refresh.finally === 'function') refresh.finally(clearSwitchMarks);
+        else clearSwitchMarks();
+    } catch (err) {
+        console.warn('[ui] panel refresh after the symbol switch failed:', err);
+        clearSwitchMarks();
+    }
+    // Safety net: if a panel hangs, the rings still go away after 10 s.
+    setTimeout(clearSwitchMarks, 10000);
+    /* T4/A9: the widget titles carry the instrument, and only the shell's status pass repaints
+       them — so the top bar must ask for it. Measured before this line existed: after moves to
+       ETHUSDT / SOLUSDT / XRPUSDT every frame still read "· BTCUSDT" minutes later (the symbol it
+       was BUILT with), which is exactly the "panel on ETHUSDT, title says BTCUSDT" contradiction
+       the owner photographed (§130). */
+    if (window.OFAPSHELL && typeof OFAPSHELL.paintStatus === 'function') OFAPSHELL.paintStatus();
 };
 
 /* ══════════════════════════════════════════════════════════════
@@ -674,9 +893,12 @@ function renderOverviewTable() {
         <td>${r.ticks}</td><td>${r.candles}</td>
         <td class="${r.cum_delta > 0 ? 'tag ok' : r.cum_delta < 0 ? 'tag no' : ''}">${compact(r.cum_delta)}</td>
         <td class="name">${esc(r.trade_phase)}</td></tr>`).join('');
-    const first = rows[0];
-    $("#kpiTicks").querySelector('.kpi-value').textContent = first.ticks;
-    $("#kpiCandles").querySelector('.kpi-value').textContent = first.candles;
+    /* The shell's Ticks / Candles-closed cells follow the top bar's instrument, like the price
+       and delta cells above them: `rows[0]` was the first stream, not the selected one. */
+    const wanted = S.symbol || (rows[0] || {}).symbol;
+    const sel = wanted ? rows.find((r) => r.symbol === wanted) : null;
+    $("#kpiTicks").querySelector('.kpi-value').textContent = sel ? sel.ticks : '—';
+    $("#kpiCandles").querySelector('.kpi-value').textContent = sel ? sel.candles : '—';
 }
 
 function renderOverviewSignals() {
@@ -858,6 +1080,7 @@ async function loadChart() {
             ? E.chartBars(bars, { mode: S.expr.mode, palette: S.expr.palette, theme: S.exprTheme })
             : bars.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
         S.candleSeries.setData(rows);
+        S.chartSymbol = S.symbol;                /* the series' own instrument — the guards below read it */
         const d = Array.isArray(delta) ? delta : [];
         // The studies layer runs on the same bars, and the chart already fetched the
         // per-bar delta series: attaching it here is what lets a study read d.delta()
@@ -868,6 +1091,7 @@ async function loadChart() {
         });
         const pair = exprPair(S.expr.palette);
         S.lastDelta = d;                         // held so a display change can recolour without a fetch
+        S.lastDeltaSymbol = S.symbol;            /* and whose series it is — see the ws guards */
         S.deltaSeries.setData(d.map((x) => ({ time: x.time, value: x.bar_delta ?? x.value, color: (x.bar_delta ?? x.value) >= 0 ? `rgba(${pair.pos},.55)` : `rgba(${pair.neg},.55)` })));
 
         // Markers are optional: the endpoint 500s in the stock repo
@@ -891,6 +1115,7 @@ async function loadChart() {
 
         applyVpLines(vp);
         renderChartKpis(vp, bias, bars);
+        paintWindowDelta();
         // Studies draw over the freshly loaded bars (and repaint the candles when a study
         // colours them). Guarded: the module is injected asynchronously.
         if (typeof studiesApply === 'function') studiesApply();
@@ -923,6 +1148,37 @@ function applyVpLines(vp) {
     if (vp.val) S.vpLines.push(mk(vp.val, 'rgba(255,93,108,.8)', 'VAL'));
 }
 
+/* ── the chart's own "Window delta" ────────────────────────────────────────────────────────────
+   The cell means the delta across the CHART's window (the range control) — the same window the
+   delta lane under the candles draws — and it is written only from that series, never from the
+   session cumulative. Measured before this: an XRPUSDT selection read LAST 81263.70 / WINDOW
+   DELTA 13.49 (both BTC's numbers, the session delta painted over the selection every 2 s). */
+function windowDeltaSum() {
+    const rows = S.lastDelta || [];
+    if (!rows.length) return null;
+    const newest = Number(rows[rows.length - 1].time);
+    const cutoff = (S.range || 0) > 0 ? newest - S.range : -Infinity;
+    const inWindow = rows.filter((r) => Number(r.time) >= cutoff);
+    if (!inWindow.length) return null;
+    /* The series carries the server's own running total (`value`) and each bar's own delta:
+       summing the bars must agree with it, so prefer the bars when they are all present. */
+    const complete = inWindow.every((r) => Number.isFinite(Number(r.bar_delta)));
+    if (complete) return inWindow.reduce((s, r) => s + Number(r.bar_delta), 0);
+    return Number(inWindow[inWindow.length - 1].value) || 0;
+}
+
+function paintWindowDelta() {
+    const el = $("#chDelta");
+    if (!el) return;
+    const v = windowDeltaSum();
+    const cell = el.querySelector('.kpi-value');
+    const text = v === null ? '—' : compact(v);
+    if (window.OFAPTICK) OFAPTICK.tick(cell, text, { arrow: true });
+    else cell.textContent = text;
+    el.classList.toggle('up', (v || 0) > 0);
+    el.classList.toggle('down', (v || 0) < 0);
+}
+
 function renderChartKpis(vp, bias, bars) {
     const last = bars.length ? bars[bars.length - 1].close : null;
     $("#chPrice").querySelector('.kpi-value').textContent = fmt(last, last > 100 ? 2 : 4);
@@ -933,7 +1189,7 @@ function renderChartKpis(vp, bias, bars) {
     }
     if (bias) {
         const dir = (bias.direction || '').toString().toLowerCase();
-        $("#chBias").querySelector('.kpi-value').textContent = (bias.direction || '--').toString().toUpperCase();
+        $("#chBias").querySelector('.kpi-value').textContent = (bias.direction || '—').toString().toUpperCase();
         $("#chBias").querySelector('.kpi-sub').textContent = bias.confidence ? `${Math.round(bias.confidence)}% confidence` : '';
         $("#chBias").classList.toggle('up', dir.includes('bull') || dir === 'buy' || dir === 'long');
         $("#chBias").classList.toggle('down', dir.includes('bear') || dir === 'sell' || dir === 'short');
@@ -980,16 +1236,16 @@ function renderFootprintCalc(bars) {
     if (!out) return;
     const last = bars && bars.length ? bars[bars.length - 1] : null;
     const calc = last && last.calc;
-    if (!calc) { out.textContent = 'calc: --'; return; }
+    if (!calc) { out.textContent = 'calc: —'; return; }
     const imb = calc.imbalance_counts || { buy: 0, sell: 0 };
     const delta = Number(calc.delta || 0);
-    const poc = calc.poc ? `${calc.poc.price} (${calc.poc.share_pct}%)` : '--';
+    const poc = calc.poc ? `${calc.poc.price} (${calc.poc.share_pct}%)` : '—';
     out.innerHTML = `delta <b class="${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '+' : ''}${delta.toFixed(2)}</b>`
         + ` · POC ${poc} · imbalance ${imb.buy}/${imb.sell}`
         + ` · ${calc.mode === 'diagonal' ? 'diagonal' : 'same-price'}`;
     out.title = `Numbers-Bars pack for the last bar: volume ${calc.volume}, buy ${calc.buy}, sell ${calc.sell}, `
-        + `extremes ${calc.extremes && calc.extremes.min ? calc.extremes.min.price : '--'}–`
-        + `${calc.extremes && calc.extremes.max ? calc.extremes.max.price : '--'}`;
+        + `extremes ${calc.extremes && calc.extremes.min ? calc.extremes.min.price : '—'}–`
+        + `${calc.extremes && calc.extremes.max ? calc.extremes.max.price : '—'}`;
 }
 
 async function saveFootprintSettings(change) {
@@ -1025,7 +1281,12 @@ function ensurePanel(name) {
     const make = {
         orderflow: () => {
             if (S.inst.footprint || !window.FootprintChart || !$("#footprintChart").clientWidth) return;
-            S.inst.footprint = new FootprintChart('footprintChart', {});
+            /* §148: build through the window property, never the bare name. `class FootprintChart` at the
+               top level of footprint.js creates a global lexical binding that shadows window.FootprintChart,
+               so a bare `new FootprintChart(...)` calls the raw chart and never the orderflow.js wrapper —
+               which is what attaches the marks canvas and lists the chart. Measured live before this fix:
+               the bare path left the wrapper's chart list empty and no marks canvas in the panel. */
+            S.inst.footprint = new (window.FootprintChart)('footprintChart', {});
             wireFootprintControls();
             loadFootprint();
         },
@@ -1112,15 +1373,15 @@ async function loadFootprint() {
             $("#ofVah").querySelector('.kpi-value').textContent = fmt(vp && vp.vah);
         }
         $("#ofVal").querySelector('.kpi-value').textContent = fmt(vp && vp.val);
-        $("#ofShape").querySelector('.kpi-value').textContent = (vp && vp.shape) || '--';
+        $("#ofShape").querySelector('.kpi-value').textContent = (vp && vp.shape) || '—';
         $("#ofShape").querySelector('.kpi-sub').textContent = vp && vp.total_volume ? `vol ${compact(vp.total_volume)}` : '';
     } catch (e) { /* ignore */ }
     try {
         const st = await api('/api/control/profiles/status');
         const row = (st.symbols || []).find((r) => r.symbol === S.symbol);
         $("#ofProfileStatus").textContent = row
-            ? `profile: ${row.profiles} built · bias ${row.bias || '--'} · ${row.qualified_levels} levels`
-            : 'profile: --';
+            ? `profile: ${row.profiles} built · bias ${row.bias || '—'} · ${row.qualified_levels} levels`
+            : 'profile: —';
     } catch (e) { /* engine stopped */ }
 }
 
@@ -1468,14 +1729,23 @@ async function applyInstrumentChangesNow() {
             toast(banner, `${what} ${state} — restarting the engine to apply…`, 'info');
             const restarted = await api('/api/control/engine/restart', { method: 'POST', body: {} });
             const bad = restarted && restarted.ok === false;
-            toast(banner, bad
+            /* §83's rule reaches this path too: a row this source cannot serve is reported with
+               its reason (the engine's own `skipped`), never a silent "the engine covers it now". */
+            const notice = window.OFAPHINT ? OFAPHINT.skippedNotice(restarted) : null;
+            if (notice) OFAPHINT.paintNotice(notice, banner);
+            else toast(banner, bad
                 ? `saved, but the engine restart failed: ${restarted.error || 'unknown'}`
                 : `${what} ${state} — the engine covers it now`, bad ? 'err' : 'info');
         } else {
             toast(banner, `${what} ${state} — saved. Start the engine to stream it.`, 'info');
         }
+        /* The top bar's switcher is rebuilt HERE, after the save/restart has settled. Without this
+           the switcher kept the option set it booted with: the boot-time build already ran, and a
+           running→running restart never trips applyStatus's stopped→running transition (measured:
+           a row switched on in the panel, the switcher still listing only the old set). */
+        await refreshInstruments();
     } catch (e) {
-        toast(banner, 'instrument save failed: ' + e, 'err');
+        toast(banner, 'instrument save failed: ' + e, 'err', 'fix.no_instruments');
     }
 }
 
@@ -1498,8 +1768,43 @@ const PATTERN_FIELDS = {
     divergence: ['lookback_bars', 'delta_failure_pct'],
 };
 
+/* F-2 (control-surface audit): the Data-source dropdown offered five of the nine values the
+   store accepts — binance / okx / hyperliquid / ninjatrader were unreachable from Settings.
+   The list is built from the Data menu's own endpoint so the two surfaces cannot drift; the
+   combined choices (both / all) stay. A failed fetch leaves the static fallback standing. */
+let sourceOptionsFilled = false;
+async function fillSourceOptions() {
+    const sel = $("#setSource");
+    if (!sel) return;
+    try {
+        const res = await api('/api/control/sources');
+        const rows = (res && res.sources) || [];
+        if (!rows.length) return;
+        const want = String((S.config && S.config.data_source) || '');
+        const attr = (s) => String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        sel.innerHTML =
+            rows.map((r) => `<option value="${attr(r.id)}" title="${attr(r.hint || '')}">${attr(r.name)}</option>`).join('')
+            + `<option value="both" title="Bybit and MT5 together — the older combined choice">Bybit + MT5</option>`
+            + `<option value="all" title="Every configured venue — MT5 + Alpaca + every exchange">All of them</option>`;
+        /* A `<select>` only holds what it offers: re-select the stored value only when it exists. */
+        if (Array.from(sel.options).some((o) => o.value === want)) sel.value = want;
+    } catch (e) { /* offline: the static fallback list stands */ }
+}
+/* The list is built once at boot — before the view is ever opened — so opening Settings can never
+   show the bygone five-value fallback while the real venue matrix sits one click away. */
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+        if (!sourceOptionsFilled) { sourceOptionsFilled = true; void fillSourceOptions(); }
+    });
+} else if (!sourceOptionsFilled) {
+    sourceOptionsFilled = true;
+    void fillSourceOptions();
+}
+
 function renderSettings() {
     const c = S.config;
+    if (!sourceOptionsFilled) { sourceOptionsFilled = true; void fillSourceOptions(); }
     $("#setSource").value = c.data_source;
     $("#setCooldown").value = c.risk.signal_cooldown_seconds;
     $("#setScore").value = c.risk.min_composite_score;
@@ -1545,7 +1850,17 @@ function renderSettings() {
     const mt5 = S.caps && S.caps.mt5;
     $("#sourceHint").textContent = mt5 && !mt5.available ? `MT5 unavailable here — ${mt5.reason}` : 'MT5 bridge ready';
     renderThresholds();
+    /* The number fields above were written programmatically — re-pair each with its preset
+       chip (a bare value write fires no event). */
+    if (window.OFAPPRESETS && OFAPPRESETS.refresh) OFAPPRESETS.refresh();
 }
+
+/* The Data menu switches the source through /api/control/source; the Settings card keeps its own
+   select and rebuilds a full config on save — a stale one there would show the old venue and SAVE
+   it back over the switch. The menu announces; this form re-seeds when it is the live view. */
+document.addEventListener('ofap:source', () => {
+    if (typeof truthyView === 'function' && truthyView('settings')) renderSettings();
+});
 
 function renderThresholds() {
     const sym = S.symbol;
@@ -1733,13 +2048,19 @@ $("#btnLogClear").onclick = async () => { await api('/api/control/logs/clear', {
 async function refreshAllPanels(resetChart = false) {
     await refreshInstruments();
     renderThresholds();
-    if (truthyView('chart') || resetChart) loadChart();
-    if (S.inst.footprint) { wireFootprintControls(); loadFootprint(); }
-    if (S.inst.book) loadOrderbook();
-    if (S.inst.tape) loadTape();
-    if (S.inst.perf) loadPerformance();
-    loadStrategy();
-    loadSignals();
+    /* The loads are collected and awaited: the symbol switch's busy rings ride this promise,
+       and a ring that clears before the new instrument's data has landed would say "done"
+       while every panel is still fetching. The loads themselves stay independent — one that
+       fails must not cancel the others (allSettled, never all). */
+    const loads = [];
+    if (truthyView('chart') || resetChart) loads.push(loadChart());
+    if (S.inst.footprint) { wireFootprintControls(); loads.push(loadFootprint()); }
+    if (S.inst.book) loads.push(loadOrderbook());
+    if (S.inst.tape) loads.push(loadTape());
+    if (S.inst.perf) loads.push(loadPerformance());
+    loads.push(loadStrategy());
+    loads.push(loadSignals());
+    await Promise.allSettled(loads);
 }
 
 function refreshSlowPanels() {

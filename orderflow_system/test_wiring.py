@@ -412,3 +412,54 @@ def test_the_panel_loaders_keep_their_request_sequencing():
     # leaving the canvas clears the crosshair/tooltip state
     assert "canvas.addEventListener('mouseleave'" in engine
     assert "state.hover = null;" in engine
+
+
+def test_the_engine_progress_bar_is_wired_end_to_end():
+    """§132 — the engine progress bar: green on the way up, red on the way down, beside the buttons.
+
+    The bar is only as good as its wiring, and every piece of it fails SILENTLY on its own (a module
+    that never loads, a mount host that does not exist, a button that never arms it, a plan key the
+    engine never sends). Pinned here: the tag loads BEFORE the shell that mounts it, the host element
+    wraps the buttons, both directions are announced by the buttons that start them, the shell's own
+    poll is left alone (the bar polls the route itself while a transition runs), and the stylesheet
+    keeps the owner's colour rule.
+    """
+    html = INDEX.read_text(encoding="utf-8")
+    assert "/desktop/engine-progress.js" in html
+    assert html.index("/desktop/engine-progress.js") < html.index("/desktop/ui.js"), \
+        "the progress module must load before the shell that mounts it"
+    assert 'id="engineCtl"' in html, "the bar needs its host around the button cluster"
+    assert html.index('id="engineCtl"') < html.index('id="btnStart"'), "and the buttons live inside it"
+
+    ui = (UI / "ui.js").read_text(encoding="utf-8")
+    assert "OFAPENGINEPROGRESS.mount(" in ui, "nothing ever mounts the bar"
+    assert "OFAPENGINEPROGRESS.apply(" in ui, "the status payload never reaches the bar"
+    assert ui.count("OFAPENGINEPROGRESS.begin(") == 3, \
+        "the three engine buttons (start, stop, restart) no longer announce their direction"
+
+    js = (UI / "engine-progress.js").read_text(encoding="utf-8")
+    for key in ("config", "instruments", "build", "connect", "ready", "feeds", "history", "release"):
+        assert key + ":" in js, f"the bar lost the caption for stage {key!r}"
+    assert "expect" in js and "EXPECT_TTL_MS" in js, \
+        "the stale-payload guard is gone: a poll started before the click repaints the bar"
+    # the bar's own beat is guarded: the pause registry must know it (the suite's G-09 timer rule),
+    # and it must stay ONE beat — the local tick, with the status re-poll riding every fourth one.
+    assert "OFAPPause.register" in js, "the bar's beat is unguarded — P would freeze the board under a live bar"
+    assert js.count("setInterval(") == 1, "the bar grew a second beat — one timer, or the G-09 counts move"
+
+    css = (UI / "ui.css").read_text(encoding="utf-8")
+    assert ".ep.up" in css and ".ep.down" in css, "green on the way up / red on the way down"
+    assert ".ep .ep-track" not in css or ".ep-track" in css
+
+
+def test_the_source_switch_announces_and_the_settings_form_listens():
+    """The Data menu writes the source through /api/control/source; the Settings card keeps its own
+    select and rebuilds a FULL config on save — a stale select there would show the old venue and
+    save it back over the switch (the menu cannot call into a view that may not be loaded, so the
+    write is announced, the ofap:expression pattern)."""
+    bar = (UI / "menubar.js").read_text(encoding="utf-8")
+    assert "CustomEvent('ofap:source'" in bar, "the Data menu no longer announces the source switch"
+    assert "async function switchSource(" in bar
+    ui = (UI / "ui.js").read_text(encoding="utf-8")
+    assert "addEventListener('ofap:source'" in ui, "nothing re-seeds a surface on a source switch"
+    assert "truthyView('settings')" in ui and "renderSettings();" in ui

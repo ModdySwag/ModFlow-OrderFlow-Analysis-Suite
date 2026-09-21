@@ -51,6 +51,8 @@ FROZEN_COUNTS = {
     "profiles.js": 1, "scanner.js": 1, "search.js": 3, "steady.js": 2, "storage.js": 1,
     "strips.js": 2, "ui.js": 4, "updates.js": 1, "vwap.js": 1, "watchlist.js": 1,
     "watermark.js": 2,
+    # §136's four analytics panels: one cadence each, every one registered with OFAPPause.
+    "gex.js": 1, "market-read.js": 1, "option-flow.js": 1, "volatility.js": 1,
 }
 
 

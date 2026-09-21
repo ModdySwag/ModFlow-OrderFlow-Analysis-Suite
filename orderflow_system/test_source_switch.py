@@ -253,6 +253,15 @@ def test_the_bybit_extras_feed_runs_only_where_the_exchange_leg_does():
     assert started and list(started[-1]) == ["ETHUSDT"], started
     assert "BTCUSDT" not in started[-1], "a broker-mapped symbol must not get Bybit depth"
 
+    # …but under a SINGLE-venue source nothing is partitioned, so the same table must not strand a
+    # broker-stamped crypto symbol: BTCUSDT (mt5_symbol set by the wizard) lost its deep book,
+    # liquidations and block trades while four lesser symbols kept theirs, because the extras read
+    # a `both`-shaped partition that a `bybit` run never applies.
+    stranded = _MorePipelines("bybit")
+    asyncio.run(engine_mod._start_atlas_extras(stranded))
+    assert set(stranded._atlas_hub.started[-1]) == {"BTCUSDT", "ETHUSDT"}, (
+        "under `bybit` every exchange-servable symbol gets its extras — the partition means nothing")
+
 
 def test_the_sources_sweep_is_cached_and_refreshable(monkeypatch):
     """Seven blocking probes ran on the event loop for every call (measured 2.7 s uncached)."""

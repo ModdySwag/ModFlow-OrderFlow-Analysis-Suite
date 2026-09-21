@@ -13,36 +13,45 @@
 
     const GROUPS = [
         { name: 'Order flow', items: [
-            ['ofx', 'Engine', 'footprint matrix, DOM heatmap, sweeps, HUD'],
-            ['orderflow', 'Order Flow', 'bid/ask per level, POC, value area'],
-            ['heatmap', 'Heatmap', 'resting liquidity over time'],
-            ['depth', 'Depth', 'live order book ladder'],
-            ['tape', 'Time & Sales', 'every print, newest first'],
-            ['cvd', 'CVD', 'cumulative delta + pro multi-anchor'],
-            ['profile', 'Profile', 'volume profile by price'],
-            ['frames', 'Frames', 'per-bar detail sheets'],
+            ['ofx', 'Engine', 'footprint matrix, DOM heatmap, sweeps, HUD', 'footprint dom heat map sweeps hud'],
+            ['orderflow', 'Order Flow', 'bid/ask per level, POC, value area', 'poc value area levels bid ask imbalance'],
+            ['heatmap', 'Heatmap', 'resting liquidity over time', 'liquidity resting book depth map'],
+            ['depth', 'Depth', 'live order book ladder', 'book ladder dom levels queue'],
+            ['tape', 'Time & Sales', 'every print, newest first', 'tape prints time sales speed prints'],
+            ['cvd', 'CVD', 'cumulative delta + pro multi-anchor', 'delta cumulative anchor divergence'],
+            ['profile', 'Profile', 'volume profile by price', 'volume profile poc vah val histogram'],
+            ['frames', 'Frames', 'per-bar detail sheets', 'per bar detail sheet bars'],
         ] },
         { name: 'Analytics', items: [
-            ['chart', 'Chart', 'candles with studies and markers'],
-            ['scanner', 'Scanner', 'ranked opportunities across symbols'],
-            ['trackers', 'Trackers', 'correlation, dots, cross-venue reads'],
-            ['signals', 'Signals', 'detections with strength and context'],
-            ['replay', 'Replay', 'step through stored sessions'],
+            ['chart', 'Chart', 'candles with studies and markers', 'candles bars studies markers drawings'],
+            ['scanner', 'Scanner', 'ranked opportunities across symbols', 'scan rank screener opportunities'],
+            ['trackers', 'Trackers', 'correlation, dots, cross-venue reads', 'correlation cross venue basis dots'],
+            ['signals', 'Signals', 'detections with strength and context', 'detections strength context setups'],
+            ['replay', 'Replay', 'step through stored sessions', 'history sessions step backtest'],
         ] },
         { name: 'Trading', items: [
-            ['strategy', 'Strategy', 'rule sets and their live state'],
-            ['performance', 'Performance', 'session and per-signal stats'],
-            ['alerts', 'Alerts', 'thresholds and notifications'],
+            ['strategy', 'Strategy', 'rule sets and their live state', 'rules automation playbook'],
+            ['performance', 'Performance', 'session and per-signal stats', 'stats pnl results trades'],
+            ['alerts', 'Alerts', 'thresholds and notifications', 'threshold notify trigger'],
         ] },
         { name: 'Information', items: [
-            ['overview', 'Overview', 'the session at a glance'],
-            ['instruments', 'Instruments', 'what is streaming and how'],
-            ['studies', 'Studies', 'indicator modules'],
-            ['logs', 'Logs', 'what the app is doing'],
-            ['settings', 'Settings', 'config, sources, appearance'],
+            ['overview', 'Overview', 'the session at a glance', 'summary dashboard at a glance'],
+            ['instruments', 'Instruments', 'what is streaming and how', 'symbols feeds subscriptions enabled'],
+            ['studies', 'Studies', 'indicator modules', 'indicators modules vwap ema rsi'],
+            ['logs', 'Logs', 'what the app is doing', 'events diagnostics errors'],
+            ['settings', 'Settings', 'config, sources, appearance', 'preferences config theme tokens'],
         ] },
         { name: 'Connections', items: [] },
     ];
+
+    /* The Help rows and the recent list are rows in the same walk (arrows/Enter), so they are
+       described once here rather than inline in the markup below. */
+    const HELP_ROWS = [
+        ['menuHelpCentre', 'Help Centre', 'everything, searchable — F1 · Simple or Advanced', 'help f1 docs search'],
+        ['menuHotkeys', 'Hotkeys', 'the full map, with scopes', 'keys shortcuts keyboard bindings'],
+        ['menuGuide', 'Guide', 'how the panels fit together', 'guide tour walkthrough'],
+    ];
+    const RECENT_KEY = 'ofap.recentViews';
 
     const FREE_SOURCES = [
         ['bybit', 'Bybit', 'public WS + REST — trades, order book depth, candles, no key', true],
@@ -56,7 +65,40 @@
     /* The hotkey sheet renders from OFAPKEYS (keys.js) — the app's one shortcut map. The
        hand-written list that used to live here drifted from the real bindings; it is gone. */
 
-    const state = { open: false, filter: '', workspace: 'default', sources: [], active: '' };
+    const state = { open: false, filter: '', workspace: 'default', sources: [], active: '',
+        cursor: 0, walk: [] };
+
+    /* §144: what the drawer remembers. `walk` is the visible order the arrows step through — every
+       row that does something, panels and sources and help alike. */
+    function readRecent() {
+        try {
+            const raw = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+            return Array.isArray(raw) ? raw.filter((x) => typeof x === 'string').slice(0, 5) : [];
+        } catch (err) { return []; }
+    }
+    function noteRecent(id) {
+        if (!id) return;
+        const list = [id].concat(readRecent().filter((x) => x !== id)).slice(0, 5);
+        try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch (err) { /* private mode */ }
+    }
+    function activeViewId() {
+        const btn = document.querySelector('.nav-item.active[data-view]');
+        return btn && btn.dataset.view ? btn.dataset.view : '';
+    }
+    function labelOf(id) {
+        for (const group of GROUPS) {
+            for (const item of group.items) if (item[0] === id) return item[1];
+        }
+        return id;
+    }
+    function markHit(text, filter) {
+        const safe = esc(text);
+        if (!filter) return safe;
+        const at = safe.toLowerCase().indexOf(filter);
+        if (at < 0) return safe;
+        return safe.slice(0, at) + '<b class="pal-hit">' + safe.slice(at, at + filter.length) + '</b>'
+            + safe.slice(at + filter.length);
+    }
 
     function el(id) { return document.getElementById(id); }
     /* The shell's api() (ui.js) is the app's one fetch wrapper. A bare `api` here would name THIS
@@ -105,6 +147,13 @@
         }
         state.workspace = name;
         paintStatus();
+        /* Recent (File ▸ Recent): one writer for every kind — the full path, not the mirror. */
+        if (window.OFAPMENUBAR_RECENT) { try { window.OFAPMENUBAR_RECENT('workspace', name); } catch (e) {} }
+    }
+    function applyWorkspaceByName(name) {
+        const all = readWorkspaces();
+        if (!all || !all[name]) { setStatusNote('workspace "' + name + '" is gone'); return; }
+        applyWorkspace(name, all[name]);
     }
     async function saveWorkspace(name) {
         const data = snapshot();
@@ -168,12 +217,51 @@
     window.setStatusNote = setStatusNote;
 
     /* ── painting ────────────────────────────────────────────────────────────── */
+    /* §144: after every repaint the visible rows are re-collected in DOM order, so the arrows walk
+       exactly what the eye can see (panels, then help, then connections, then anything else added). */
+    function bindWalk(host) {
+        state.walk = Array.from(host.querySelectorAll('[data-nav]'));
+        state.walk.forEach((node, i) => { node.id = 'palrow-' + i; });
+        if (state.cursor >= state.walk.length) state.cursor = 0;
+        paintCursor();
+        state.walk.forEach((node, i) => { node.onmouseenter = () => { state.cursor = i; paintCursor(); }; });
+    }
+    function paintCursor() {
+        const box = el('menuFilter');
+        if (!state.walk.length) {
+            if (box) box.removeAttribute('aria-activedescendant');
+            return;
+        }
+        state.walk.forEach((node, i) => node.classList.toggle('pal-cur', i === state.cursor));
+        const cur = state.walk[state.cursor];
+        if (cur) {
+            if (typeof cur.scrollIntoView === 'function') cur.scrollIntoView({ block: 'nearest' });
+            if (box) box.setAttribute('aria-activedescendant', cur.id);
+        }
+    }
+    function runCursor(delta) {
+        if (!state.walk.length) return;
+        state.cursor = (state.cursor + delta + state.walk.length) % state.walk.length;
+        paintCursor();
+    }
+    function openCursor() {
+        const node = state.walk[state.cursor];
+        if (node && typeof node.click === 'function') node.click();
+    }
+
     function paintMenu() {
         const host = el('menuBody');
         if (!host) return;
-        const filter = state.filter.toLowerCase();
-        const match = (label, hint) => !filter
-            || label.toLowerCase().includes(filter) || (hint || '').toLowerCase().includes(filter);
+        const filter = state.filter.toLowerCase().trim();
+        const tokens = filter.split(/\s+/).filter(Boolean);
+        const first = tokens[0] || '';
+        const match = (...parts) => {
+            if (!tokens.length) return true;
+            const hay = parts.filter(Boolean).join(' ').toLowerCase();
+            return tokens.every((t) => hay.includes(t));
+        };
+        const openId = activeViewId();
+        let found = 0;
         const groups = GROUPS.map((group) => {
             if (group.name === 'Connections') {
                 const rows = state.sources.length ? state.sources : FREE_SOURCES.map(([id, name, hint, wired]) => ({ id, name, hint, wired, status: 'unknown' }));
@@ -184,19 +272,24 @@
                         const on = s.id === state.active;
                         const dot = s.status === 'ok' ? 'ok' : (s.status === 'unreachable' ? 'bad' : 'idle');
                         const usable = s.wired !== false;
-                        return `<button class="menu-item${usable ? '' : ' menu-item-off'}" ${usable ? `data-source="${esc(s.id)}"` : 'disabled'}`
+                        return `<button class="menu-item pal-row${usable ? '' : ' menu-item-off'}" ${usable ? `data-source="${esc(s.id)}" data-nav` : 'disabled'}`
                             + ` title="${esc(usable ? 'switch the engine to this source' : 'reachable, but this build has no feed adapter for it yet')}">`
                             + `<span class="dot ${dot}"></span>`
-                            + `<span class="menu-label">${esc(s.name)}${on ? ' <em>· active</em>' : ''}</span>`
+                            + `<span class="menu-label">${markHit(s.name, first)}${on ? ' <em>· active</em>' : ''}</span>`
                             + `<span class="menu-hint">${esc(usable ? (s.hint || '') : 'no adapter in this build yet')}</span></button>`;
                     }).join('')
                     + `</div>`;
             }
-            const items = group.items.filter(([id, label, hint]) => match(label, hint));
+            const items = group.items.filter(([id, label, hint, words]) => match(label, hint, words, id));
+            found += items.length;
             if (!items.length) return '';
-            return `<div class="menu-group"><div class="menu-group-title">${esc(group.name)}</div>`
-                + items.map(([id, label, hint]) => `<button class="menu-item" data-view="${esc(id)}">`
-                    + `<span class="menu-label">${esc(label)}</span><span class="menu-hint">${esc(hint)}</span></button>`).join('')
+            const title = filter ? `${esc(group.name)} · ${items.length} of ${group.items.length}`
+                : esc(group.name);
+            return `<div class="menu-group"><div class="menu-group-title">${title}</div>`
+                + items.map(([id, label, hint, words]) => `<button class="menu-item pal-row${id === openId ? ' pal-open' : ''}"`
+                    + ` data-view="${esc(id)}" data-nav title="${esc(hint)}">`
+                    + `<span class="menu-label">${markHit(label, first)}${id === openId ? ' <em>· open</em>' : ''}</span>`
+                    + `<span class="menu-hint">${esc(hint)}</span></button>`).join('')
                 + `</div>`;
         }).join('');
 
@@ -207,6 +300,20 @@
                 + `<button class="menu-ws-x" data-ws-del="${esc(name)}" title="Delete this workspace">×</button></span>`).join('')
             : '<span class="dim">no saved workspaces yet</span>';
 
+        const recent = filter ? [] : readRecent().filter((id) => labelOf(id) !== id);
+        const recentGroup = recent.length
+            ? `<div class="menu-group"><div class="menu-group-title">Recent</div>`
+                + recent.map((id) => `<button class="menu-item pal-row${id === openId ? ' pal-open' : ''}"`
+                    + ` data-view="${esc(id)}" data-nav title="open it again">`
+                    + `<span class="menu-label">${esc(labelOf(id))}${id === openId ? ' <em>· open</em>' : ''}</span>`
+                    + `<span class="menu-hint">${id === openId ? 'you are here' : ''}</span></button>`).join('')
+                + `</div>`
+            : '';
+        const empty = filter && !found
+            ? `<div class="pal-empty">no panel, action or source matches “${esc(state.filter)}”`
+                + `<button id="palClear" class="pal-clear">clear</button></div>`
+            : '';
+
         host.innerHTML = `<div class="menu-col">
             <div class="menu-group"><div class="menu-group-title">Workspaces</div>
               <div class="menu-row"><input id="menuWsName" placeholder="name this layout…" size="16">
@@ -215,14 +322,32 @@
               <div class="menu-row menu-ws-list">${wsList}</div>
             </div>
             <div class="menu-group"><div class="menu-group-title">Help</div>
-              <button class="menu-item" id="menuHelpCentre"><span class="menu-label">Help Centre</span><span class="menu-hint">everything, searchable — F1 · Simple or Advanced</span></button>
-              <button class="menu-item" id="menuHotkeys"><span class="menu-label">Hotkeys</span><span class="menu-hint">the full map, with scopes</span></button>
-              <button class="menu-item" id="menuGuide"><span class="menu-label">Guide</span><span class="menu-hint">how the panels fit together</span></button>
+              ${HELP_ROWS.filter(([id, label, hint, words]) => match(label, hint, words)).map(([id, label, hint]) =>
+                `<button class="menu-item pal-row" id="${id}" data-nav title="${esc(hint)}">`
+                + `<span class="menu-label">${markHit(label, first)}</span>`
+                + `<span class="menu-hint">${esc(hint)}</span></button>`).join('')}
             </div>
           </div>
-          <div class="menu-col">${groups}</div>`;
+          <div class="menu-col">${recentGroup}${empty}${groups}</div>
+          <div class="pal-foot">↑↓ move · Enter open · Esc close · Ctrl+K the full palette`
+            + ` <span class="dim">(panels, actions and symbols in one box)</span></div>`;
 
-        host.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => { close(); showView(b.dataset.view); }; });
+        const countBox = el('menuCount');
+        if (countBox) {
+            countBox.textContent = filter
+                ? (found ? `${found} match${found === 1 ? '' : 'es'}` : 'no matches')
+                : `${GROUPS.reduce((n, g) => n + g.items.length, 0)} panels`;
+        }
+        if (el('palClear')) el('palClear').onclick = () => {
+            const box = el('menuFilter');
+            if (box) box.value = '';
+            state.filter = ''; state.cursor = 0;
+            paintMenu();
+            if (box) box.focus();
+        };
+        bindWalk(host);
+
+        host.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => { close(); noteRecent(b.dataset.view); showView(b.dataset.view); }; });
         host.querySelectorAll('[data-source]').forEach((b) => { b.onclick = () => void useSource(b.dataset.source); });
         host.querySelectorAll('[data-ws-load]').forEach((b) => { b.onclick = () => { applyWorkspace(b.dataset.wsLoad, readWorkspaces()[b.dataset.wsLoad]); close(); }; });
         host.querySelectorAll('[data-ws-del]').forEach((b) => { b.onclick = () => deleteWorkspace(b.dataset.wsDel); });
@@ -360,10 +485,13 @@
     /* ── open / close / keys ─────────────────────────────────────────────────── */
     function open() {
         state.open = true;
+        /* §144: repaint on open. The drawer used to paint once at boot, so the · open marker and the
+           recent rail showed whatever was true back then. */
+        paintMenu();
         if (el('menuPanel')) el('menuPanel').classList.add('on');
         if (el('menuBtn')) el('menuBtn').setAttribute('aria-expanded', 'true');
         const box = el('menuFilter');
-        if (box) { box.value = ''; state.filter = ''; box.focus(); }
+        if (box) { box.value = ''; state.filter = ''; state.cursor = 0; box.focus(); }
     }
     function close() {
         state.open = false;
@@ -388,9 +516,24 @@
         /* §117: the rebind capture. Capture phase, so an armed capture never lets a
            combination fall through to the dispatcher or into a focused field. */
         document.addEventListener('keydown', captureKeys, true);
-        if (el('menuFilter')) el('menuFilter').oninput = (ev) => { state.filter = ev.target.value; paintMenu(); };
+        if (el('menuFilter')) {
+            el('menuFilter').oninput = (ev) => { state.filter = ev.target.value; state.cursor = 0; paintMenu(); };
+            el('menuFilter').onkeydown = (ev) => {
+                if (ev.key === 'ArrowDown') { ev.preventDefault(); runCursor(1); }
+                else if (ev.key === 'ArrowUp') { ev.preventDefault(); runCursor(-1); }
+                else if (ev.key === 'Home') { ev.preventDefault(); state.cursor = 0; paintCursor(); }
+                else if (ev.key === 'End') { ev.preventDefault(); state.cursor = Math.max(0, state.walk.length - 1); paintCursor(); }
+                else if (ev.key === 'Enter') {
+                    ev.preventDefault();
+                    if (state.walk.length && state.walk[state.cursor]) openCursor();
+                    else if (state.walk.length) { state.cursor = 0; openCursor(); }
+                }
+            };
+        }
         document.addEventListener('click', (ev) => {
             const panel = el('menuPanel');
+            const nav = ev.target && ev.target.closest ? ev.target.closest('.nav-item[data-view]') : null;
+            if (nav && nav.dataset.view) noteRecent(nav.dataset.view);
             if (state.open && panel && !panel.contains(ev.target) && ev.target !== el('menuBtn')) close();
         });
         /* The keys that used to live here are in keys.js's map now — Escape and 1-9 in the core,
@@ -404,8 +547,15 @@
         document.addEventListener('ofap:paused', paintStatus);
     }
 
+    /* §145: the one place that knows what a view id is called. The menubar prints stored view ids
+       (`search.default_view` = "orderflow" was showing as exactly that), so it reads the labels from
+       here rather than keeping a second list that could drift. */
+    const VIEW_LABELS = {};
+    GROUPS.forEach((group) => group.items.forEach(([id, label]) => { VIEW_LABELS[id] = label; }));
+    window.OFAPVIEWS = { byId: VIEW_LABELS, groups: GROUPS };
+
     window.OFAPMenu = { open, close, showHotkeys, saveWorkspace, deleteWorkspace, readWorkspaces,
-        loadWorkspaces, GROUPS, state };
+        loadWorkspaces, applyWorkspaceByName, GROUPS, state };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
     else wire();
 })();

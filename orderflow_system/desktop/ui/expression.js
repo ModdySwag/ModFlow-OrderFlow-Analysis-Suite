@@ -382,7 +382,7 @@
         const o = opts || {};
         const m = mode(o.mode);
         const colors = pair(o.palette, o.theme);
-        /* The vendor PARSES every colour it is handed and THROWS on a bare 'r,g,b' triplet --
+        /* The vendor PARSES every colour it is handed and THROWS on a bare 'r,g,b' triplet —
            measured live: "Error: Cannot parse color: 86,180,233" out of lightweight-charts' own
            paint path, which the shell's fatal handler turned into a wiped app. The pair table
            keeps triplets because the canvas renderers compose them with alpha; the chart

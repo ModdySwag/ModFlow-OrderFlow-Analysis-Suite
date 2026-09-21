@@ -97,13 +97,14 @@ function boot() {
         assert(a && b, 'badges are created');
         assert.strictEqual(hostA.children.length, 1, 'one badge per host, not one per call');
         assert.strictEqual(C.badge(hostA), a, 'calling badge again returns the same element');
-        assert.strictEqual(a.textContent, '— · —', 'clear cursor reads as no-reading');
+        assert.strictEqual(a.textContent, 'cursor: hover a chart',
+            '§141: a cleared cursor names what it waits for, not three dashes');
         C.move(76500.5, 1789488000, 'engine');            // seconds, as the engine publishes
         assert(/76500\.50 · \d\d:\d\d:\d\d/.test(a.textContent), a.textContent);
         assert.strictEqual(a.textContent, b.textContent, 'both panels read the same instant');
         assert.strictEqual(a.classList.contains('on'), true);
         C.clear('engine');
-        assert.strictEqual(a.textContent, '— · —');
+        assert.strictEqual(a.textContent, 'cursor: hover a chart');
         assert.strictEqual(a.classList.contains('on'), false);
     });
 

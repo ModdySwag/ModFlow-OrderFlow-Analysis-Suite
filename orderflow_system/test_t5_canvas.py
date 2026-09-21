@@ -65,8 +65,12 @@ def test_the_nudge_keys_are_registered_for_both_axes():
         assert "['" + chord + "'" in view, "the Engine lost the " + chord + " nudge"
     assert "engine-nudge-" in view and "OFX.nudge(" in view
     heat = _text(UI / "heatmap-pro.js")
+    # §121: the arrows PAN (industry grammar — the wheel and the +/- pair own zoom); the shift
+    # pair jumps ten buckets, Home returns to the live edge.
     for ident in ("heatmap-rows-more", "heatmap-rows-fewer",
-                  "heatmap-window-wider", "heatmap-window-narrower"):
+                  "heatmap-zoom-in", "heatmap-zoom-out",
+                  "heatmap-pan-back", "heatmap-pan-back-10",
+                  "heatmap-pan-fwd", "heatmap-pan-fwd-10", "heatmap-live"):
         assert ident in heat, "the Heatmap lost " + ident
 
 

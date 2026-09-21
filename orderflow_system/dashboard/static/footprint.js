@@ -159,7 +159,30 @@ class FootprintChart {
     // Public API
     // ═══════════════════════════════════════
 
+    /* The row step is the instrument's OWN price granularity, read from the levels the bars
+       carry. The 0.5 constant was a BTC-scale number: on an XRP footprint (levels 0.0001 apart)
+       every cell drew thousands of pixels tall — the footprint painted as one solid smear with
+       every price label overlapping — and the hover hit-test (0.5 × 0.8) matched the first level
+       of the bar for any pointer position. Cached per payload; invalidated in setData. */
+    _rowStep() {
+        if (this._rowStepCache) return this._rowStepCache;
+        const prices = new Set();
+        (this.data || []).forEach((bar) => (bar.levels || []).forEach((l) => {
+            const p = Number(l && l.price);
+            if (Number.isFinite(p)) prices.add(p);
+        }));
+        const sorted = [...prices].sort((a, b) => a - b);
+        let step = 0;
+        for (let i = 1; i < sorted.length; i++) {
+            const d = sorted[i] - sorted[i - 1];
+            if (d > 1e-12 && (!step || d < step)) step = d;
+        }
+        this._rowStepCache = step || this.options.priceStep || 0.5;
+        return this._rowStepCache;
+    }
+
     setData(data) {
+        this._rowStepCache = 0;
         this.data = data || [];
         if (this.data.length > 0) {
             this.currentPrice = this.data[this.data.length - 1].close;
@@ -359,7 +382,7 @@ class FootprintChart {
         // Volume cells
         levels.forEach(level => {
             const py = this._priceToY(level.price);
-            const nextPy = this._priceToY(level.price + this.options.priceStep);
+            const nextPy = this._priceToY(level.price + this._rowStep());
             const rowH = Math.max(2, Math.abs(py - nextPy));
             if (py < this._chartTop - rowH || py > this._chartBottom + rowH) return;
 
@@ -662,7 +685,7 @@ class FootprintChart {
         if (bi < 0 || bi >= this.data.length) { this._hideTooltip(); return; }
         const bar = this.data[bi];
         const price = this._yToPrice(this._mouseY);
-        const level = bar.levels?.find(l => Math.abs(l.price - price) < this.options.priceStep * 0.8);
+        const level = bar.levels?.find(l => Math.abs(l.price - price) < this._rowStep() * 0.8);
         if (level) this._showTooltip(bar, level); else this._hideTooltip();
     }
 
@@ -706,7 +729,19 @@ class FootprintChart {
         return `rgba(${r},${g},${b},${a})`;
     }
 
-    _fmtPrice(p) { return p >= 10000 ? p.toFixed(1) : p >= 1 ? p.toFixed(2) : p.toFixed(4); }
+    /* §142: decimals come from the instrument's own tick when the embedder states one — a
+       price written from the size of the number (>=10000 → 1 dp) prints false precision on
+       anything whose tick isn't implied by its magnitude. The magnitude rule survives only as
+       the fallback for a widget nobody told the tick. */
+    _fmtPrice(p, tick) {
+        const t = Number(tick != null ? tick : (this.options && this.options.tickSize));
+        if (isFinite(t) && t > 0) {
+            const text = String(t);
+            const dp = Math.min(8, text.indexOf('.') >= 0 ? text.split('.')[1].replace(/0+$/, '').length : 0);
+            return Number(p).toFixed(dp);
+        }
+        return p >= 10000 ? p.toFixed(1) : p >= 1 ? p.toFixed(2) : p.toFixed(4);
+    }
 
     _fmtVol(v) {
         const a = Math.abs(v);

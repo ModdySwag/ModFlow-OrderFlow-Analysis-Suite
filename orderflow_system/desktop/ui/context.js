@@ -31,7 +31,7 @@ const CTX_STYLE = `
 `;
 
 function ctxFmt(n, digits) {
-    if (n === null || n === undefined || Number.isNaN(n)) return '--';
+    if (n === null || n === undefined || Number.isNaN(n)) return '—';
     const abs = Math.abs(n);
     if (abs >= 1e9) return (n / 1e9).toFixed(2) + 'B';
     if (abs >= 1e6) return (n / 1e6).toFixed(2) + 'M';

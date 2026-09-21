@@ -241,8 +241,8 @@
 
     function tapeTime(ms) {
         var n = Number(ms) || 0;
-        if (n <= 0) return '--:--:--';
-        try { return new Date(n).toISOString().slice(11, 19); } catch (err) { return '--:--:--'; }
+        if (n <= 0) return '—:—:—';
+        try { return new Date(n).toISOString().slice(11, 19); } catch (err) { return '—:—:—'; }
     }
 
     /* The open position's bracket — shown as the pair the account carries, applied as one. */

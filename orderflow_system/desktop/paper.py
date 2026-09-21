@@ -33,6 +33,17 @@ position and flipping it are the two arithmetic cases worth knowing: adding to a
 the entry, and an opposite order **reduces first, then flips the remainder** into a new position at
 the fill price, booking the closed part as a journal row.
 
+An **order template** (``desktop/atm.py``) rides along with an entry order and becomes a **plan** the
+moment that order fills: the *fill* price fixes where the stop, the target and any partial sit,
+because a limit that rested for an hour must be stopped eight ticks from its own fill rather than
+from the click that placed it. A live plan then manages itself against every print — the stop moves
+to break-even once the trade has gone its way far enough, trails behind the best price seen since,
+and the position leaves at the print when the plan's clock runs out (``time_stop``). The legs are one
+OCO group: when one of them is the reason the position leaves, every other working leg of the group
+is cancelled with it, so nothing is left resting on a position that no longer exists. Setting the
+exits by hand (``set_exits``) hands that job back to the user — a typed price always wins over
+automation, and the plan says so in ``plan()["managed"]``.
+
 The account is the device's own; the caller drives the tape:
 
     account = PaperAccount(symbol="ESZ6", tick_size=0.25, starting_balance=100_000.0)
@@ -48,20 +59,23 @@ import logging
 import math
 from typing import Any, Optional
 
+from orderflow_system.desktop import atm
+
 logger = logging.getLogger(__name__)
 
 #: Order kinds a caller can submit; anything else is rejected with a reason rather than raising.
 ORDER_KINDS = ("market", "limit", "stop")
 #: Sides, lower-case — the vocabulary of ``data.models.Side`` and of the journal.
 SIDES = ("buy", "sell")
-#: Why a fill happened: the order's own kind, or the exit that closed the position.
-FILL_REASONS = ("market", "limit", "stop", "stop_loss", "take_profit", "flatten")
+#: Why a fill happened: the order's own kind, the exit that closed the position, or its plan's clock.
+FILL_REASONS = ("market", "limit", "stop", "stop_loss", "take_profit", "time_stop", "flatten")
 #: Order lifecycle. ``cancelled`` is only ever reached through ``cancel``, never through ``submit``.
 ORDER_STATUSES = ("working", "filled", "rejected", "cancelled")
 #: The ``trade_journal`` columns a ``closed_trades`` row carries, in this order — so a session can
 #: be handed to ``data.database.log_trade`` (or an INSERT) without a translation step.
 JOURNAL_COLUMNS = ("instrument", "direction", "entry_time_ms", "exit_time_ms", "entry_price",
-                   "exit_price", "stop_loss", "take_profit", "pnl_ticks", "rr_ratio")
+                   "exit_price", "stop_loss", "take_profit", "pnl_ticks", "rr_ratio",
+                   "mae_ticks", "mfe_ticks")
 
 #: Ticks are rounded here so float noise never reaches a journal row: a 0.05 tick, or a price that
 #: travelled through a subtraction, can otherwise report 39.99999999999999 ticks of profit.
@@ -92,6 +106,18 @@ def _ms(value: Any) -> int:
 def _text(value: Any) -> str:
     """A vocabulary word, lower-cased — accepts the app's ``Side`` enum as well as a string."""
     return str(getattr(value, "value", value)).strip().lower()
+
+
+def _plan_outcome(reason: str) -> str:
+    """The plan's word for why the position left, read off the fill's own reason.
+
+    ``stop_loss``, ``take_profit`` and ``time_stop`` are the plan's own exits; a limit or market
+    fill that closed the position was a hand on the button (``flatten``), and a flip is a flip.
+    """
+    word = _text(reason)
+    if word in ("stop_loss", "take_profit", "time_stop", "flip"):
+        return word
+    return "flatten" if word in ("limit", "market", "stop", "flatten") else "unknown"
 
 
 def _level_reached(order: dict[str, Any], price: float) -> bool:
@@ -128,10 +154,19 @@ class PaperAccount:
         self._entry_ms = 0
         self._stop_loss: Optional[float] = None
         self._take_profit: Optional[float] = None
+        #: §148: the stop the position was OPENED with — the risk its trades are measured against.
+        #: ``_stop_loss`` moves with break-even and the trail, so it cannot be the R basis.
+        self._entry_stop: Optional[float] = None
+        #: §148: the open position's worst and best print prices — the journal's MAE/MFE. Prices
+        #: while the position lives; ticks off the row's own entry price when a leg closes.
+        self._excursion_worst: Optional[float] = None
+        self._excursion_best: Optional[float] = None
         self._realised = 0.0       # banked PnL in price × size; turned into ticks on the way out
         self._closed: list[dict[str, Any]] = []
         self._last_price: Optional[float] = None
         self._last_print: Optional[dict[str, Any]] = None
+        self._plan: Optional[dict[str, Any]] = None   # the template bracket, once an order armed one
+        self._plan_seq = 0                            # names the OCO group: oc1, oc2, ...
 
     # ══════════════════════════════════════════════════════════════
     # Orders
@@ -139,13 +174,24 @@ class PaperAccount:
 
     def submit(self, side: str, size: float, *, kind: str = "market", price: Optional[float] = None,
                stop_loss: Optional[float] = None, take_profit: Optional[float] = None,
-               ts_ms: int = 0) -> dict[str, Any]:
+               template: Any = None, ts_ms: int = 0) -> dict[str, Any]:
         """Put an order on the book. Always returns an order row; a refusal is a row, not an error.
 
         A market order comes back ``working`` and fills on the next print; a limit or stop waits
         for a print at or through ``price``. ``stop_loss`` / ``take_profit`` ride along and become
         the position's exits if this order opens one. ``price`` on a market order is meaningless
         and stored as ``None``.
+
+        ``template`` is an ATM plan (``desktop/atm.py``) — either the template dict the ladder sends
+        or a shipped template's id. It is stored on the order and built into a bracket at the fill
+        price, so the plan is measured from the price that actually traded. A template and a typed
+        stop-loss are refused together: one position, one stop. A template on an order that would
+        ADD to a position already open is refused too — the bracket belongs to the order that OPENS
+        the position. (The one path that can still carry a template onto an adding fill is a race:
+        two orders posted while flat, the second arriving after the first has opened. That one is
+        dropped at the fill and the row records ``plan_template_note`` saying so.) An order that fills **against a
+        position already open** (an add, a scale-out, a reduce) keeps that position's plan and
+        cannot arm its template; the row records ``plan_template_note`` saying so (§148 T1-D4).
 
         The returned dict *is* the account's own row for this order: it flips to ``filled`` (with
         ``filled_ms`` and ``fill_price``) when the tape catches it, so a UI can keep hold of it.
@@ -166,11 +212,40 @@ class PaperAccount:
         }
         self._next_id += 1
         reason = self._validate(order, size, price, stop_loss, take_profit)
+        if not reason:
+            reason = self._resolve_template(order, template, stop_loss, take_profit)
         if reason:
             order["status"] = "rejected"
             order["reason"] = reason
             logger.debug("paper %s: refused %s %s — %s",
                          self.symbol or "account", order["side"], order["kind"], reason)
+        self._orders.append(order)
+        return order
+
+    def refuse(self, side: Any, size: Any, reason: Any, *, kind: Any = "market",
+               price: Any = None, ts_ms: int = 0) -> dict[str, Any]:
+        """A refused order as a ledger row — the id and the trace of a click that placed nothing.
+
+        Used when the refusal happened *before* the account (a risk gate in `orders.OrderRouter`):
+        the row keeps the shape one the account refused itself would have, so the session's ledger
+        and its ``orders_rejected`` count read the same whichever door said no.
+        """
+        amount = _number(size)
+        order: dict[str, Any] = {
+            "id": f"o{self._next_id}",
+            "side": _text(side),
+            "kind": _text(kind),
+            "size": amount if amount is not None and amount > 0 else 0.0,
+            "price": _number(price),
+            "stop_loss": None,
+            "take_profit": None,
+            "status": "rejected",
+            "reason": str(reason or ""),
+            "created_ms": _ms(ts_ms),
+            "filled_ms": None,
+            "fill_price": None,
+        }
+        self._next_id += 1
         self._orders.append(order)
         return order
 
@@ -208,12 +283,54 @@ class PaperAccount:
                         f"past max_position {self.max_position:g}")
         return ""
 
+    def _resolve_template(self, order: dict[str, Any], template: Any,
+                          stop_loss: Any, take_profit: Any) -> str:
+        """Store the order's ATM template, or the reason it cannot be used. ``""`` when there is none.
+
+        An id is looked up in the shipped templates; a dict is coerced field by field. A template
+        that names nothing (`clean_template` leaves it empty) is refused rather than silently
+        treated as no plan at all, and a template sent with a typed stop is refused outright: a
+        position with two stops is the mistake this whole feature exists to prevent.
+        """
+        if template is None or template == "" or template == {}:
+            return ""
+        if isinstance(template, dict):
+            cleaned = atm.clean_template(template)
+            if not (cleaned["stop_ticks"] or cleaned["target_ticks"] or cleaned["trail_ticks"]
+                    or cleaned["time_stop_min"]):
+                return "that plan names no stop, target, trail or clock — there is no plan in it"
+        else:
+            cleaned = atm.template_of(atm.DEFAULTS, template)
+            if cleaned is None:
+                return (f"'{str(template)[:24]}' is not a template this build ships — "
+                        f"pick one from the ladder")
+        if _positive(stop_loss) is not None or _positive(take_profit) is not None:
+            return "a plan and a typed stop or target are two exits for one position — send one or the other"
+        # §148 T1-D4: a template arms only the order that OPENS the position, so an order that would
+        # ADD to one already open is refused here rather than dropped at the fill. The old build
+        # stored the template, never built a plan from it, and left the row advertising a bracket
+        # that did not exist (§148 measured: 3 of 3 adds);
+        # the ladder shows this sentence under the order button, so the trader is told at the click.
+        if self._net != 0 and (self._net > 0) == (order["side"] == "buy"):
+            return ("this order would add to a position that is already open, and a template is armed "
+                    "by the order that opens one — send it without a template, or set the exits by hand")
+        order["plan_template"] = cleaned
+        return ""
+
     def cancel(self, order_id: str) -> bool:
-        """Take a working order off the book. ``False`` when it never was (filled/cancelled/unknown)."""
+        """Take a working order off the book. ``False`` when it never was (filled/cancelled/unknown).
+
+        A cancelled leg the plan was still counting is dropped from the plan and ``partial_note``
+        says what happened (§148 T1-D5): the row used to keep advertising a scale-out that would
+        never fill, so the ladder read "half resting" over an empty book.
+        """
         for order in self._orders:
             if order["id"] == order_id and order["status"] == "working":
                 order["status"] = "cancelled"
                 order["reason"] = "cancelled by the user"
+                if str(order.get("plan_leg") or "") == "partial" and self._plan is not None:
+                    self._plan["partial"] = None
+                    self._plan["partial_note"] = "cancelled — the partial was taken off the book"
                 return True
         return False
 
@@ -244,6 +361,8 @@ class PaperAccount:
         self._last_price = mark_price
         self._last_print = {"price": mark_price, "size": _number(size) or 0.0,
                             "side": _text(side), "ts_ms": _ms(ts_ms)}
+        if self._net != 0:
+            self._note_excursion(mark_price)   # §148: the print is part of the position's own path
         fills: list[dict[str, Any]] = []
         for order in list(self._working()):
             if order["kind"] == "market":
@@ -253,7 +372,13 @@ class PaperAccount:
                 fills.append(self._fill(order, order["price"], ts_ms, "limit"))
             elif order["kind"] == "stop" and _level_reached(order, mark_price):
                 fills.append(self._fill(order, order["price"], ts_ms, "stop"))
+        # The plan moves the stop *before* the print is measured against it: a break-even or trailing
+        # stop this print armed is the stop this print is judged by, which is what "move to break-even
+        # as soon as it pays" has to mean to be worth having.
+        step = self._advance_plan(mark_price, ts_ms)
         exit_fill = self._exit_on_print(mark_price, ts_ms)
+        if exit_fill is None and step.get("exit"):
+            exit_fill = self._exit(str(step["exit"]["reason"]), float(step["exit"]["price"]), ts_ms)
         if exit_fill is not None:
             fills.append(exit_fill)
         return fills
@@ -271,6 +396,7 @@ class PaperAccount:
         self._last_price = px
         if self._net == 0:
             return []
+        self._note_excursion(px)                     # §148: the flatten price is part of the path
         return [self._exit("flatten", px, ts_ms)]
 
     # ── the bracket, edited as a pair ────────────────────────────────────────────────────
@@ -284,6 +410,10 @@ class PaperAccount:
         silently clear a stop). Refused while flat: an exit without a position is a resting
         order, and this account models those separately. Whether either level ever fills stays
         the tape's call, exactly as at submission.
+
+        Editing a plan's exits by hand releases the plan from managing them: the levels become the
+        user's, the break-even move and the trail stop, and the plan says so in ``managed``. The
+        plan's clock is not a level and keeps running: a nudged stop does not cancel a time exit.
         """
         if self._net == 0:
             return {"ok": False, "reason": "no open position — exits belong to a position, not to the book"}
@@ -300,12 +430,185 @@ class PaperAccount:
         changed = (clean["stop_loss"] != self._stop_loss) or (clean["take_profit"] != self._take_profit)
         self._stop_loss = clean["stop_loss"]
         self._take_profit = clean["take_profit"]
+        released = False
+        if self._plan is not None and str(self._plan.get("status") or "live") == "live":
+            # A typed price beats a template: the plan keeps the levels it was edited to and stops
+            # managing them, so nothing moves a stop out from under the user's own hand.
+            self._plan["managed"] = False
+            self._plan["stop_loss"] = self._stop_loss
+            self._plan["take_profit"] = self._take_profit
+            released = True
         return {"ok": True, "changed": changed, "stop_loss": self._stop_loss,
-                "take_profit": self._take_profit, "ts_ms": _ms(ts_ms)}
+                "take_profit": self._take_profit, "plan_released": released, "ts_ms": _ms(ts_ms)}
 
     def exits(self) -> dict[str, Any]:
         """The open position's exits as the UI edits them: a price, or ``None`` when unset."""
         return {"stop_loss": self._stop_loss, "take_profit": self._take_profit}
+
+    # ── the plan: a template's bracket, live on the position ─────────────────────────────
+
+    def plan(self) -> Optional[dict[str, Any]]:
+        """The position's plan — or the last one, marked ``done`` — as a copy. ``None`` when there is none.
+
+        This is what the ladder draws: the legs, where the stop has travelled to, whether the
+        break-even move has happened, how far the trade ever got, and how it ended.
+        """
+        return dict(self._plan) if self._plan else None
+
+    def set_plan(self, template: Any, *, ts_ms: int = 0, price: Any = None) -> dict[str, Any]:
+        """Attach a template's bracket to the open position — for the fill you took before planning.
+
+        §148 T1-D9: nothing in the app calls this yet. The Replay view reaches a bracket the way the
+        ladder sends it, on the order that OPENS the position; a route for attaching one to a
+        position that is already open has not landed, so today this is a tested API a caller (a test,
+        a future route) reaches directly — not a control any user surface offers.
+
+        The levels are measured from ``price`` (the position's own entry by default) and applied at
+        once. Refused while flat, exactly as ``set_exits`` is: a plan belongs to a position, not to
+        the book. An older plan on the same position is retired, and its resting orders with it.
+        """
+        if self._net == 0:
+            return {"ok": False, "reason": "no open position — a plan belongs to a position, not to the book"}
+        if isinstance(template, dict):
+            cleaned = atm.clean_template(template)
+            if not (cleaned["stop_ticks"] or cleaned["target_ticks"] or cleaned["trail_ticks"]
+                    or cleaned["time_stop_min"]):
+                return {"ok": False,
+                        "reason": "that plan names no stop, target, trail or clock — there is no plan in it"}
+        else:
+            cleaned = atm.template_of(atm.DEFAULTS, template)
+            if cleaned is None:
+                return {"ok": False, "reason": (f"'{str(template)[:24]}' is not a template this build "
+                                                f"ships — pick one from the ladder")}
+        if self._plan is not None:
+            self._cancel_group(str(self._plan.get("group") or ""), "cancelled — its plan was replaced")
+        base = _positive(price) or self._entry_price
+        self._plan_seq += 1
+        p = atm.plan("buy" if self._net > 0 else "sell", abs(self._net), base, cleaned,
+                     tick_size=self.tick_size, ts_ms=ts_ms, group=f"oc{self._plan_seq}")
+        if not p.get("ok"):
+            return {"ok": False, "reason": str(p.get("reason") or "that plan could not be built")}
+        self._plan = p
+        self._stop_loss = _positive(p.get("stop_loss"))
+        self._take_profit = _positive(p.get("take_profit"))
+        self._place_partial(p, _ms(ts_ms))
+        return {"ok": True, "changed": True, "plan": dict(p), "text": str(p.get("text") or ""),
+                "stop_loss": self._stop_loss, "take_profit": self._take_profit, "ts_ms": _ms(ts_ms)}
+
+    def _note_unarmed_template(self, order: Optional[dict[str, Any]]) -> None:
+        """Say on the row that the template it carried was not built into a plan (§148 T1-D4).
+
+        A template arms only when the order opens a position — ``_arm_plan`` runs on a fresh fill or
+        on a flip. An order that fills against a position already open (an add, a scale-out, a
+        reduce) keeps the plan the position has, so its template is dropped. Dropping it silently
+        left the row advertising a bracket that was never built; the row keeps both facts now: the
+        template that was sent, and this note saying it was not used.
+        """
+        if order is not None and order.get("plan_template"):
+            order["plan_template_note"] = (
+                "not armed — a template is built into a plan by the order that opens the position; "
+                "this order filled against one that was already open")
+
+    def _arm_plan(self, order: Optional[dict[str, Any]], price: float, ts_ms: int) -> Optional[dict[str, Any]]:
+        """Build the plan the filling order carried and put its legs on the position just opened."""
+        template = (order or {}).get("plan_template")
+        if not template:
+            # §148 T1-D8: the order that opens the position decides its plan. With no template there
+            # is none — so a settled plan from the position before this one is dropped here, instead
+            # of leaving ``plan()`` describing a closed trade while a new position runs on.
+            self._plan = None
+            return None
+        self._plan_seq += 1
+        p = atm.plan("buy" if self._net > 0 else "sell", abs(self._net), price, template,
+                     tick_size=self.tick_size, kind=str((order or {}).get("kind") or "market"),
+                     ts_ms=ts_ms, group=f"oc{self._plan_seq}")
+        if not p.get("ok"):
+            logger.debug("paper %s: the order's plan was refused — %s", self.symbol, p.get("reason"))
+            return None
+        self._plan = p
+        if order is not None:
+            order["plan"] = p["group"]
+        self._stop_loss = _positive(p.get("stop_loss"))
+        self._take_profit = _positive(p.get("take_profit"))
+        self._place_partial(p, ts_ms)
+        return p
+
+    def _place_partial(self, plan: dict[str, Any], ts_ms: int) -> Optional[dict[str, Any]]:
+        """Rest the plan's partial as a reduce-only limit, so the tape decides when it is taken.
+
+        The order carries the plan's group and its leg name, which is what makes the OCO sibling
+        cancel real: when the position leaves, the group's working orders leave with it. If the tape
+        has already passed the level the account refuses it — the same rule every other limit obeys —
+        and the plan carries on without a partial rather than inventing one.
+        """
+        part = (plan or {}).get("partial")
+        if not part or self._net == 0:
+            return None
+        order = self.submit("sell" if self._net > 0 else "buy", float(part["size"]), kind="limit",
+                            price=float(part["price"]), ts_ms=ts_ms)
+        order["plan_leg"] = "partial"
+        order["group"] = str(plan.get("group") or "")
+        if order["status"] == "rejected":
+            plan["partial"] = None
+            plan["partial_note"] = str(order.get("reason") or "")
+            return order
+        plan["partial_order"] = order["id"]
+        return order
+
+    def _advance_plan(self, price: float, ts_ms: int) -> dict[str, Any]:
+        """One print's worth of plan management: break-even, the trail, the clock.
+
+        Returns the pure module's step (``actions``, ``exit``) so a caller can see what the print
+        moved. A plan whose exits the user has since edited by hand keeps them: ``managed`` is False
+        from that moment, so the break-even move and the trail are not touched. Its clock is not a
+        level, though, and it still runs (§148 T1-D7 — a nudged stop used to take the time stop with
+        it, silently, because the whole step was skipped).
+        """
+        if self._plan is None or self._net == 0:
+            return {}
+        step = atm.advance(self._plan, price=price, ts_ms=ts_ms, tick_size=self.tick_size,
+                           levels=self._plan.get("managed") is not False)
+        if not step.get("ok"):
+            return step
+        self._plan.update({"stop_loss": step["stop_loss"], "take_profit": step["take_profit"],
+                           "trail_stop": step["trail_stop"], "peak": step["peak"],
+                           "breakeven_done": step["breakeven_done"]})
+        if step["changed"]:
+            self._stop_loss = _positive(step.get("stop_loss"))
+            self._take_profit = _positive(step.get("take_profit"))
+        return step
+
+    def _settle_plan(self, reason: str, ts_ms: int) -> Optional[dict[str, Any]]:
+        """The position has left: settle the plan, and cancel whatever it still had resting.
+
+        This is the OCO half that matters in practice. A bracket's legs are siblings, so the moment
+        one of them is the reason the position is gone the others stop existing — a partial limit
+        left resting on a closed position would open a new one nobody asked for.
+        """
+        if self._plan is None:
+            return None
+        cancelled = self._cancel_group(str(self._plan.get("group") or ""),
+                                       "cancelled — the position closed")
+        self._plan = atm.finish(self._plan, _plan_outcome(reason), ts_ms=ts_ms)
+        self._plan["cancelled"] = cancelled
+        return self._plan
+
+    def _cancel_group(self, group: str, reason: str) -> list[str]:
+        """Cancel every working order of an OCO group — the siblings of the leg that filled."""
+        if not group:
+            return []
+        out: list[str] = []
+        for order in self._working():
+            if str(order.get("group") or "") == group:
+                order["status"] = "cancelled"
+                order["reason"] = reason
+                out.append(order["id"])
+        return out
+
+    def _mark_partial_done(self) -> None:
+        """Record that the plan's scale-out filled, so the ladder can stop drawing it as pending."""
+        if self._plan is not None and str(self._plan.get("status") or "live") == "live":
+            self._plan["partial_done"] = True
 
     def _fill(self, order: dict[str, Any], price: float, ts_ms: int, reason: str) -> dict[str, Any]:
         """Fill one order at ``price`` — the level it named, or the print for a market order."""
@@ -351,11 +654,22 @@ class PaperAccount:
         net = self._net + signed
         if self._net == 0 or (self._net > 0) == (signed > 0):
             total = abs(self._net) + size
+            fresh = self._net == 0
             self._entry_price = ((self._entry_price * abs(self._net)) + (price * size)) / total
-            if self._net == 0:                       # a fresh position takes its order's exits
+            if fresh:                                # a fresh position takes its order's exits
                 self._entry_ms = _ms(fill["ts_ms"])
                 self._adopt_exits(order)
             self._net = net
+            if fresh:                                # ...and the bracket its order carried
+                self._arm_plan(order, price, _ms(fill["ts_ms"]))
+                # §148: captured AFTER the plan arms — an order-level stop and a template-armed one
+                # both land in `_stop_loss`, and this is the level BE/trail later move.
+                self._entry_stop = self._stop_loss
+                self._excursion_worst = self._excursion_best = price   # the price path starts here
+            else:                                    # §148 T1-D4: an add cannot arm a template
+                self._note_unarmed_template(order)
+            if order is not None and str(order.get("plan_leg") or "") == "partial":
+                self._mark_partial_done()
             return
 
         direction = 1 if self._net > 0 else -1
@@ -369,28 +683,78 @@ class PaperAccount:
             "exit_time_ms": _ms(fill["ts_ms"]),
             "entry_price": self._entry_price,
             "exit_price": price,
-            "stop_loss": self._stop_loss if self._stop_loss is not None else 0.0,
+            "stop_loss": self._entry_stop if self._entry_stop is not None else 0.0,   # §148: the R basis
             "take_profit": self._take_profit if self._take_profit is not None else 0.0,
             "pnl_ticks": self._ticks(leg),
             "rr_ratio": self._rr(),
+            "mae_ticks": self._excursion_ticks(adverse=True),
+            "mfe_ticks": self._excursion_ticks(adverse=False),
         })
         self._net = net
         if net == 0:                                 # flat: the position's levels go with it
             self._entry_price = 0.0
             self._entry_ms = 0
+            self._entry_stop = None
+            self._excursion_worst = self._excursion_best = None
             self._stop_loss = None
             self._take_profit = None
+            self._settle_plan(str(fill.get("reason") or ""), _ms(fill["ts_ms"]))
         elif (net > 0) == (direction > 0):
-            return                                   # reduced only: entry, age and exits survive
+            # reduced only: entry, age and exits survive — and so does the plan. §148 T1-D4: a
+            # template on a reducing order never arms either, and the row now says so.
+            self._note_unarmed_template(order)
         else:                                        # flipped: the remainder opened at this fill
+            self._settle_plan("flip", _ms(fill["ts_ms"]))   # the old plan left with the old position
             self._entry_price = price
             self._entry_ms = _ms(fill["ts_ms"])
             self._adopt_exits(order)
+            self._arm_plan(order, price, _ms(fill["ts_ms"]))   # and the new position takes its bracket
+            self._entry_stop = self._stop_loss       # §148: the flipped position's own risk basis
+            self._excursion_worst = self._excursion_best = price
+        if order is not None and str(order.get("plan_leg") or "") == "partial":
+            self._mark_partial_done()
 
     def _adopt_exits(self, order: Optional[dict[str, Any]]) -> None:
         """A new position inherits the exits of the order that opened it (``None`` clears them)."""
         self._stop_loss = _positive(order.get("stop_loss")) if order else None
         self._take_profit = _positive(order.get("take_profit")) if order else None
+
+    def _note_excursion(self, price: float) -> None:
+        """Fold one print into the open position's worst/best excursion (the journal's MAE/MFE).
+
+        Direction-aware at the source: ``_excursion_worst`` is the print most against the trade and
+        ``_excursion_best`` the print most for it, so a short's adverse side is the HIGHER price.
+        (Measured before this shape: the note kept long-perspective min/max, the ticks helper then
+        applied the direction again, and a short's excursions both read 0.)
+        """
+        px = float(price)
+        if self._excursion_worst is None or self._excursion_best is None:
+            self._excursion_worst = self._excursion_best = px
+            return
+        if self._net > 0:                            # long: a lower print is the adverse one
+            self._excursion_worst = min(self._excursion_worst, px)
+            self._excursion_best = max(self._excursion_best, px)
+        else:                                        # short: a higher print is the adverse one
+            self._excursion_worst = max(self._excursion_worst, px)
+            self._excursion_best = min(self._excursion_best, px)
+
+    def _excursion_ticks(self, *, adverse: bool) -> float:
+        """One side of the excursion as ticks against the row's own entry: MAE or MFE.
+
+        MAE is the worst move against the trade and MFE the best for it, both positive by
+        convention. The excursion is position-level, so every leg of a scale-out carries the same
+        pair; a row with no excursion recorded (an old session, a position that never printed
+        while it was open) answers 0.0, which the analytics read as "not recorded".
+        """
+        if self._excursion_worst is None or self._excursion_best is None or self._net == 0:
+            return 0.0
+        entry = float(self._entry_price)
+        long = self._net > 0
+        if adverse:                                  # worst is already on the adverse side
+            move = (entry - self._excursion_worst) if long else (self._excursion_worst - entry)
+        else:
+            move = (self._excursion_best - entry) if long else (entry - self._excursion_best)
+        return round(max(0.0, move) / self.tick_size, TICK_DECIMALS)
 
     # ══════════════════════════════════════════════════════════════
     # What the account looks like now
@@ -480,11 +844,16 @@ class PaperAccount:
             "orders": [dict(order) for order in self._orders],
             "position": {"net": self._net, "entry_price": self._entry_price,
                          "entry_ms": self._entry_ms, "stop_loss": self._stop_loss,
+                         "entry_stop": self._entry_stop,
+                         "excursion_worst": self._excursion_worst,
+                         "excursion_best": self._excursion_best,
                          "take_profit": self._take_profit},
             "realised": self._realised,
             "closed_trades": [dict(row) for row in self._closed],
             "last_price": self._last_price,
             "last_print": dict(self._last_print) if self._last_print else None,
+            "plan": dict(self._plan) if self._plan else None,
+            "plan_seq": self._plan_seq,
         }
 
     @classmethod
@@ -509,6 +878,11 @@ class PaperAccount:
         account._entry_price = _number(held.get("entry_price")) or 0.0
         account._entry_ms = _ms(held.get("entry_ms"))
         account._stop_loss = _positive(held.get("stop_loss"))
+        # §148: older files have no entry_stop; the level the stop is at now is the best estimate
+        # available for the risk basis, and it is only consulted for trades that close from here.
+        account._entry_stop = _positive(held.get("entry_stop")) or account._stop_loss
+        account._excursion_worst = _number(held.get("excursion_worst"))
+        account._excursion_best = _number(held.get("excursion_best"))
         account._take_profit = _positive(held.get("take_profit"))
         account._realised = _number(data.get("realised")) or 0.0
         account._closed = [dict(row) for row in data.get("closed_trades") or []
@@ -516,4 +890,7 @@ class PaperAccount:
         account._last_price = _number(data.get("last_price"))
         last = data.get("last_print")
         account._last_print = dict(last) if isinstance(last, dict) else None
+        held_plan = data.get("plan")
+        account._plan = dict(held_plan) if isinstance(held_plan, dict) else None
+        account._plan_seq = int(_number(data.get("plan_seq")) or 0)
         return account

@@ -13,6 +13,7 @@ footprint arithmetic and is pinned by `test_footprint_analysis.py`.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from collections.abc import Mapping
 from typing import Optional
@@ -71,10 +72,10 @@ class FootprintBar:
                 tick = min(gaps) if gaps else 0.0
             if tick <= 0:
                 return self.imbalance_levels(threshold, "same_price")     # one row: nothing diagonal
-            by_price = {round(p / tick): lv for p, lv in rows}
+            by_price = {_step_key(p, tick): lv for p, lv in rows}
             results: list[tuple[float, str]] = []
             for _index, (price, lv) in enumerate(rows):
-                key = round(price / tick)
+                key = _step_key(price, tick)
                 below = by_price.get(key - 1)      # one tick down
                 above = by_price.get(key + 1)      # one tick up
                 bid_cmp = below.bid_volume if below is not None else self.levels[price].bid_volume
@@ -126,6 +127,16 @@ class FootprintBar:
             if abs(p - price) <= tolerance:
                 return lv
         return None
+
+
+def _step_key(price: float, step: float) -> int:
+    """The step-count a price lands on, half-UP — the same key the panel's ``Math.round`` builds.
+
+    Python's ``round`` is half-to-even: at exactly half a step it keys a row below the one the panel
+    keys, and the diagonal reading (the mode this module documents) then compares against the wrong
+    neighbour (T6-F06).
+    """
+    return int(math.floor(price / step + 0.5))
 
 
 def analyse_levels(levels: "MappingLike", tick_size: float = 0.0, *, threshold: float = 3.0,
@@ -196,11 +207,11 @@ def analyse_levels(levels: "MappingLike", tick_size: float = 0.0, *, threshold: 
     if mode == "diagonal" and tick <= 0 and len(rows) > 1:
         gaps = [rows[i + 1][0] - rows[i][0] for i in range(len(rows) - 1) if rows[i + 1][0] != rows[i][0]]
         tick = min(gaps) if gaps else 0.0
-    by_key = {round(p / tick): (b, a) for p, b, a in rows} if (mode == "diagonal" and tick > 0) else {}
+    by_key = {_step_key(p, tick): (b, a) for p, b, a in rows} if (mode == "diagonal" and tick > 0) else {}
     imbalances: list[dict] = []
     for price, bid, ask in rows:
         if mode == "diagonal" and by_key:
-            key = round(price / tick)
+            key = _step_key(price, tick)
             below = by_key.get(key - 1)
             above = by_key.get(key + 1)
             bid_cmp = below[0] if below is not None else bid

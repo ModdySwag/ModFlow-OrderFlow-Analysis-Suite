@@ -89,7 +89,10 @@
         const t = text();
         badges.forEach((el) => {
             if (!el || !el.isConnected) return;
-            el.textContent = t || '— · —';
+            /* §141: '— · —' was the idle reading — three dashes in every panel's chrome that named
+               nothing. The badge says what it waits for instead, and the title still explains the
+               mechanism. */
+            el.textContent = t || 'cursor: hover a chart';
             el.classList.toggle('on', !!t);
         });
     }

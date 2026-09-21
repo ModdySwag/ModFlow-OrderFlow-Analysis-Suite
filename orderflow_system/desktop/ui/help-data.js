@@ -972,7 +972,7 @@
             summary: 'What the engine subscribes to. Tick the instruments you want; unsupported feeds '
                 + 'are greyed out rather than silently streaming nothing — and **Look up an '
                 + 'instrument…** answers any name you type (a market name, a broker spelling, or '
-                + 'one of the suite’s own rows) before you tick anything. Ticking **On** saves itself and applies — with the engine running the panel restarts it right then (the same path as **Enable & restart**), so nothing here waits for a save button.',
+                + 'one of the suite’s own rows) before you tick anything. Ticking **On** saves itself and applies — with the engine running the panel restarts it right then (the same path as **Enable & restart**), so nothing here waits for a save button. Picking an instrument in the top bar moves every panel — and starts the engine when it is stopped (the engine pill and the progress bar narrate it).',
             blocks: [
                 { h: 'The controls', table: [
                     ['Validate against Bybit', 'Asks the venue which of these symbols it actually lists, '
@@ -1251,6 +1251,134 @@
             related: ['connect.alpaca', 'view.alpaca'],
         },
 
+        {
+            id: 'view.gex', group: 'panels', mode: 'both',
+            title: 'Gamma exposure (GEX)',
+            tags: ['gex', 'gamma', 'dealers', 'walls', 'zero gamma', 'options', 'charm', 'vanna'],
+            summary: 'Per-strike dealer gamma from an option chain: the zero-gamma line, the call and '
+                + 'put walls, and the DEX / VEX / theta / vanna / charm totals.',
+            blocks: [
+                { p: 'Pick a **chain source** (Deribit is public and keyless for crypto; Tradier and '
+                    + 'Market Data read US equity OPRA chains and need a key in the app\'s config) and '
+                    + 'leave **Symbol** empty to follow the active instrument, or type a name to read '
+                    + 'another one. The table lists each strike\'s gamma, exposure, open interest and '
+                    + 'traded volume, widest exposure first.' },
+                { h: 'What needs what', p: 'Gamma exposure requires a chain that actually carries '
+                    + 'gammas. Deribit publishes them per instrument, Market Data sends them with its '
+                    + 'chains, and **Tradier\'s chain carries IV, open interest and volume but no '
+                    + 'greeks** — the panel then prints that sentence instead of a map of zeros. The '
+                    + 'same honesty applies to vanna and charm: Deribit does not publish them, so '
+                    + 'those two fields read **not published** rather than $0.00.' },
+                { note: 'Every number comes from the venue\'s own chain and nothing is modelled: a '
+                    + 'synthetic gamma would be this app\'s opinion, not the market\'s.' },
+            ],
+            actions: [
+                { label: 'Open GEX', kind: 'view', value: 'gex' },
+                { label: 'Open Volatility', kind: 'view', value: 'volatility' },
+                { label: 'Open Options', kind: 'view', value: 'options' },
+            ],
+            related: ['view.options', 'view.volatility', 'method.levels'],
+        },
+
+        {
+            id: 'view.volatility', group: 'panels', mode: 'both',
+            title: 'Volatility surface',
+            tags: ['volatility', 'iv', 'smile', 'skew', '25 delta', 'term structure', 'options'],
+            summary: 'The implied-volatility smile per expiry, the 25Δ put and call wings, the skew '
+                + 'between them and the term structure.',
+            blocks: [
+                { p: 'The surface reads the same three chain sources as the GEX panel, and **every one '
+                    + 'of them carries implied volatility** — so this panel answers for all three; '
+                    + 'only the expiries on offer differ (Deribit sends one expiry per read, the OPRA '
+                    + 'chains send everything they list, which is what gives the term structure '
+                    + 'something to draw).' },
+                { h: 'Reading it', p: '**ATM IV** is the strike nearest spot; **25Δ put** and **25Δ '
+                    + 'call** are the two wings the skew is the difference of — a skew alone cannot '
+                    + 'say which wing moved. Beside them sit the chain\'s own desk numbers: **P/C OI** '
+                    + '(how much open interest sits on puts against calls), **total OI**, the **IV '
+                    + 'range** across the strikes read, and the **days to expiry** the whole surface '
+                    + 'is scaled by.' },
+                { h: 'The smile table', p: 'Strikes read left to right, ascending, with the same '
+                    + 'strike\'s call and put beside each other. The strike nearest spot is marked, '
+                    + 'in-the-money rows are shaded, and the Type cell carries the option market\'s '
+                    + 'own colour. Open interest prints as whole contracts (1,235, never 1234.57) and '
+                    + 'the IV column is a percentage of the same fraction every engine in this build '
+                    + 'passes around.' },
+            ],
+            actions: [
+                { label: 'Open Volatility', kind: 'view', value: 'volatility' },
+                { label: 'Open GEX', kind: 'view', value: 'gex' },
+            ],
+            related: ['view.gex', 'view.options'],
+        },
+
+        {
+            id: 'view.optionflow', group: 'panels', mode: 'both',
+            title: 'Option flow (sweeps, blocks, unusual premium)',
+            tags: ['option flow', 'sweeps', 'blocks', 'unusual premium', 'prints', 'tape', 'deribit',
+                   'net premium', 'call premium', 'put premium', 'largest print'],
+            summary: 'Deribit\'s public option tape classified into sweeps, blocks and unusual-premium '
+                + 'prints, read as a tape: every print in the window, newest first, with the call and '
+                + 'put premium each side paid.',
+            blocks: [
+                { p: 'The panel reads the venue\'s most recent option prints for the active '
+                    + 'instrument\'s currency and classifies every one of them: a **sweep** is several '
+                    + 'strikes traded in one burst, a **block** is a single large print, and '
+                    + '**unusual premium** is a print that stands out against the open interest it '
+                    + 'landed on. The window is the last 15 minutes, refreshed on the panel\'s own '
+                    + 'cadence.' },
+                { h: 'The tape is the table', p: 'Every print in the window is listed, newest first, '
+                    + 'each one tagged with the class the engine gave it — a classified event reads '
+                    + 'better inside the sequence that produced it than torn out of it. Sweep beats '
+                    + 'block beats unusual when a print qualifies for more than one, because that is '
+                    + 'the stronger statement about it.' },
+                { h: 'Premium and the money fields', p: '**Premium** is the venue\'s own size × price. '
+                    + 'The panel quotes it in dollars whenever the wire names the underlying it '
+                    + 'priced against (the currency\'s perpetual mark, the contract crypto premium is '
+                    + 'quoted against) and falls back to the contract\'s own currency — never a '
+                    + 'guessed rate. **Call premium** and **put premium** split the tape, and **net '
+                    + 'premium** is the difference: positive means calls paid more than puts over '
+                    + 'this window. **Largest print** names the single biggest one.' },
+                { p: 'The sub-line prints both counts on purpose — the prints the venue handed back '
+                    + 'and how many fell inside the window — because they are different numbers and '
+                    + 'a reader who sees only one of them will think it is wrong.' },
+                { note: 'Flow needs **prints**, not quotes. Deribit publishes a keyless public option '
+                    + 'tape and it is the only print source this build reads; the equity venues\' '
+                    + 'chains carry quotes, so the panel names what would be needed rather than '
+                    + 'showing sample trades — an invented sweep table would be worse than an empty '
+                    + 'one.' },
+            ],
+            actions: [
+                { label: 'Open Option Flow', kind: 'view', value: 'option-flow' },
+                { label: 'Open the tape', kind: 'view', value: 'tape' },
+            ],
+            related: ['view.tape', 'view.options', 'view.trackers'],
+        },
+
+        {
+            id: 'view.marketread', group: 'panels', mode: 'both',
+            title: 'Market read',
+            tags: ['market read', 'regime', 'conviction', 'levels', 'confluence', 'read'],
+            summary: 'A deterministic read of the engine\'s live state: regime, conviction score and '
+                + 'its per-signal breakdown, key levels and confluence points — no AI anywhere.',
+            blocks: [
+                { p: 'The read is a pure function of what the engine already knows about the active '
+                    + 'instrument: tape stats, the session profile, the radar\'s levels, the depth '
+                    + 'map\'s walls and the VWAP study. **With the engine stopped there is no read** '
+                    + 'and the panel says so — it never invents a regime to fill the space.' },
+                { h: 'What the scores are', p: 'The conviction score is a weighted sum of seven '
+                    + 'signals (trend, imbalance, absorption, liquidity, levels, profile, VWAP), each '
+                    + 'printed separately. The `not measured` line under the read names the inputs '
+                    + 'that had nothing to read — the footprint family is not wired to the hub yet, '
+                    + 'so a score computed without it says so on its own face.' },
+            ],
+            actions: [
+                { label: 'Open Market Read', kind: 'view', value: 'market-read' },
+                { label: 'Open Trackers', kind: 'view', value: 'trackers' },
+            ],
+            related: ['view.trackers', 'view.signals', 'method.levels'],
+        },
+
 
         /* ═══════════ Working with the app ═══════════ */
         {
@@ -1285,19 +1413,35 @@
         {
             id: 'work.windows', group: 'workflow', mode: 'both',
             title: 'Widget windows (a panel in its own window)',
-            tags: ['window', 'second monitor', 'aux', 'pin', 'always on top', 'multi monitor'],
-            aliases: ['send to monitor', 'floating panel', 'auxiliary window'],
+            tags: ['window', 'second monitor', 'aux', 'pin', 'always on top', 'multi monitor',
+                   'snap', 'send to monitor'],
+            aliases: ['send to monitor', 'floating panel', 'auxiliary window', 'move window',
+                      'snap window', 'unpin'],
             summary: 'Any panel can be opened as its own real window and placed on any monitor — the '
                 + 'way you keep a depth map on a second screen while the footprint stays on the first.',
             blocks: [
                 { h: 'Opening one', list: [
                     '**Windows ▸ Open** (menu bar) opens the panel you are looking at as a separate '
                     + 'window; **Windows ▸ Send to monitor ▸** places it on a specific display.',
+                    'In Terminal mode every widget carries a **⧉** button: it opens this menu on the '
+                    + 'widget itself, already expanded to that window.',
                     'The window chip beside the top bar lists what is open, focuses a window, pins it '
                     + 'above others, or closes it.',
                     'Each window is one panel: it cannot itself open further windows, and it never '
                     + 'writes to your layout — closing it by its own ×, the OS\'s ×, or the app\'s '
                     + 'control all mean the same thing.',
+                ] },
+                { h: 'Moving, snapping, rescuing', list: [
+                    '**⇥** on a window\'s row sends it to any monitor, or snaps it to a half, a '
+                    + 'corner, centred or the whole monitor — one click each, right now.',
+                    '**Ctrl+Alt+Shift+← / →** send the focused panel\'s window one monitor over; '
+                    + '**Ctrl+Alt+W** opens its window menu. Both work in Classic mode too.',
+                    '**View ▸ Windows & layouts…** is the whole desk in one dialog: every window with '
+                    + 'the monitor it is on, Send and shape buttons per row, and a panel/monitor/shape '
+                    + 'row that opens any panel anywhere.',
+                    'A window whose monitor is not there any more is flagged, with **Bring them home** '
+                    + 'to place it back on a live screen — the answer to the field\'s "my window is '
+                    + 'off-screen" failure.',
                 ] },
                 { h: 'What is remembered', p: 'Open windows and their positions are remembered, so a '
                     + 'launch restores exactly the arrangement you had — and if a monitor is not '
@@ -1314,8 +1458,10 @@
         {
             id: 'work.layouts', group: 'workflow', mode: 'both',
             title: 'Layouts and workspaces',
-            tags: ['layouts', 'workspaces', 'save layout', 'arrangement', 'profiles'],
-            aliases: ['save my setup', 'screens setup'],
+            tags: ['layouts', 'workspaces', 'save layout', 'arrangement', 'profiles',
+                   'previous versions', 'undo layout', 'version history', 'auto-cull'],
+            aliases: ['save my setup', 'screens setup', 'undo my layout', 'roll back my layout',
+                      'restore layout', 'older version'],
             summary: 'Two kinds of saved state: **layouts** (where the widgets are) and **workspaces** '
                 + '(which panel you are on and how it is configured). Both live in your config file.',
             blocks: [
@@ -1325,6 +1471,26 @@
                         + 'screen it was made on.'],
                     ['Workspace', 'A quicker thing: the active panel and its parameters, saved from the '
                         + '☰ menu\'s Workspaces box or **File ▸ Save workspace** (**Ctrl+S**).'],
+                ] },
+                { h: 'Previous versions — the one-click undo for a layout', list: [
+                    '**What it is.** Every time a layout is saved over (or deleted), the arrangement '
+                    + 'it had a moment before is kept. **Layout ▸ Previous versions of this layout** '
+                    + 'lists those snapshots — newest first, each with the time to the second, how '
+                    + 'long ago it was kept, and what it holds ("6 widgets · 2 tabs"). One click puts '
+                    + 'that arrangement back.',
+                    '**Why it exists.** This app can change a whole screen with one click — '
+                    + '**Auto-arrange this tab**, **Reset to the starter board**, a save-over, a '
+                    + 'delete, an import. Any of those can land on an arrangement you liked. The '
+                    + 'version ring is the cheap way back, and a restore is itself recorded, so you '
+                    + 'can step forward again to what you had.',
+                    '**Why only the last five.** Five is what people actually reach for: the last '
+                    + 'few edits, not the whole history. It also keeps your config file honest — '
+                    + 'every version is a full copy of the layout, so an unbounded history would '
+                    + 'grow the file forever for versions you would never read.',
+                    '**Auto-cull** (on by default) is what enforces the five: older copies are '
+                    + 'dropped as you save. Turn it off and the store keeps up to ten — the same '
+                    + 'command then also stops culling, and turning it back on drops the extra ones '
+                    + 'immediately. The choice is saved in your config file with everything else.',
                 ] },
                 { note: 'Both are stored in your user config file, so they follow the machine and '
                     + 'survive a restart. Nothing about your arrangement is kept in the repository.' },
@@ -2751,12 +2917,236 @@
             ],
             related: ['method.levels', 'method.reading_order', 'view.studies'],
         },
+        {
+            id: 'view.depth-history', group: 'panels', mode: 'both',
+            title: 'Depth history',
+            tags: ['depth history', 'depth over time', 'liquidity', 'pull', 'stack', 'resting size',
+                   'market depth historical graph'],
+            aliases: ['depth over time', 'where did the liquidity go'],
+            summary: 'Resting size over time: price rows, time along the bottom, brightness for size \u2014 '
+                + 'plus the levels that were pulled or stacked while the market sat there.',
+            blocks: [
+                { h: 'How to read the strip', list: [
+                    'Brightness is resting size: how much was sitting on that price at that moment. A hole means no depth was reported then \u2014 never zero size.',
+                    'A filled dot marks a level that was **pulled** (size vanished without prints); a ring marks one that was **stacked** (size appeared). Both are read from the difference between two recorded columns, and both are candidates to look into, not verdicts.',
+                    'The record starts when the engine starts, and only covers what retention keeps \u2014 the newest columns are always the ones on screen.',
+                ] },
+                { h: 'Controls', table: [
+                    ['window', 'How much of the record the strip shows (5 / 15 / 30 / 60 minutes).'],
+                    ['bucket', 'How much time one cell covers; a wider bucket smooths a busy book.'],
+                    ['keep', 'How long columns are kept before pruning \u2014 the same number the settings block holds.'],
+                    ['events', 'The pull and stack markers; turn them off to read pure resting size.'],
+                    ['forget', 'Drops this instrument\'s recorded columns. Nothing outside this panel uses them.'],
+                ] },
+                { note: 'One column is kept per interval (default one second), bounded per instrument \u2014 a '
+                    + 'day of history costs about a megabyte, not a gigabyte.' },
+            ],
+            actions: [{ label: 'Open Depth history', kind: 'view', value: 'depth-history' }],
+            related: ['view.depth', 'method.levels'],
+        },
+        {
+            id: 'view.sessions', group: 'panels', mode: 'both',
+            title: 'Sessions',
+            tags: ['sessions', 'session clock', 'rth', 'eth', 'globex', 'holidays', 'early close',
+                   'roll date', 'expiry', 'is the market open'],
+            aliases: ['when does the market open', 'when does it close', 'roll day', 'expiry day'],
+            summary: 'Says which session a symbol is trading in, how long until it opens or closes, and '
+                + 'when the futures contract rolls \u2014 from session templates you own, with holidays and '
+                + 'breaks, not a guess.',
+            blocks: [
+                { p: 'The clock is the server\'s arithmetic, not the browser\'s: the panel re-reads the '
+                    + 'session on its own cadence and counts the seconds down locally, so the state word '
+                    + '(open, break, pre-open, post-close, holiday, closed) is always the program\'s answer '
+                    + 'about the active symbol.' },
+                { h: 'Templates', list: [
+                    'The picker lists the built-in library and your own copies. **Copy into my templates** '
+                    + 'appends a copy; **Set as active** makes the picked one the default every view reads.',
+                    'A template is name, timezone, days of the week, open/close, optional breaks, optional '
+                    + 'holidays and an optional exchange label. Shipping examples: crypto 24/7, US equities '
+                    + 'RTH plus pre/post, CME Globex for index, energy and metals, Tokyo cash, and the '
+                    + 'Sydney/London/New York FX day.',
+                    'A symbol with no template says so rather than assuming \u2014 add one in Settings or copy '
+                    + 'a built-in.',
+                ] },
+                { h: 'Rolls', list: [
+                    'The roll table writes the convention beside every date: equity index rolls the Thursday '
+                    + 'before the third Friday, energy expires three business days before the 25th of the '
+                    + 'month before delivery, metals on the third-to-last business day, and a crypto '
+                    + 'perpetual has no roll at all \u2014 only its next funding stamp.',
+                    '**Days to roll** is highlighted from five days out, and each root prints its own rule, '
+                    + 'so a date is never a number without the convention next to it.',
+                ] },
+                { note: 'An unknown timezone is read as UTC and the clock card says so \u2014 it never '
+                    + 'silently pretends to know a market\'s hours.' },
+            ],
+            actions: [
+                { label: 'Open Sessions', kind: 'view', value: 'sessions' },
+                { label: 'Open Settings', kind: 'view', value: 'settings' },
+            ],
+            related: ['view.marketread', 'fix.no_data'],
+        },
+        {
+            id: 'view.data-quality', group: 'method', mode: 'both',
+            title: 'Is the stored history good enough to read?',
+            tags: ['data quality', 'coverage', 'gap', 'duplicate stamps', 'stale', 'backfill', 'verdict'],
+            aliases: ['is my data complete', 'missing bars', 'bad data'],
+            summary: 'The Data quality view scores the history this program stored for each instrument '
+                + '\u2014 coverage, gaps, duplicate and out-of-order stamps, staleness \u2014 gives it a '
+                + 'letter, and names the one repair the program can actually do.',
+            blocks: [
+                { p: 'Coverage counts the cadence slots the venue expected over the window and how many of '
+                    + 'them have a stored sample. The expectation is scaled to the instrument\'s own hours: '
+                    + 'a stock is not missing anything on a Saturday night.' },
+                { p: 'Gaps are runs of empty slots wider than a few cadence steps; the list gives the '
+                    + 'wall-clock range, how many slots were empty, and how many rows sat inside the hole. '
+                    + 'Duplicate stamps are counted as extra rows, out-of-order stamps as a stored-order '
+                    + 'problem.' },
+                { p: 'The repairs are the ones the program has a route for: refetch for a stale or thin '
+                    + 'window, backfill for a named hole. A repair the program cannot do yet is printed as '
+                    + 'a sentence, not a button.' },
+                { p: 'A capped read (the read budget is per instrument) can never score an A \u2014 it did '
+                    + 'not look at everything, and it says so.' },
+            ],
+            actions: [{ label: 'Open Data quality', kind: 'view', value: 'data-quality' }],
+            related: ['fix.no_data', 'view.instruments'],
+        },
+        {
+            id: 'view.derivatives', group: 'panels', mode: 'both',
+            title: 'Funding and open interest',
+            tags: ['funding', 'funding rate', 'open interest', 'oi', 'basis', 'perp', 'annualised',
+                   'carry', 'crowded', 'bybit', 'binance', 'okx', 'hyperliquid'],
+            aliases: ['funding rate', 'open interest', 'basis'],
+            summary: 'Per-venue funding and its annualised rate, open interest and its change, and the '
+                + 'perpetual\'s basis against its own index \u2014 with one plain sentence saying who is '
+                + 'paying to hold.',
+            blocks: [
+                { p: 'Funding is the rate a perpetual\'s longs and shorts pay each other every settlement. '
+                    + 'The panel annualises it through the venue\'s own interval (8 hours on Bybit and '
+                    + 'Binance, read off OKX\'s next-funding stamp, hourly on Hyperliquid) \u2014 it is a '
+                    + 'rate, not a yield.' },
+                { p: 'Open interest is each venue\'s own figure in its own unit, with a USD total across '
+                    + 'venues. The change is measured against **this program\'s own samples**: until it has '
+                    + 'watched long enough the sentence says exactly what it saw, never zero.' },
+                { p: 'The basis is the perp\'s mark against its index in basis points, annualised only as a '
+                    + 'shorthand so venues can be compared.' },
+                { note: 'Every endpoint is public and keyless (Bybit v5 tickers, Binance premiumIndex and '
+                    + 'openInterest, OKX funding-rate / open-interest / mark-price / index-tickers, '
+                    + 'Hyperliquid metaAndAssetCtxs). A venue that rate-limits or serves HTML keeps its row '
+                    + 'and gets a sentence naming it.' },
+            ],
+            actions: [{ label: 'Open Funding & OI', kind: 'view', value: 'derivatives' }],
+            related: ['view.gex', 'view.options'],
+        },
+        {
+            id: 'view.synthetic', group: 'panels', mode: 'both',
+            title: 'Synthetic instruments',
+            tags: ['synthetic', 'spread', 'ratio', 'basket', 'basis', 'perp', 'relative value',
+                   'cross-venue', 'arbitrage'],
+            aliases: ['ratio chart', 'spread chart'],
+            summary: 'Ratios, spreads, baskets and basis series composed from each leg\'s own stored '
+                + 'candles \u2014 with a z-score against the window\'s own mean, and a sentence that says '
+                + 'how rich or cheap the composite is right now.',
+            blocks: [
+                { h: 'Building one', list: [
+                    'A definition is a name, a kind (ratio, spread, basket, basis) and its legs: a symbol, '
+                    + 'a side (added or subtracted) and a weight. Three starters ship with the program \u2014 '
+                    + 'an ETH/BTC ratio, a majors basket and a BTC-perp basis.',
+                    'Every leg must have stored candles: a leg with no history is refused by name \u2014 '
+                    + '"open its chart first" \u2014 rather than quietly charting one leg fewer.',
+                ] },
+                { h: 'Reading it', list: [
+                    'The composite is the weighted sum of the aligned legs, on a grid you set. The '
+                    + '\"carried forward\" figure says how much of each leg had to be filled in to align them.',
+                    'The read compares the composite against the subtracted leg in basis points, or against '
+                    + 'its own window median for a one-sided composite, and gives a z-score over the window '
+                    + 'plus the share of time it spent beyond one sigma.',
+                    'A composite that never moved gets no z-score at all \u2014 the panel says why instead '
+                    + 'of printing 0.00.',
+                ] },
+            ],
+            actions: [
+                { label: 'Open Synthetic', kind: 'view', value: 'synthetic' },
+                { label: 'Open Chart', kind: 'view', value: 'chart' },
+            ],
+            related: ['view.chart', 'method.levels'],
+        },
+        {
+            id: 'view.monitor', group: 'panels', mode: 'both',
+            title: 'Companion monitor (phone)',
+            tags: ['monitor', 'phone', 'mobile', 'companion', 'read only', 'remote', 'second screen',
+                   'alerts on my phone'],
+            aliases: ['mobile view', 'phone page'],
+            summary: 'A small read-only page the program already serves: the alert log, the simulated '
+                + 'account, the watchlist quotes and one order-flow read, arranged for a phone. It reads '
+                + 'the same local server the desktop window does, and it writes nothing.',
+            blocks: [
+                { h: 'Opening it', list: [
+                    'On this machine: **/desktop/monitor.html** (the Settings view links it), or the same '
+                    + 'address on whatever port the program is running on.',
+                    'From a phone: the program listens on 127.0.0.1 only, so a phone on the same network '
+                    + 'cannot reach it until the host setting points at the machine\'s LAN address. Until '
+                    + 'then the page is a second-screen view on this computer.',
+                    'The page refreshes every 5 s while it is in front; hiding the tab stops the reads.',
+                ] },
+                { h: 'What it shows, and what it refuses', list: [
+                    'Alerts come from the same log the Alerts view exports, newest first.',
+                    'Positions are the **simulated** account the Replay view runs \u2014 no broker anywhere.',
+                    'Watchlist quotes are the engine\'s own rows: a symbol it is not streaming says "no live '
+                    + 'readings" rather than showing a price nobody printed.',
+                    'With no engine running the read panel prints the server\'s own sentence instead of a '
+                    + 'state of zeros.',
+                ] },
+            ],
+        },
+        {
+            id: 'view.orderflow.settings', group: 'panels', mode: 'both',
+            title: 'Footprint settings (the drawer)',
+            tags: ['footprint', 'settings', 'imbalance', 'diagonal', 'stacked imbalance', 'absorption',
+                   'poc', 'value area', 'ticks per row', 'session filter', 'cell metric'],
+            aliases: ['footprint settings', 'imbalance ratio'],
+            summary: 'Every reading the footprint draws is set in one drawer under the grid: what a cell '
+                + 'is read for, the imbalance ratios, stacked and diagonal imbalance, absorption, the '
+                + 'per-bar POC and value area, rows per price, and the session window.',
+            blocks: [
+                { h: 'Where it is', p: 'Under the grid as **Footprint settings**. It starts collapsed and '
+                    + 're-reads itself when opened, so a second window changing the same block is picked up '
+                    + 'rather than shown stale.' },
+                { h: 'The controls', table: [
+                    ['cell metric', 'What a cell is read for: bid and ask as shipped, one side, the row\'s '
+                        + 'delta, its volume, or its print count. **count** refuses with a sentence when the '
+                        + 'feed carries no print counts \u2014 nothing is invented.'],
+                    ['imbalance convention', '**Same price** compares a row\'s own two sides; **diagonal** '
+                        + 'compares a row\'s ask with the bid one row below; **both** draws each and bands '
+                        + 'them separately.'],
+                    ['stacked imbalance', 'How many imbalanced rows in a row in one direction make a stack, '
+                        + 'counted separately for the diagonal reading.'],
+                    ['absorption', 'A row this many times the bar\'s average row that did not move the '
+                        + 'price: size with no result.'],
+                    ['POC and value area', 'Marked per bar: the row it traded most at, and the rows holding '
+                        + 'the chosen share of its volume.'],
+                    ['rows per price', 'Clustering two or four ticks into one row for coarser reading.'],
+                    ['session window', 'Which bars the marks are drawn on: all, only inside the window, or '
+                        + 'only outside it.'],
+                ] },
+                { note: 'Each control saves the moment it changes and says what the config store kept. The '
+                    + 'drawer never writes the file itself.' },
+            ],
+            actions: [{ label: 'Open Order Flow', kind: 'view', value: 'orderflow' }],
+            related: ['view.orderflow', 'view.ofx', 'view.profile'],
+        },
+
     ];
 
     /* The coverage contract: every view the shell has, and the topic that explains it.
        test_help.py reads this app's own markup ([data-view] in index.html, the rail's nav items) and
        fails when a view has no entry here — so a new panel cannot ship undocumented. */
     const VIEWS = {
+        // §147 (upgrade package): the new panels, mapped like every view above.
+        'depth-history': 'view.depth-history',
+        sessions: 'view.sessions',
+        'data-quality': 'view.data-quality',
+        derivatives: 'view.derivatives',
+        synthetic: 'view.synthetic',
         overview: 'view.overview',
         chart: 'view.chart',
         heatmap: 'view.heatmap',
@@ -2788,6 +3178,10 @@
         news: 'view.news',
         fundamentals: 'view.fundamentals',
         options: 'view.options',
+        gex: 'view.gex',
+        volatility: 'view.volatility',
+        'option-flow': 'view.optionflow',
+        'market-read': 'view.marketread',
         guide: 'start.help',
         help: 'start.help',
     };

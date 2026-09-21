@@ -5,7 +5,13 @@
  *       ?news_limit=N                   Query(ge=0, le=30); 0 means "let the server use the config"
  *   → { ok, symbol, ts_ms,
  *       news: [ { title, link, published, source, published_ms } ],
- *       stats: { requests, failures, last_error, cached, feeds } }
+ *       stats: { requests, failures, last_error, cached, feeds, lane } }
+ *
+ *   TWO LANES, ONE SHAPE: `context.news_source` picks where the headlines come from — "feeds" (the
+ *   built-in public feeds above, the default) or "finnhub" (the Finnhub news API, unlocked by the key
+ *   in Settings ▸ Feed keys). The server names the lane it answered with in `stats.lane`, and this
+ *   panel says which one it was: a keyed lane is never called a built-in feed, and an empty keyed
+ *   lane prints the reason the server gave instead of blaming the network.
  *
  *   The feed URL is the config key `context.news_url`. Left empty — the shipped default — the SERVER
  *   falls back to its own three public feeds (atlas/context.py :: DEFAULT_NEWS_FEEDS: CoinDesk,
@@ -172,6 +178,9 @@
         const served = (Array.isArray(stats.feeds) ? stats.feeds : [])
             .filter((f) => typeof f === 'string' && f.trim());
         const why = String(stats.last_error || '').trim();
+        /* Which lane answered — the server says so in stats.lane. "feeds" is the built-in RSS set,
+           "finnhub" is the keyed Finnhub news API, and the panel must not call one the other. */
+        const onLane = String(stats.lane || 'feeds').toLowerCase() === 'finnhub';
 
         if (payload.ok === false) {
             st.state = 'disabled';
@@ -187,6 +196,13 @@
             return st;
         }
         if (!st.count) {
+            if (onLane) {
+                st.source = 'Finnhub';
+                st.state = 'empty';
+                st.message = 'the Finnhub news lane has no headlines right now'
+                    + (why ? ' — ' + why : '') + '.';
+                return st;
+            }
             st.source = feed ? (hostOf(feed) || 'configured feed')
                 : (served.length ? 'built-in feeds' : 'not configured');
             if (feed) {
@@ -213,10 +229,12 @@
             ? hosts.slice(0, 2).join(', ') + ' +' + (hosts.length - 2)
             : (hosts.join(', ') || 'unknown feed');
         st.state = 'ok';
-        st.source = (feed ? '' : 'built-in: ') + shown;
-        st.note = (feed
-            ? 'feed from ' + FEED_KEY + ' = ' + feed
-            : 'the app\'s built-in public feeds are in use — ' + FEED_KEY + ' is empty')
+        st.source = onLane ? 'finnhub: ' + shown : (feed ? '' : 'built-in: ') + shown;
+        st.note = (onLane
+            ? 'headlines come from the Finnhub news API, unlocked by the key in Settings ▸ Feed keys'
+            : (feed
+                ? 'feed from ' + FEED_KEY + ' = ' + feed
+                : 'the app\'s built-in public feeds are in use — ' + FEED_KEY + ' is empty'))
             + ' · general market news, not filtered by instrument.';
         return st;
     }

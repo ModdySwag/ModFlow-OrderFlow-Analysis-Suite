@@ -45,12 +45,30 @@ def build_app(port: int):
 
     from orderflow_system.dashboard.app import app as dashboard_app
     from orderflow_system.atlas.api import router as atlas_router
+    from orderflow_system.atlas.options_api import router as options_router
     from orderflow_system.desktop.edgar import router as fundamentals_router
     from orderflow_system.desktop.api import router
+    # §147 (upgrade package): the feature routers. Each module owns its own router and its own
+    # handlers; this block is the one place they are mounted.
+    from orderflow_system.atlas.footprint_config import router as footprint_config_router
+    from orderflow_system.atlas.depth_history import router as depth_history_router
+    from orderflow_system.atlas.dataquality import router as data_quality_router
+    from orderflow_system.atlas.sessions import router as sessions_router
+    from orderflow_system.atlas.derivatives import router as derivatives_router
+    from orderflow_system.atlas.synthetic import router as synthetic_router
+    from orderflow_system.desktop.orders import router as trading_router
 
     dashboard_app.include_router(router)
     dashboard_app.include_router(atlas_router)
+    dashboard_app.include_router(options_router)
     dashboard_app.include_router(fundamentals_router)
+    dashboard_app.include_router(footprint_config_router)
+    dashboard_app.include_router(depth_history_router)
+    dashboard_app.include_router(data_quality_router)
+    dashboard_app.include_router(sessions_router)
+    dashboard_app.include_router(derivatives_router)
+    dashboard_app.include_router(synthetic_router)
+    dashboard_app.include_router(trading_router)
 
     # The repo's NoCacheMiddleware only covers / and /static — extend it to the
     # desktop shell so UI edits are never served stale from the webview cache.
@@ -497,6 +515,35 @@ class NativeWindowHost(windows_mod.WindowHost):
             return False
         return True
 
+    def move(self, wid: str, x: int, y: int, width: int, height: int) -> bool:
+        """Put an open window at this rectangle — the native half of "send it to that monitor".
+
+        Unlike `focus` this must be honest about failure: the caller has already written the new
+        geometry to the store, so a window that did not actually move would be a silent lie.
+        """
+        window = self._windows.get(wid)
+        if window is None:
+            return False
+        try:
+            window.move(int(x), int(y))
+            window.resize(int(width), int(height))
+        except Exception:
+            logger.debug("aux window move failed", exc_info=True)
+            return False
+        return True
+
+    def geometry(self, wid: str) -> dict | None:
+        """Where an open window is right now — what the UI needs to say "on Monitor 2"."""
+        window = self._windows.get(wid)
+        if window is None:
+            return None
+        try:
+            return {"x": int(window.x), "y": int(window.y),
+                    "width": int(window.width), "height": int(window.height)}
+        except Exception:                      # a window mid-teardown has no geometry
+            logger.debug("aux geometry read failed", exc_info=True)
+            return None
+
     def set_on_top(self, wid: str, on_top: bool) -> bool:
         window = self._windows.get(wid)
         if window is None:
@@ -582,6 +629,23 @@ def sweep_webview_profiles(temp_dir: Path | None = None, *, now: float | None = 
 # Entry point
 # ──────────────────────────────────────────────────────────────
 
+def apply_depth_history_block(cfg: dict) -> None:
+    """§148: give the depth-history store the saved block before anything is served.
+
+    Measured before the fix: with no engine running, ``/api/atlas/depth-history`` answered the
+    factory block (30 min) whatever the file said, because the only place that read
+    ``atlas.depth_history`` was an engine start building its own hub. A refusal here is logged and
+    the app carries on with the stored block.
+    """
+    try:
+        from orderflow_system.atlas import depth_history as depth_history_mod
+        block = cfg.get("atlas") or {}
+        block = block.get("depth_history") if isinstance(block, dict) else None
+        depth_history_mod.get_store().configure(block or {})
+    except Exception:
+        logger.debug("depth-history boot apply skipped", exc_info=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="orderflow-desktop", description="ModFlow OrderFlow Analysis Suite — desktop app")
     parser.add_argument("--browser", action="store_true", help="open in the default browser instead of a native window")
@@ -620,6 +684,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     app = build_app(port)
+    # §148: before anything is served, the depth-history store carries the saved block — the dial
+    # reads what is stored even while the engine is stopped (see apply_depth_history_block).
+    apply_depth_history_block(cfg)
     started = threading.Event()
     threading.Thread(target=serve, args=(app, "127.0.0.1", port, started), daemon=True,
                      name="orderflow-server").start()
@@ -684,6 +751,18 @@ def main(argv: list[str] | None = None) -> int:
     # directory the installer/uninstaller already owns — not a fresh %TEMP% private profile
     # per run. Boot also reaps any legacy temp profile an older build left orphaned.
     profile_dir = config_store.config_dir() / "webview2"
+    # Storage card (Settings > Storage): a "clear app cache" ask from the last session is
+    # honoured here — before WebView2 opens its profile, the one moment the tree is not locked
+    # by the running window.
+    try:
+        from orderflow_system.desktop import storage as _storage_mod
+
+        _cleared = _storage_mod.apply_pending_cache_clear(config_store.config_dir())
+        if _cleared.get("cleared"):
+            logger.info("cleared the WebView2 app cache at boot: %.1f MB freed",
+                        _cleared.get("freed_bytes", 0) / 1e6)
+    except Exception:                                  # never block the launch on housekeeping
+        logger.debug("WebView2 cache clear at boot failed", exc_info=True)
     try:
         profile_dir.mkdir(parents=True, exist_ok=True)
     except OSError:

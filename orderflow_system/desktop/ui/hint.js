@@ -192,7 +192,8 @@
                 if (window.showView) window.showView('ofx');
                 break;
             case 'instruments':
-                if (window.showView) window.showView('instruments');
+                if (window.OFAPNAV) window.OFAPNAV.jump('instruments');
+                else if (window.showView) window.showView('instruments');
                 break;
             case 'wizard':
                 if (typeof window.openWizard === 'function') window.openWizard();

@@ -1,6 +1,326 @@
 # Resume here — ModFlow OrderFlow Analysis Suite
 
-> ## ▶ RE-ATTENDANCE (latest, 2026-09-19 — **§118: the audit's safe remainder — the paper desk (Trade DOM ladder · bracket editing after entry · session ledger + CSV export · the Chart strip) · heat dimming + large-size highlight on both surfaces · the fresh-DB journal fix; live-verified; nothing committed**)
+> ## ▶ RE-ATTENDANCE (latest, 2026-09-21 — **§148: the final audit — CLOSED; every register row fixed and receipted, the public docs' counts re-derived and synced.** Baseline HEAD `797eea0`
+> (2,389/3/0) re-derived against §147's claims and confirmed; the brief's seven steps are under way —
+> every in-repo gate re-run green, seven read-only module audits consolidated, and each confirmed defect
+> fixed **with its missing regression pin, proven to bite**. **70 fixed / 42 open (P1 0 · P2 4 · P3 38); ALL P1s are fixed** —
+> the seven headline P1s (marks layer, ladder template, risk-gate binding, retention persistence,
+> entry-time R, DST zones, the two why-card honesty P1s), plus **AB-01** (the alert rehearsal/test-fire
+> now runs the same `at_price`/`min_age_s` scope gates the live engine refuses on, from one shared
+> `_scope_gates`), **AB-02** (malformed `conditions` were silently dropped, so a typo made the rule
+> fire LOUDER than authored; entries are now quarantined as never-met at the single parse point, the
+> authored text kept for a save round-trip), **AB-03** (`_cap_lines` could empty the evidence
+> block to make room for its `+N more` note — at the legal cap (40) the block came back "" and the
+> panel claimed "the snapshot was empty"; the marked first-line cut now sits after the pop loop, so
+> a block with rows never returns nothing) and **AB-04** (the block's window had no upper bound — a
+> snapshot held NOW, read against an older event, dragged the current tape and the provider's own
+> delta into the old event's block, making a two-minute-old event's block identical to a now event's;
+> both bounds now, and a delta that ends after the block's window is not used — every live receipt
+> includes its pre-fix run caught against the still-running old server, and AB-04's also covers two
+> real wire fires; one new own finding filed along the way: the window labels' span claim vs the tape
+> ring's real coverage), and **AB-05** (a rule authored with a non-numeric threshold threw straight
+> out of `evaluate()` and rode the per-tick detection path into the feed's catch — 31 tracebacks in
+> 83 s live with that tick's wire/emit/DB output lost; unreadable rules are now counted and skipped
+> in `evaluate` and `evaluate_touch`, the rehearsal refuses with a sentence, and `hub._dispatch` is
+> armoured — old build 31 error lines in-window, fixed build 0, `unreadable: {'ab05-typo': 303}`),
+> and **AB-06** (legacy rule shapes were misread or fatal: `"channels": "telegram"` came back as
+> per-letter noise while the save route answered 200, a params string or `"30s"` clock 500'd the
+> save, and — the severe half — the same shapes in the stored rules failed the engine START itself;
+> all shapes now read quiet: strings are lists, unreadable reads off/default, authored text is kept
+> verbatim, and a junk entry becomes a visible disabled placeholder — old build start 'error',
+> fixed build start running with 23/23 rules loaded), and **AB-07** (the side catalogue promises
+> "bid/ask are read as the same thing": `==`/`!=` honoured it while the text `in`/`not_in` branch
+> compared raw strings — an author listing "bid" built a condition that could never meet a buy, and
+> `not_in ["bid"]` fired on exactly the buys it excluded; both sides of the list ops now read
+> through the same `_side_word` normalisation the equality ops use — old build `in ['bid']` False on
+> a buy while `not_in ['bid']` fired, fixed build True/quiet, `==` and `in` agreeing on every
+> spelling), and **AB-08** (a delta over a window that held no prints printed as a measured zero —
+> the block's bare "+0.00" and a `<= 0` condition meeting on it; measured as **latent on the
+> shipped wiring** (both live ctx sources carry no delta, so the live kind walk showed no delta line
+> at all) and real at the contract level every helper accepts — now "delta 60s: no prints", that
+> delta reads unreadable so it never meets, while a genuinely balanced window keeps its
+> "+0.00 (buy 50% / sell 50%)"), and **AB-09** (`notification_text()` was dead — zero production
+> callers — with a docstring claiming "notify.py's formatters use this", while the real appender is
+> `notify._with_context`; and the dead render had drifted: a sentence-less alert came back with a
+> leading blank line and the block unstripped. It now delegates to the one appender, so a whole-alert
+> render and a channel body are the same text by construction — receipted live through a real
+> rehearsal answer's sentence + block and all three channel formatters), and **AB-10** (the
+> conditions gate's sentence ignored the rule's `match` — an `any` rule that met one condition
+> claimed "every condition is met", and any-fail said "at least one condition is not met" as if the
+> bar were every; now keyed on the same reader the evaluation uses: any-pass "at least one condition
+> is met", any-fail "no condition is met", `all` unchanged — live, the full matrix true over its own
+> rows), and **AB-11** (the rehearsal rendered the evidence block unconditionally — a rule whose
+> evidence was switched off, or whose channels wake nobody, was shown a block no notification would
+> carry; pre-fix, all three shapes returned the identical block. One gate, two consumers:
+> `_block_ride` decides the render in the delivery path and is reported to the client as
+> `context_gate`, so the answer carries no block when none would ride — and the client names the gate
+> that held it back), and **AB-12** (the JS header documented a fallback that exists nowhere — "the
+> block is then the last real alert's own"; nothing supplies it, the answer carries no block, and the
+> header now says so, with the invariant asserted in the selftest), and **AB-13** (the CSV block's cap
+> used the text capper — a bare "+N more" line among three-field rows, a malformed table; the CSV cap
+> now drops whole rows, writes the marker as a row of the same shape, and keeps the column header
+> uncut — live, one-field marker rows before, three fields throughout after), and **AB-14** (the
+> rehearsal read the alert log's scalarised copy of an event that fired — a cooling kind's newest
+> event was invisible; it now reads the newest raw event the engine itself evaluated, same shape the
+> live path read, with the log as the documented fallback; the age face was live-measured, the shape
+> face is a contract matter — and one frozen assertion met the update-and-strengthen rule). **AB-15**
+> made a set param a member list (a typo can no longer become a rule that can never match, and the
+> panel names it — a selftest assertion that had frozen the defect was corrected, 8th instance), and
+> **AB-16** re-measured the upgrade package's alert-builder counts (77 tests / 17 checks) with the
+> fine print its "legacy rules behave exactly as before" claim earned. The pin-proof harness itself
+> was hardened to edit and hash bytes (a CRLF file's endings had been at risk). **T5-F01..F03**: the
+> funding sentence paired one venue's rate with the cross-venue median annualised (live:
+> "+0.010%/8h (+9.9% annualised)" while the rate annualises to 10.95%) — the payload now carries
+> `rate_apr_pct` and the sentence's parenthetical comes from it, both halves; the OI fallback no
+> longer claims a span nobody measured ("over the last 0 s" → no span claim, the number's source
+> named instead); OKX's contract count is no longer published under the coin's label. **T6-F02/F03/
+> F06**: a folded depth cell is now the interval's newest snapshot, not a union (live: 147 levels in
+> a 40-level cell → exactly 40), late-stamped books are skipped and counted (`late_skipped`), the
+> ladder key is half-up everywhere (four sites; fuzz 120/240 → 0/240), the store's future-stamped
+> books fall back to the stream's own clock and are counted (`future_skipped`; the day-ahead face is
+> a defence the live tape cannot produce — carried by pin + harness and said so), and the panel's
+> markers are drawn on their own cell's SLOT in the bucket array, newest-first under a cap (measured
+> live: 154 of 400 markers one column off on the old reading, over a tape that skipped one cell).
+> **T4-F2..F5** (the last four P2s): a non-finite number in `config.json` no longer 500s every
+> read — and the save-time sanitiser (`config_store._feature_sanitise`, a blanket `except Exception:
+> return`) that had been silently aborting mid-write now completes, so the poison no longer reaches
+> the file either (`months: inf` -> `6`, measured); a user template that shadows a built-in is no
+> longer deleted by the panel's copy flow; an unbounded leg weight is clamped to the panel's own
+> 1000 cap; the documented `"12:00-13:00 lunch"` break keeps its label. Live two phases: the old read
+> off the still-running pre-fix server (before the first edit; pre-fix shas reconstructed and
+> matched), the new off the relaunched fixed build.
+> **T5 wave 1 (F-04..F-10)**: the is-flat chip now reads the threshold from the settings the route
+> already sends (the payload never carried it; live, the served panel went from `is-long` to
+> `is-flat` on a 0.2% venue beside a 5% setting); the flat words no longer throw / print
+> "undefined%" with a bare cfg; Hyperliquid's computed OI-USD is now labelled computed; the capped
+> read no longer counts its own probe row (an exact-budget store read as capped); the capped note
+> and trim hint quote the read's own split budget (the rows route said `capped at 60000` against its
+> own 20000); and the route's order now mirrors the panel's (worst first, an unreadable letter
+> leading — live, `ZZZNOSUCH` before `BTCUSDT`; the prepared helper had sorted best-first and the
+> new pin caught it on its first run).
+> **T5 wave 2 (F-11..F-17)**: the capped row's advice now names the setting a user can change
+> (Settings ▸ Data quality ▸ Data-quality window — `param_registry` really shows it) and says why
+> a retention prune cannot uncap the read (it trims the OLD end; the read counts from the
+> newest); `ROUTE_PRUNE` went with its only user. The header stopped claiming `count_ticks`
+> among this route's reads and now names all six repair actions. The derivatives cache carries a
+> bound (`CACHE_MAX = 32`, oldest first) and the route stores through it. The dead
+> `weekend_days` counter is gone — its weekday note lives at `session_open_ms`, the only live
+> reader, which behaves unchanged. The gap table's header says "Last print before the gap
+> (UTC)" (the selftest paints it and asserts it). And the id audit walks every module and every
+> UI page — which caught a real bug the old three-file scan could not see: vwap.js mounted the
+> Depth-executions card under `inCard`, an id that has never existed in this repo's history, so
+> the panel never mounted; `logBody` was a stale read of the `logList` scroller; `monStatus`
+> lives on monitor.html. All fixed (the intent card carries `id="tkIntentCard"`), the guide's
+> "Overview" line corrected to Trackers, and the audit's own report moved from 162 ids to 344,
+> missing 0 either way.
+> **Closed 2026-09-21.** The last six opens landed in batch 29 (T6-F7..F11 + the AB-04-era own
+> finding), then the switcher notifier + convergence waves, the program-wide control-pair matching
+> audit, and the close-out: the `BLOCK_FAILED` fallback with its proven pin, every count the public
+> docs claim re-derived (README/CONTRIBUTING/upgrade package), and the register's stale NEXT lines
+> corrected. Register: **113 [FIXED] / 0 open** (P1 0 · P2 0 · P3 0) + 1 [VERIFIED] compose check.
+> **Gates (final, 2026-09-21, §149b re-run): 2,494 passed / 3 skipped / 0 failed · ruff clean · AUDIT CLEAN (346 ids;
+> 192 /api routes) · metric hygiene CLEAN · 57 selftests, 0 nonzero · pin-proof harness 154 cases, 0 problem(s) — every pin bites — and the §149b fold case makes it **155, 0 problem(s), every pin bites** (re-run complete).** Full
+> record: `AUDIT_REGISTER.md` (its head carries `§148 — CLOSED`); boot map: `RESUME.md` — both in
+> `C:\Users\Moddy\AppData\Local\hermes\profiles\deepseek\runtime\ofap_s148\`. **Nothing committed.**
+> **Live state at close:** the windowed app was relaunched at his launch form on 127.0.0.1:8081; the engine is running on bybit, streaming 7 instruments (APTUSDT, BTCUSDT, ETHUSDT, SOLUSDT, SUIUSDT, TRXUSDT, XRPUSDT), 7 advancing.
+>
+> **§149/§149b supplement (same day):** the storage card gained **Clear app cache** (WebView2 caches are freed live — what the open window holds goes at the next start, through a boot flag the launcher honours) and **archive open / delete quarantine** controls (`/storage/clear_cache`, `/storage/clear_archive`, `folder/open {folder:'archive'}`); the DB size budget is set (2 GB). The Overview's **Systems board gained its hide/show button** (`#systemsHide`; the folded state persists as `ui.systems_hidden` — config, never localStorage, which the cache clear would wipe). Gates re-run: 2,494 / 3 skipped / 0 failed · ruff + both audits clean (**346 ids**) · 57 selftests · served == disk on the relaunched app · live round-trip `ui.systems_hidden` true → false. Harness re-run complete: **155 cases, 0 problems** (`runtime/ofap_s148/pin_run_s149b.txt`; the §149b scripts sit in `runtime/ofap_s149/s149b_*.py`).
+>
+> **Resume prompt:** `OFAP: §148 is CLOSED — 113 [FIXED] / 0 open, suite 2494/3/0, docs re-derived; §149 storage-card follow-ups + §149b systems-fold button landed (nothing committed). Read AUDIT_REGISTER.md + RESUME.md in C:\Users\Moddy\AppData\Local\hermes\profiles\deepseek\runtime\ofap_s148; owed on his word: rebuild, commit/push, the physical multi-monitor pass.`
+>
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-20 — **§147: the upgrade package, applied.** The competitive
+> analysis (`docs/COMPETITIVE_ANALYSIS_2026-09.md`) compiled into `docs/UPGRADE_PACKAGE_2026-09.md` and
+> applied — paid features excluded by instruction. Ten workstreams, twelve new test suites (~490 tests),
+> nine config blocks owned by their modules, seven routers, five new views, 13 UI selftests (455 checks),
+> `docs/PERFORMANCE.md`, seven help topics. **Gates: 2,389 passed / 3 skipped / 0 failed, ruff clean,
+> AUDIT CLEAN (187 routes, 0 missing), live smoke 36 route objects with every new surface 200 — including
+> a `runner` template on the paper order receipt and a live Bybit funding read.** Self-caught: the
+> footprint block's `clean()` does not seed keys (registered as DEFAULTS), a depth-history bound that
+> disagreed with its own clamp, two dead help relations, and a shipped assertion that raised instead of
+> skipping. The honest remainder is §3 of the package: broker adapters, MAE/MFE writers, chart tabs,
+> study packs, options×flow confluence, depth-history retention persistence, a render-side FPS harness,
+> the mobile host policy.)
+>
+> **State.** Full record: SESSION_HANDOFF **§147**.
+>
+> **Owed.** The §129c frozen rebuild (dist/zip/SBOM/Setup) · commit/publish on his word · the physical
+> multi-monitor pass.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §147 closed (upgrade package applied and verified: 2389/3/0, AUDIT CLEAN 187 routes, live smoke green). Owed: the §129c rebuild, commit/publish on his word, the physical multi-monitor pass.`
+>
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§136: the owner's "go for all fixes" executed — the §135 audit's whole register, in one pass with pins. FG-01 README/CONTRIBUTING claims re-derived (tests badge 1,584→1,753; 115→126 modules; total 98,326→102,412L; suite 146→160 files) · FG-02 release identity pinned in the README (`0.1.0` ⇄ tag `v0.1.0-beta`; the tag is the publish act) · FG-05 documented (selector tooltip + Instruments help say a pick can start the engine) · FG-06 chart retry bounded (`CHART_RETRY_MAX = 12`, spoken, reset on selection) · FG-07 the live chip reuses the shell's payload · FG-08 the flaky case's capture isolated to the feed's logger (assertion unchanged; no recurrence). Gates 1,756/3/0 both interpreters, 41/41 selftests, AUDIT CLEAN, ruff clean, goldens exact, a 5-run flake loop all green. Rebuilt + re-batteried: smoke 18/18 (79 shell refs) · features 20/20 · journey 11/11 · guard probe 23/23; Setup `D921D58E…` (37,699,102 B), zip `6a1926a7…`, SBOM `26dad36f…`, dist exe `bb503bcd…` (BUILD_INFO `797eea0`, dirty, 22:42:07). The audit report is annotated CLOSED; nothing committed.**)
+>
+> **State.** Full record: SESSION_HANDOFF **§136**. Two process defects self-caught and fixed (a wiring script that claimed unwritten edits — read-backs are mandatory; a line-number claim map that broke when an earlier edit shifted the file — the claim pass is token-based now). Dirty count 99 (68 modified + 31 untracked).
+>
+> **Owed.** Commit/publish on his word (the push pass then watches CI to green) · his physical multi-monitor pass.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §136 closed (all §135 fixes executed, gates 1756/3/0, smoke 18/18, features 20/20, journey 11/11, probe 23/23; report annotated CLOSED). Owed: commit/publish on his word + the physical multi-monitor pass.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§135: the final release audit (the owner's Desktop `final audit prompt.txt`) — SHIP ONLY AFTER REQUIRED FIXES, and all four required items are release mechanics, not defects: the content is uncommitted (96 entries; CI has never run it), the distributables are the §129c build (§130–§134 not in them), the README's measured claims are stale (tests badge 1,584 vs 1,753; 115 modules vs 126), and the version identity is unpinned (no tag). No P0/P1 found; guards/fresh-profile/CSP/churn re-verified live, frozen-exe probe 23/23, gates 1,753/3/0 both interpreters, 41/41 selftests. One behaviour for his call: a top-bar symbol pick starts the engine once the Engine view has initialised. Report `docs/FINAL_RELEASE_AUDIT_v0.1b.md`; evidence `Desktop\OFAP_v0.1b_final_audit\`. Report-only: no code changed, nothing committed.**)
+>
+> **State.** Full record: SESSION_HANDOFF **§135**. New findings: FG-01 README drift · FG-02 identity/tag · FG-03 artifact lag (6 UI files + `engine-progress.js`) · FG-04 uncommitted content · FG-05 pick-starts-engine · FG-06 chart retry cap · FG-07 duplicate status fetch · FG-08 a 1-in-5-run flaky test case (hyperliquid feed, green 6/6 in isolation). Receipts: `receipts\audit_summary.json` + `evidence\` (26 files) + `ev\` (13 re-runnable probes). No source file was touched: the audit's baseline held 96 entries and the tree now counts 97 — the one new file is the report itself.
+>
+> **Owed.** The four required items on his word: (1) the push pass (commit the 96-entry delta, watch CI to green), (2) the README re-derivation pass, (3) the version/tag decision, (4) the rebuild-or-ship-the-snapshot decision · the FG-05 call (document / gate / say-it-in-the-toast) · unchanged: his physical multi-monitor pass, commit/publish on his word.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §135 closed (final release audit: SHIP ONLY AFTER REQUIRED FIXES, no P0/P1; required items = commit the delta, re-derive the README counts, pin the version/tag, decide the rebuild; FG-05 = a symbol pick starts the engine). Owed: those four on his word + the FG-05 call.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§134: the menu closing by itself, root-caused — the app scrolls ITSELF (the strips pin to the newest print, the signal log sticks to its bottom) and the menubar obeyed every `scroll` event, so the menu died mid-reach once data flowed: "fine at first, broken after 10-20 s". The closer is now the real gesture — `wheel`/`touchmove` outside the bar — with the dropdown exempt; mousedown/focusin/blur/Tab/Escape untouched. Receipts: 12 app-generated scrolls in 3 s with the menu open for 6 s (was: closed at once); wheel inside stays, wheel outside closes; a pin now fails if a scroll-event closer ever returns. Gates 1,753/3/0 both interpreters, 41/41 selftests, AUDIT CLEAN, ruff clean. Source-only.**)
+>
+> **State.** Full record: SESSION_HANDOFF **§134**. Diagnosed by instrumenting the page (capture hooks on scroll/focusin/blur/ofap:relayout/Tab) — the killer was `scroll` on `div.wf-body | inBar=false` at t+49 s; the scrollers are `strips.js` (pinned to the newest print) and `ui.js` (the signal log's sticky bottom). `test_listener_balance` moved menubar.js 20 → 21 with the reason recorded. Probes `runtime/ofap_s134*`.
+>
+> **Owed.** A rebuild if §130–§134 should ride in the distributables · his call on the §130 picker semantics · his physical multi-monitor pass · commit/publish on his word.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §134 closed (menu-closed-by-itself: the app's own scrolling closed it; closer now wheel/touchmove; gates 1753/3/0). Owed: a rebuild decision for §130–§134, his call on the picker semantics, the physical multi-monitor pass, commit/publish.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§133: the engine bar's placement fixed — the owner's screenshot showed it covering the Classic/Terminal switch. An absolute anchor off the button cluster lands on a neighbour (measured: bar 1928→2080 over the switch 1949→2080); the bar is now the cluster's FIRST child, in flow with its width RESERVED (`flex: 0 1 152px`, `visibility: hidden` when idle, `hidden`'s `display: none` overridden), so the top bar's spacer absorbs it and nothing to its right ever moves — `overlaps: []` and an EMPTY moved-controls list, idle vs visible. Crowded bars give way (152 → 118 → 96 px) with the caption ellipsising. Gates 1,753/3/0 both interpreters, 41/41 selftests, AUDIT CLEAN, ruff clean. Source-only.**)
+>
+> **State.** Full record: SESSION_HANDOFF **§133** (and §132 for the bar itself). Probes `runtime/ofap_s133*` — geometry by boxes: every top-bar control's rect idle vs visible identical, the bar's box intersected against each (`overlaps: []`); narrow widths via CDP `Emulation.setDeviceMetricsOverride` (1200 px already collides pill-to-pill with the bar HIDDEN — pre-existing, and why the media give-way exists).
+>
+> **Owed.** A rebuild if §130–§133 should ride in the distributables · his call on the §130 picker semantics · his physical multi-monitor pass · commit/publish on his word.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §133 closed (engine bar placement: in flow, reserved width, no overlap; gates 1753/3/0, 41/41 selftests). Owed: a rebuild decision for §130–§133, his call on the picker semantics, the physical multi-monitor pass, commit/publish.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§132: the engine progress bar (the owner's ask) — a live stage readout beside Start/Stop: green up, red down, honest about a stop that really takes ten seconds. The engine now publishes its own stages (`config · instruments · build · connect` / `feeds · history · release`) with measured durations; the bar names the stage, ticks the seconds, creeps while a stage runs, says "live" only after a real print, and fades when settled. Measured: start 0.47 s + ~1.8 s to first tick; stop 10.3 s of which `release` is 10.0 s. Five defects found by driving the real page and fixed; the bar's one beat is handed to the pause registry. Gates 1,753/3/0 both interpreters, 41/41 selftests, AUDIT CLEAN, ruff clean. Source-only.**)
+>
+> **State.** Full record: SESSION_HANDOFF **§132**. `EngineController.STAGE_PLAN` + `_mark()` (the route serves `stage`, `stage_at`, `stage_ms`, `stage_plan`, `stage_log`); the bar is `desktop/ui/engine-progress.js` (pure half + selftested fill/caption/settle maths) mounted into the new `#engineCtl` cluster and styled in `ui.css` — absolutely positioned in the top bar's empty spacer so nothing shifts when it appears. Green up (`reading your setup → preparing instruments → building the run → connecting the feed → waiting for ticks → live`), red down (`closing the feed → flushing history → finishing the shutdown → stopped`), 1.4 s hold on the closing word, hidden in zen. The buttons arm it on click; it polls the route itself while a transition runs (the shell's poll is held during user intent) and its single beat is registered with `OFAPPause` so `P` freezes the bar with the board.
+>
+> **Gates + receipts.** pytest **1,753 / 3 skipped / 0 failed** (+2 pins) · same under `PYTHONUTF8=0` · **41/41 node selftests** · AUDIT CLEAN · ruff clean · live (sandbox 8094 + CDP 9223, real clicks): stop t+0.01 `stopping the engine` 3 % → `finishing the shutdown` ticking to 95 % → t+10.3 `stopped` 100 % → hidden; start t+0.03 → `waiting for ticks` → t+1.9 `live`; 8 s quiet watch = 0 re-flashes; 0 client errors · probes `runtime/ofap_s132*`.
+>
+> **Owed.** A rebuild if §130–§132 should ride in the distributables · his call on the §130 picker semantics · his physical multi-monitor pass · commit/publish on his word.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §132 closed (engine progress bar + engine stage marks; gates 1753/3/0, 41/41 selftests). Owed: a rebuild decision for §130–§132, his call on the picker semantics, the physical multi-monitor pass, commit/publish.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§131: the owner's "3×2 cells on hover" find — a whole-panel tooltip (`placeFrame` set a native title on the FRAME, so every widget in the suite showed `view · w×h cells` wherever the pointer sat, over its own chart or prose). Fixed: the frame carries no title, the size moved to the resize grip (`Drag to resize this widget — now 6×4 cells`, refreshed on every placement change); the same class swept mechanically app-wide (both modes, menus, the windows dialog) — the frame was the only structural instance; two untitled Alpaca buttons given their own one-liners. Gates 1,751/3/0 both interpreters, 40/40 selftests, AUDIT CLEAN, ruff clean. Source-only.**)
+>
+> **State.** Full record: SESSION_HANDOFF **§131**. The rule applied: hover text belongs to a CONTROL, never to a container that spans content — a container's `title` silently becomes every untitled child's tooltip (measured: `<section class="widget-frame" title="Overview · 6×4 cells">` on every widget). The sweep: 78 visible hover texts in terminal mode, 92 in classic, ~190 per menu, plus the dialog; internal-vocabulary and "container is the only help for a control" classes both checked (0 remaining structural hits). Probes `runtime/ofap_s131*`.
+>
+> **Gates + receipts.** pytest **1,751 / 3 skipped / 0 failed** (+1 pin in `test_t4_trust.py`) · same under `PYTHONUTF8=0` · 40/40 node selftests · AUDIT CLEAN · ruff clean · live: frames `frameTitle: null`, bar `Drag to move this widget`, grip `… now 6×4 cells`, pointer over a panel body resolves to that panel's own inner control.
+>
+> **Owed.** His call on the §130 picker semantics · a rebuild if §130+§131 should ride in the distributables · unchanged: his physical multi-monitor pass, commit/publish on his word.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §131 closed (whole-panel hover text moved to the grip + app-wide hover-text sweep; gates 1751/3/0). Owed: his call on the picker semantics, a rebuild decision, the physical multi-monitor pass, commit/publish.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§130: the symbol row answered + one defect fixed — the widget frame titles never followed the instrument (every frame kept the symbol it was BUILT with; the fix asks the shell's own `paintStatus` on a top-bar change, pinned; gates 1,750/3/0 both interpreters, 40/40 selftests, AUDIT CLEAN, ruff clean). Two honesty gaps recorded for the owner's call: the picker's `selected` follows the TYPED box (uncommitted typing reads as current, and a re-pick of the same option fires no `change`), and the box+Enter path moves only the panel while a picker pick also mirrors the top bar. Source-only: the §129c artifacts predate this fix.**)
+>
+> **State.** Full record: SESSION_HANDOFF **§130**. Reproduced against a COPY of his config (his real `%APPDATA%\OrderFlowAnalysisPro\config.json` untouched): 49 instruments, engine streaming 7. Verified working: top bar = the streaming instruments and drives every panel; the engine's picker = all 49 configured grouped `streaming now / enabled / configured — off` with `SYMBOL — AssetClass` labels; picks move the panel and mirror the app-wide symbol (~1 s, store confirmed); unusable picks answer honestly (`◌ not enabled`, `⚠ not on this source`, `? unknown`). Broken: titles never repainted on a symbol change — the owner's "panel ETHUSDT / title BTCUSDT" contradiction. Fixed in `ui.js` (`OFAPSHELL.paintStatus()` after `ofap:symbol`), pinned in `test_t4_trust.py`, re-verified live.
+>
+> **Gates + receipts.** pytest **1,750 / 3 skipped / 0 failed** (+1 pin) · same under `PYTHONUTF8=0` · 40/40 node selftests · AUDIT CLEAN · ruff clean · receipts in `runtime/ofap_s130*` (config-copy recon, the row matrix with +0.3/+2.4/+6.4 s reads, the fetch-hooked pick trace, the group probes, the fix's live check). Skill: `orderflow-app-ops` → `references/instrument-symbol-row.md`.
+>
+> **Owed.** His call on the two honesty gaps (picker `selected` semantics; box vs picker path parity) · a rebuild if the fix should ride in the distributables · unchanged: his physical multi-monitor pass, commit/publish on his word.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §130 closed (symbol-row audit + the stale widget-titles fix; gates 1750/3/0). Owed: his call on the picker semantics + a rebuild decision, the physical multi-monitor pass, commit/publish.`
+>
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§129c: the owner's "rebuild" done — §128+§129+§129b frozen into dist/zip/SBOM/Setup (exe `1863553f…` · zip `b51b1c9f…` · SBOM `cc88e4cc…` · Setup `E39E3ADC…`, 37,693,744 B), battery green (frozen smoke 18/18, frozen features 20/20, installer journey 11/11), and one defect found by the rebuild itself: every `POST /api/control/layouts` answered with a DEFAULTED `autocull` flag instead of the stored one — fixed (parameter now mandatory), pinned, and re-shipped; gates 1,749/3/0 on both interpreters, AUDIT CLEAN, 40/40 selftests, ruff clean; nothing committed**)
+>
+> **State.** Full record: SESSION_HANDOFF **§129c** (and §129/§129b for the waves it carries). Launch reality check: the owner runs the DEV shortcut (`pythonw -m orderflow_system.desktop`), not the frozen build, and the page he was clicking predates §128 — so his "old" version menu was a stale page, not a stale artifact. The rebuild chain, in order, all on the same tree: gates → `build_exe.py --clean` (896 payload files, 232 pruned, 62 licence texts) → frozen smoke **18/18** → frozen features **20/20** → `make_release.py` → `installer/make_installer.ps1` → `verify_installer.ps1` **11/11**. `BUILD_INFO.json`: commit `797eea0`, worktree dirty, built 2026-09-19T20:20:02+0930. Numbers + receipts: `installer/README.md` → "Verified journey (Inno pipeline, the §129b rebuild)".
+>
+> **The defect the rebuild caught.** `POST /api/control/layouts {autocull:false}` answered `autocull: True` while the store held `False` — `layouts_post`'s returns relied on `_layouts_state(...)`'s DEFAULT for the new flag. Invisible to the tree's tests and to the UI (which re-reads state after acting). Fixed by making the parameter mandatory and passing the flag at every call site; pinned (`test_layout_versions.py` 12→13, including a source grep that fails if a default returns or a call site drops the flag). The wave's first build (exe `7aa420d2…`, 20:14) was superseded; the shipped artifacts are the 20:20 build.
+>
+> **Gates + receipts.** pytest **1,749 / 3 skipped / 0 failed** · same under `PYTHONUTF8=0` · AUDIT CLEAN (123 modules) · ruff clean · **40/40 node selftests** · frozen smoke **18/18** · frozen features **20/20** · the artifact's own WebView2 driven over CDP: wheel inside the open dropdown keeps it open (`scrollTop 260`) and the below-the-fold Rail row acts; the Layout menu's `✓Auto-cull old versions` row flips the route flag · installer journey **11/11** (install → ARP/Start Menu → headless boot → uninstall → all gone; `%APPDATA%\OrderFlowAnalysisPro` and his dev shortcut untouched) · nothing left installed, all scratch cleaned.
+>
+> **Owed.** The owner's **physical multi-monitor pass** (§128); commit/publish on his word (drafts first). Standing follow-ups unchanged: radar walls / big-trade zones, spent-state persistence, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §129c closed (rebuild shipped + the stale-flag write answer fixed and pinned; gates 1749/3/0; smoke 18/18, features 20/20, journey 11/11). Owed: the owner's physical multi-monitor pass, commit/publish on his word.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§128: the multi-monitor system audit — send-to-any-monitor + 10 snap shapes + the unplug rescue for every panel window, in BOTH views (widget ⧉ button, menu ⇥ panel, dialog rows + "another panel" pickers, aux-window self-move, Ctrl+Alt+W / Ctrl+Alt+Shift+←→); four defects found and fixed with pins and live receipts (the View-menu dialog was unreachable — one global per module now; the stranded detector missed live off-screen windows; the single-monitor send key re-centred a hand-placed window; the aux hash came back); gates green (1,740/3/0 on both interpreters, AUDIT CLEAN, 40/40 selftests, ruff clean); nothing committed**)
+>
+> **State.** Full record: SESSION_HANDOFF **§128**; audit doc `docs/MULTIMONITOR_SYSTEM_AUDIT.md`. What a user can do now, both modes: every widget frame carries **⧉** (its own window menu, expanded to that window's send/snap panel); any open window goes to any monitor or snaps to any of 10 shapes in one click (menu ⇥, dialog buttons, the aux window's own "⇥ monitor"); the dialog's "Another panel, on any monitor" row opens ANY panel on ANY monitor already placed (Classic's route, where there is no focused widget); a window whose monitor is gone is flagged (menu ⚠ + dialog banner) with **Bring them home**; hotkeys `Ctrl+Alt+W`, `Ctrl+Alt+Shift+→/←`. Route: `POST /api/control/windows {action: move|arrange}`; state answers `open_geometry` + `stranded` (store AND live rects).
+>
+> **Gates + receipts.** pytest **1,740 / 3 skipped / 0 failed** (start 1,696/3; +44 in `test_aux_windows.py` + `test_windowing_ui.py`) · same under `PYTHONUTF8=0` · AUDIT CLEAN (123 modules) · ruff clean · **40/40 node selftests** · goldens untouched · live on a sandboxed launcher (8094, scratch APPDATA, CDP 9223, EnumWindows): fill → OS (0,0,2560,1384), left half → (0,0,1280,1384), stranded push (9000,40) → banner → Bring them home → (640,0), both hotkeys fired, WM_CLOSE swept every aux window, **0 client errors**. `dist/`/zip/SBOM/Setup NOT rebuilt (source+tests+docs only; §127's artifacts still the release candidates).
+>
+> **Owed.** The owner's **physical multi-monitor pass**; commit/publish on his word (drafts first). Standing follow-ups unchanged: radar walls / big-trade zones, spent-state persistence, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §128 closed (multi-monitor audit + send/snap/rescue in both views, 4 defects fixed, gates 1740/3/0). Owed: the owner's physical multi-monitor pass, commit/publish on his word.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§127: the release-assurance fix pass — RA-01 fixed (+ its second live sink: the legend panel, caught by the re-probe) · RA-02 fixed (400 + sentence; sanitised filename; live 10/10) · RA-03 · F-05 · F-08 · gates green (1,673/3/0) · dist/zip/SBOM/Setup rebuilt + battery re-run (smoke 18/18, journey 17/17); nothing committed**)
+>
+> **State.** Full record: SESSION_HANDOFF **§127**; receipts `Desktop\OFAP_v0.1b_release_assurance_audit\evidence\x127_*.txt`. Every fix the §126 audit named is executed with pins (`test_ra_fixes.py`, 8): the readout AND the legend escape the symbol (the re-probe caught the legend as a second sink of the same class — `OFX.legend().live` carries `"${state.symbol} · Ns bars"`), the store clamps `instruments[].symbol` (the palette lanes keep `BTC/USD`), the export tag is a filename-safe component and a missing store answers `400 + sentence`, the Bybit URL is quoted, aborts are filter-dropped from the logs, and the sha1/SQL lint-noise items are annotated/static. Live: crafted symbol = TEXT in both sinks (0 parsed elements), fresh-profile export 400, `ticks-BTCUSDT-…csv` rows=1, 10/10 HTTP receipts.
+>
+> **Gates + artifacts.** pytest **1,673 / 3 skipped / 0 failed** · AUDIT CLEAN (123 modules) · ruff clean · 40/40 selftests · goldens exact · rebuild: Setup **37,661,860 B** sha256 `0D0BF7C5…`, zip `113be091…` (43,001,835 B), SBOM `8e2fa4b0…`, dist exe `8ae3b250…`; frozen smoke **18/18**, Setup journey **17/17 ALL PASS**.
+>
+> **Owed.** **Commit/publish** on his word (drafts first). Standing follow-ups unchanged: radar walls / big-trade zones, spent-state persistence, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §127 closed (release-assurance fix pass + rebuilt artifacts, all receipts green). Owed: commit/publish on his word, the standing follow-ups.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§126: the final release assurance audit — decision: SHIP ONLY AFTER REQUIRED FIXES — RA-01 (symbol → innerHTML element injection proven live; escape + charset clamp owed) — RA-02 (data/export 500s on a fresh profile and on '/' symbols; sanitise + 400s owed) — everything else re-verified: guard family live, CSP 0 violations over 33 views, churn flat, secrets/deps/CI clean, smoke 18/18 + journey 17/17; report-only pass, nothing committed**)
+>
+> **State.** Full record: SESSION_HANDOFF **§126**; report `docs/FINAL_RELEASE_ASSURANCE_AUDIT_v0.1b.md`; evidence `Desktop\OFAP_v0.1b_release_assurance_audit\`. The audit re-derived every claim from this tree and re-checked both prior ledgers (SS-1→SS-14 all closed incl. SS-8 now done; F-01→F-04 closed/re-verified; F-05/F-07/F-08 are the only carries). Two new findings, both confirmed live on the frozen build: **RA-01** — the Engine readout's unescaped `${sym}` + no symbol charset clamp (crafted symbol produced a real `<img>` in the DOM; `.upper()` + CSP block execution); **RA-02** — `/api/control/data/export` 500s (fresh DB; '/' symbol; filename tag unsanitised). **RA-03** — `bybit_validate()` URL quoting. Ownership table complete; soak receipts in the evidence dir (harness quirk noted: its RSS column reads the launcher shim; the child's real RSS is recorded separately).
+>
+> **Gates.** Full stack re-run today: pytest **1,665 / 3 skipped / 0 failed** (1,668 collected) · AUDIT CLEAN (123 modules) · ruff clean · 40/40 selftests · goldens exact · security subset 83 passed · pip-audit clean · bandit triaged · smoke 18/18 · journey 17/17 · guard probe 15/17 (both failures = RA-02) · churn flat · CSP sweep clean.
+>
+> **Owed.** The Stage-1 fixes (RA-01 + RA-02 + RA-03) with pins → re-run gates + packaging battery → **rebuild**. Then the standing **commit/publish** on his word (drafts first). Standing follow-ups unchanged: radar walls / big-trade zones, spent-state persistence, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §126 closed (release-assurance audit: ship only after RA-01/RA-02/RA-03 fixes). Owed: the fix pass + rebuild, then commit/publish on his word.`
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§125: the last staged three + the rebuild — MT5-style novelty-gated tips ("Try next", retires by itself) · the ingest-gap provenance counter on the data pill · Bookmap's range-to-table events list + CSV · dist/zip/SBOM/installer rebuilt over the whole tree (frozen smoke 18/18, Setup journey 17/17 ALL PASS); live-verified; nothing committed**)
+>
+> **State.** Full record: SESSION_HANDOFF **§125**. The v2 reanalysis is now fully executed. **tips.js** mounts a "Try next" card in the Guide view — four tips (layouts / workspaces / alerts / journal) gated on the STORE, each a launcher (view / help topic / ☰ menu), `N of 4 un-tried`, the card removes itself once everything is tried. **`tick_gaps()`** (engine.py) + the data-pill tooltip answer "was the feed inside the tape I just read?" — a gap is wider than max(5 s, 10 × the symbol's own median), so a thin symbol's cadence is never miscalled; live: 425 ticks, 135 intervals, 0 gaps, worst 3.7 s. The heatmap's selection strip gained **"Events in region"** — the boxed band's own walls/grows/pulls/spikes from the payload's `events` (no new route), with the honest empty sentence and **Export events CSV** through `/export/save`. Then the **rebuild**: dist exe `b2eb32d8…`, Setup `5B8BF8B4…` (37,659,252 bytes), zip `917a48b2…`, SBOM `eb51942b…`; frozen smoke **18/18** (asset parity 78 shell refs byte-identical), Setup journey **17/17 ALL PASS** (silent install → installed-exe hash == dist → smoke → silent uninstall → his dev desktop shortcut untouched, `%APPDATA%` untouched).
+>
+> **Gates.** pytest **1665 / 3 skipped / 0 failed** (start 1653/3; +12 = engine_gaps 7 · heatmap_pro 1 · tips 4); AUDIT CLEAN (123 modules); 40/40 node selftests; ruff clean; goldens exact. Live pass on the sandbox (8099, scratch APPDATA, engine running) — pill tooltip, tips card, events box + export; no client errors. Crash note: the pass died at its certification batch's `taskkill /F /IM python.exe` (killed the agent host, not any app process); the certification was re-run identically on the frozen tree.
+>
+> **Owed.** **Commit/publish** on his word (drafts first). Standing follow-ups unchanged: radar walls / big-trade zones, spent-state persistence, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §125 closed (tips, ingest provenance, range-to-table, rebuild + packaging receipts; tree certified 1665/3/0). Owed: commit/publish on his word, the standing follow-ups.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§124: the staged fixes executed — Trackers wired (5 dark routes → 5 live cards) · control surface closed (delta family, distinct Bars labels, DEBUG filter, hover-help coverage, 9-value source list, calendar persistence) · bounds unified + the enum round-trip pin (caught a second lie) · Tools ▸ Export door · stubs decided (Recent real, list editor real, Exit truthful) · 19 preset comboboxes · toast Help→ door · profile chip; live-verified; nothing committed**)
+>
+> **State.** Full record: SESSION_HANDOFF **§124**. Everything staged in `docs/COMPETITIVE_REANALYSIS_v2_2026-09-19.md` §7 that could be built this pass is built and receipt-backed: Trackers' five advertised reads (crossvenue/correlation/dots/intent/recent-trades) render on the 4 s beat; the control-surface audit's whole one-liner class closed (delta option & copy, "default"/"classic candles" split, DEBUG in the Logs filter, case-insensitive hover-help covering all four selects, Settings source list built from `/api/control/sources` → 9 live options, calendar hours/impact persisted); registry=markup=store bounds unified and pinned, and the new enum round-trip pin caught `search.default_view` (13 views offered, 6 kept — store now accepts all 13); Tools ▸ Export writes the three server CSVs through `/export/save`; the stub list decided (Reset rail order removed; **Recent** promoted — config `ui.recent`, live write→read; **list editor** real — `/params` takes lists; Exit disabled-with-reason); settings staged rows show the **was**-value; **presets.js** decorates the 19 controls; toasts carry a **Help →** door; the status bar carries the **active profile name**. Prune button, columns-rail reset modes and the ladder's ⇧-market grammar verified as already shipped (audit lines were stale — addendum added).
+>
+> **Gates.** pytest **1653 / 3 skipped / 0 failed** (start 1631/3; +22 across control_surface, param_registry, menus_pass, trackers_wiring, presets); AUDIT CLEAN (121 modules); 39/39 node selftests; ruff clean; live pass on the sandbox (port 8099, scratch APPDATA) — no client errors.
+>
+> **Owed.** **Commit/publish** on his word (drafts first). Rebuild dist/zip/SBOM/installer over this tree. Staged open: novelty-gated tips layer · MT5-ingest provenance counter · range-to-table events list.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §124 closed (staged fixes executed: Trackers wired, control surface closed, bounds pinned, Export door, stubs decided, presets, chrome). Owed: rebuild + commit/publish on his word; open: tips layer, provenance counter, range-to-table.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§123: the wizard & help audit (wizard.txt) — Esc/Enter/Tab + focus-in for every overlay · truthful ✕ (keeps your place, says so) · visited dots navigate · the dead-click class closed (bridges/start.identity were silent) · every inline card + the Guide view carry "Open in the Help Centre →" · 7 dead menu rows are doors · a new test_guide.py gate; live-verified; nothing committed**)
+>
+> **State.** Full record: SESSION_HANDOFF **§123**. Audited `guide.js` (wizard + Guide view + inline cards + notices — no gate at all before this) and the Help Centre against industry norms. Fixed: overlay keyboard grammar (Esc through the overlay's own close → wizard keeps its place + speaks; Enter advances on dialog focus; Tab trapped; focus enters the dialog), the lying ✕ tooltip, inert progress dots (visited ones now navigate back), two genuinely dead `data-help` clicks (bridges, start.identity — unknown ids returned silently; now `OFAPHELP.open(id)` lands them in the Centre; note `studies` was fine — its inline topic is added at runtime by studies.js), inline cards and the Guide view now carry "Open in the Help Centre →" (`CENTRE_QUERY` covers static + runtime ids), and seven menu rows that named real panels stop saying "planned" (Replay…→Replay, Studies library→Studies, Import profile…→Profiles, Export data…→exports folder, Notifications…/History & retention…/Performance…→Settings + a spoken pointer). New `test_guide.py` pins the whole layer (door targets must be real views; inline ids must have Centre continuations; step contract; the promoted rows).
+>
+> **Gates.** pytest **1631 / 3 skipped / 0 failed** (start 1623/3; +8); AUDIT CLEAN; ruff clean; 38/38 node selftests; ledger guide.js (4,0); live: focus-in + Enter + Esc-toast + dot jump + Tab wrap + all four data-help clicks + both doors + three menu rows, each with receipts. Owner's app relaunched on the current tree. Push-pass deltas: tests→1631.
+>
+> **Owed.** **Commit/publish** on his word (unchanged; drafts first). Standing follow-ups: radar walls / big-trade zones, spent-state persistence, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §123 closed (wizard/help audit: overlay keyboard, truthful close, dead clicks closed, Centre doors, 7 menu doors, test_guide gate). Owed: commit/publish on his word, the standing follow-ups.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§122: the dulling explained and leashed (ceiling drift measured x1.84/4 min → capped at 5%/min, smooth, pin still instant) · the Detail control (100 ms–5 s column width, live-applied) → zoom range 6 s … 75 min · atlas dials apply without restart; live-verified on his own install; nothing committed**)
+>
+> **State.** Full record: SESSION_HANDOFF **§122**. "Initially bright then dulls" was the colour ceiling (top 5% of the visible window) drifting x1.84 in 3.75 min as the window fills — measured, then leashed: the percentile stays the target, the applied ceiling walks 25% of the gap per build, capped 5%/min (a heap-light); an explicit pin bypasses the leash; `clear()` resets it; payload carries `scale_target`. Deep zoom: the **Detail** select (bucket 100 ms–5 s) now exists in the heat bar, posts the registered param and applies **live** (params endpoint re-tunes the running hub); a width change restarts the buffer with a spoken note; Window labels are time = cols × width and follow the payload. Range: 6 s … 75 min (+ `max_columns` dial → ~5.5 h).
+>
+> **Gates.** pytest **1623 / 3 skipped / 0 failed** (start 1614/3; +9); AUDIT CLEAN; ruff clean; 38/38 node selftests; live receipts both in the sandbox (drift x1.18 post-fix, 0.3%/14 s steps) and on the owner's install (engine streaming, heatmap ingesting, applied 3.80→3.772 vs target 3.80→3.688). Worktree dirty; HEAD `797eea0`. Push-pass deltas: tests→1623.
+>
+> **Owed.** **Commit/publish** on his word (unchanged; drafts first). Standing follow-ups: radar walls / big-trade zones, spent-state persistence, config slots. Refinement notes: the Engine view's heat rides the same leashed payload (one fix, both surfaces); windows beyond 15 min need the `max_columns` dial raised.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §122 closed (ceiling leash + Detail control + live dial apply; dulling measured and fixed). Owed: commit/publish on his word, the standing follow-ups.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§121: the liquidity map at industry standard — the missing time anchor (server `until`) · cursor-anchored wheel zoom · middle/shift-drag pan · click-off clears the box · more zoom options (8 windows / 7 row steps) · the live chip; and the real reason zoom looked dead: the intent gate deferred the repaint behind the wheel's own 900 ms lease — deliberate paths now force past it; live-verified; nothing committed**)
+>
+> **State.** Full record: SESSION_HANDOFF **§121**. His second report ("still not seeing any correct zoom… shift middle scroll wheel does nothing… box does not disappear on off click") led to a full mechanics audit — and the headline cause was in `intent.js`: every wheel leases the heatmap surface for **900 ms** and `loadHeatmap` **deferred** while held (each tick re-leased and replaced the deferred run), so with real input the repaint only landed ~1 s after the wheel stopped. §120's probe slept past the lease and counted the deferred fetch — masked. Fix: `loadHeatmap(force)` — deliberate paths (wheel, pan, dropdown) force; auto/slow poll still defers. Plus the missing server primitive: `snapshot(…, until_ms)` + `?until=` (epoch ms; payload carries `bucket_ms`/`have_from_ms`/`have_to_ms`; before-buffer answers a spoken note) and the new `ui/heatview.js` viewport module (pure zoom/pan/snap maths, 31 selftest checks; ladders 1–15 min × 60–400 rows, pinned equal to index.html's dropdowns). Grammar now Bookmap-style: wheel up = zoom in (inverted), shift+wheel / wheel on the price gutter = rows, deltaX read too; middle- or shift+drag = pan (throttled, final load on release); ←/→ pan (shift ×10); Home = live; click = clear the box (spoken); live chip + info line show "live" vs "N back"; fit snaps live.
+>
+> **Gates.** pytest **1614 / 3 skipped / 0 failed** (start 1599/3; +15); AUDIT CLEAN (119 modules); ruff clean; **38/38** node selftests; live receipts incl. **1 fetch within 300 ms of a wheel** (was ~1 s deferred), cursor-time drift 952 ms ≈ 1 bucket on anchored zoom, pan clamp at `haveFrom+W`, auto-pause while panned (0 fetches/6 s), shift+← exactly −10 buckets, click-off clear, Home/chip/fit → live. HEAD `797eea0`, nothing committed. Push-pass deltas: tests→1614, selftests→38, audit modules→119.
+>
+> **Owed.** **Commit/publish** on his word (unchanged; drafts first). Standing follow-ups: radar walls / big-trade zones, spent-state persistence, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §121 closed (liquidity map: server until-anchor, heatview module, cursor-anchored zoom, pan, click-off clear, live chip; intent-deferral force path). Owed: commit/publish on his word, the standing follow-ups.`
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§120: the liquidity map audited and made seamless — click no longer dims the map · one fetch per window change (was two) with sequenced loads and the overlay adopting the painted payload · drag tracks on the window · end-stops answer; live-verified; nothing committed**)
+>
+> **State.** Full record: SESSION_HANDOFF **§120**. His report: "when i click anywhere in the liquidity map it goes darker … the scroll wheen + shift doesnt function sealessly or at all." Root causes, live-proven: the selection was **born on mousedown** — a zero-size box whose outside-dim (`rgba(6,10,18,.62)`) covered the whole canvas, so any click darkened the map; every wheel/select change fetched the heatmap **twice** (the change's `loadHeatmap` + a 280 ms `pull`) on an **unsequenced** loader (a fast scroll could land stale columns); the click-refresh hook spent a fetch per click; the drag only tracked on the canvas (a box stopped extending at its edge). Fixes: clicks anchor, boxes are born only after 4 css px of real movement and track on the **window**; one fetch per settled change — `loadHeatmap` dispatches `ofap:heat-offer` and the overlay adopts that exact payload (`state.last === A.heat.last`); `A.heatSeq` drops stale answers; refresh repaints from cache; rapid scrolls coalesce to one fetch via `deferKeyed('heatmap','snap')`; wheel/rows end-stops say their window; mark/clear-markers speak; fit = one reload. New `heatmap-pro.selftest.js` + `test_heatmap_pro.py`; ledger (14,0).
+>
+> **Gates.** pytest **1599 / 3 skipped / 0 failed** (start 1594/3; +5); AUDIT CLEAN (117 modules — the new selftest joins the parse sweep); ruff clean 0.16.7; **37/37** node selftests (14 new); goldens untouched; live sandbox (real engine feed, auto-refresh off): click → 0 fetches, alpha 0; drag → box + dim 158 + "selected 21 × 57 cells"; wheel/shift/keys → 1 fetch per step, payload identity true; 3 rapid → 1 fetch, correct end state; stops 0 fetches; mark 0→1 no box; clear 2→0. HEAD `797eea0`, nothing committed. Push-pass count deltas: tests →1599, selftests →37.
+>
+> **Owed.** **Commit/publish** on his word (unchanged; drafts first). Standing follow-ups: radar walls / big-trade zones, spent-state persistence, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §120 closed (liquidity map: click/drag/wheel/shift audited and made seamless; one-fetch path; end-stops). Owed: commit/publish on his word, the standing follow-ups.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§119: the owner's list.txt — one menu hide (the boxed topbar toggle) · heatmap minimal no longer hides its own way back + fit really fits + m/wheel docs · the “← Back to X” context chip across help opens and task jumps; live-verified; nothing committed**)
+>
+> **State.** Full record: SESSION_HANDOFF **§119**. From `Desktop\list.txt`: (1) the menu bar's duplicate in-bar hide is gone — one control, the boxed topbar toggle, B on the keys; (2) the reported “click fit → it hides, no way back” root-caused to minimal mode hiding the very field that carries the pro bar (its restore button included) — the field is now exempt (`:not(:has(.hm-pro-bar))`), the face reads “minimal: on — restore”, `m` toggles, and `fit` clears the selection + resets Window/Rows through their own dials with a message (it was a silent no-op); (3) the heatmap wheel (zoom window / shift+wheel rows) existed — now documented in the tip + `m`; the hide-sweep verified rail/zen/menu/card ways back (card folds gained a title hint); (4) new `ui/navreturn.js`: one slot of context memory around `showView` — every route into help records the origin, registered jumps (`OFAPNAV.jump`) cover the hint card, the Engine look-up, heatmap→Replay and seven menu task rows; the “← Back to …” chip paints first in the destination head; manual nav clears it.
+>
+> **Gates.** pytest **1594 / 3 skipped / 0 failed** (start 1584/3); AUDIT CLEAN (116 modules); ruff clean; **36/36** node selftests; both goldens; live sandbox all four items + chip visual QA; sandbox stopped, port clear. HEAD `797eea0`, nothing committed. Push-pass deltas: tests →1594, UI modules →116, selftests →36.
+>
+> **Owed.** **Commit/publish** on his word (unchanged; drafts first). Standing follow-ups: radar walls / big-trade zones, spent-state persistence, config slots.
+>
+> **Resume prompt:** `OFAP: continue from docs/RESUME.md — §119 closed (list.txt: one menu hide, heatmap minimal way-back + fit semantics + m/wheel docs, the “← Back to X” navreturn chip). Owed: commit/publish on his word, the standing follow-ups.`
+
+> ## ▶ RE-ATTENDANCE (previous, 2026-09-19 — **§118: the audit's safe remainder — the paper desk (Trade DOM ladder · bracket editing after entry · session ledger + CSV export · the Chart strip) · heat dimming + large-size highlight on both surfaces · the fresh-DB journal fix; live-verified; nothing committed**)
 >
 > **State.** Full record: SESSION_HANDOFF **§118**; item-by-item diff: `docs/COMPETITIVE_AUDIT_DIFF.md`. Scope was "all safe and genuinely enhancing" from §117's not-built list: the **paper-only** half of Phase C (broker execution stays out — no real order path exists; every placement walks the armed switch + Lock + the one `submit()` door) plus B5's paint pair. New: `ui/ladder.js` (Trade DOM — print-centred, click grammar left=buy/right=sell, limit below / stop above, print row = market, shift = market, chips cancel; 30-check selftest; live-refused in its exact sentences, resting orders + fills + chip cancel on tape) · `paper.set_exits` + `/replay/paper/exits` + the ticket's exits row (Apply · Stop to entry · Clear — live: stop-outs and the breakeven fill) · the **session ledger** (start/submit/reject/fill/cancel/exits/end; tape clock + wall clock; card + **CSV export to the exports folder**, verified on disk) · the **Chart strip** (same account quick-fire) · `state.tick_size` on the wire + the session tick from the instrument record · `ofx.heat_dim/heat_highlight` + `atlas.heatmap.dim/highlight` (registry · store · scope editor mirrored · both bars · Engine palette alphas + live-cell outlines · Heatmap alpha pass + outlines; pixel-measured: dim 0.6 = −59 % luminance, exact restore) · the fresh-DB **journal fix** (`TRADE_JOURNAL_DDL` beside `TRADE_COLUMNS`; `paper_close` creates the table it writes to — the 500 is gone).
 >
@@ -895,3 +1215,21 @@ pin). Still nothing committed. | handoff §76 |
   that reaches the real windows (main, and each `?aux=` page), so menu clicks, pins and closes are
   tested as a user performs them, not inferred. OS-side window existence and geometry come from a
   small `EnumWindows` P/Invoke (and `SendMessage WM_CLOSE` simulates the title-bar X).
+  Two probe rules from §128: a **new** aux window is only visible to a **fresh** `connect_over_cdp`
+  (the existing connection does not surface it), and a menubar click must target the panel that is
+  actually open (`.mb-title` → its own `.mb-menu`), because every menu's `.mb-item`s sit in the DOM
+  and a stale panel resolves through `state.itemMap` to whatever now sits at that index.
+- **One global per UI module.** `windowing.js` and `windows-ui.js` both assigned
+  `window.OFAPWINDOWS`; the later script won, the View menu's dialog entry called an undefined
+  `open`, and the dialog was unreachable — for two releases, until §128. The dialog is
+  `OFAPWINMGR`, the widget-window menu is `OFAPWINDOWS`, and `test_windowing_ui.py` fails if the
+  two assignments ever collide again.
+- **The window is the truth about where it is; the store trails it.** `place_aux` re-places on
+  what the STORE says, but the store only learns a move from pywebview's moved/resized events
+  (throttled 2 s) — a window the OS left off-desktop (unplug, or a hand push) can leave a record
+  that still looks fine. `windows.stranded(records, screens, live=…)` therefore takes both sources,
+  and the state serves `open_geometry` (live rects + the monitor each window is on) beside
+  `stranded`. `POST {action: "move"}` moves an OPEN window (`screen` index, `step` for "one monitor
+  over" — cyclic, and a deliberate **no-op** when there is nowhere to go, so a one-monitor machine
+  never re-centres a hand-placed window — or `preset` for the 10 snap shapes); `{action: "arrange"}`
+  is Bring-them-home for every stranded window. `place_aux` is still the only path for a NEW window.

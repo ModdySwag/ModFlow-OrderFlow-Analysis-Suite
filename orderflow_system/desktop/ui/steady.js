@@ -35,6 +35,7 @@ const STEADY = {
     graceTypingMs: 4000,       // after the last keystroke, updates resume
     gracePointerMs: 900,       // after a click, before markup may be replaced
     dirtyHoldMs: 30000,        // unsaved field protection
+    forceUntil: 0,             // a deliberate action's window — see steadyForce/steadyShouldSkip
 };
 
 const STEADY_FIELD_SELECTOR = 'input, select, textarea, [contenteditable="true"]';
@@ -59,6 +60,17 @@ function steadyModalOpen() {
 
 function steadyActivity(ms) {
     return Date.now() - STEADY.lastActivity < ms;
+}
+
+/* A deliberate app-wide action (the top bar's symbol switch) asks the guard to stand aside
+   for a moment: the grace below exists to hold back *incidental* updates, and the output of
+   an instrument the user just picked is not incidental — it must follow the pick instead of
+   sitting out the typing window on the old instrument. A window, not a switch — a stray
+   poll landing inside it is an ordinary refresh, and the docked safeties (dialog, in-panel
+   editing, unsaved input) still apply. */
+function steadyForce(ms) {
+    const window_ms = Number(ms) > 0 ? Number(ms) : 2000;
+    STEADY.forceUntil = Math.max(STEADY.forceUntil, Date.now() + window_ms);
 }
 
 function steadyDirtyIn(root) {
@@ -115,6 +127,11 @@ function steadyShouldSkip(target) {
     const act = document.activeElement;
     if (target && steadyField(act) && target.contains(act)) return 'editing in this panel';
     if (target && steadyDirtyIn(target)) return 'unsaved input in this panel';
+    /* 6. a deliberate app-wide action asked for the pass (steadyForce): the typing/pointer
+       grace holds back incidental updates — a symbol switch is the user's own, and the
+       output must follow it (the panel holds the old instrument until the next beat
+       otherwise, which is exactly the lag the owner measured). */
+    if (STEADY.forceUntil && Date.now() < STEADY.forceUntil) return '';
     if (STEADY.pointerDown) return 'pointer down';
     if (steadyActivity(STEADY.graceTypingMs)) return 'typing';
     // a whole-view render with a field focused somewhere: only hold back if that
@@ -127,6 +144,13 @@ function steadyShouldSkip(target) {
 
 function steadyGuard(fn, target) {
     const name = fn.name || 'render';
+    /* An async render's caller may chain .then/.finally/.catch on what it returns, and the
+       skip path used to hand back a bare undefined — one TypeError then aborted the caller
+       mid-handler (measured on the symbol switch: the busy rings never cleared, the 10-second
+       fallback never registered, and the `ofap:symbol` event behind the refresh never fired,
+       so the Engine and the Atlas panels never heard the change). A skipped async render
+       therefore answers with a settled promise: nothing to wait for, and nothing broken. */
+    const isAsync = fn.constructor && fn.constructor.name === 'AsyncFunction';
     const wrapped = function steadyWrapped(...args) {
         let root = null;
         if (typeof target === 'string') root = document.querySelector(target);
@@ -135,7 +159,7 @@ function steadyGuard(fn, target) {
         if (why) {
             STEADY.skipped += 1;
             steadyBadge();
-            return undefined;
+            return isAsync ? Promise.resolve() : undefined;
         }
         const snap = steadySnapshot(root);
         let out;
@@ -257,7 +281,7 @@ function steadyWrapRenderers() {
         ['loadLogs', () => document.querySelector('.view[data-view="logs"]')],
         ['refreshAllPanels', null],
         // this session's modules
-        ['inLoad', '#inCard'],
+        ['inLoad', '#tkIntentCard'],
         ['ctxRefresh', '#ctxCard'],
         ['mpLoad', '#mpCard'],
         ['scanRefresh', '#scanView'],

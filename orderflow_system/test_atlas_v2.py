@@ -711,6 +711,39 @@ def test_intent_alert_rules_fire_through_the_engine():
     assert fired and "longs trapped" in fired[0].message
 
 
+def test_alert_text_carries_no_float_noise_and_no_dangling_colon():
+    """§148: the message is human text — tick arithmetic must not leak into it.
+
+    Measured live (monitor page + alert log): "1.240000000000009 pulled from the bid
+    0.5000000000109139 ticks from mid". And a rule that names no symbol rendered ": BUY sweep …" —
+    the fire still works, the colon just hangs there.
+    """
+    engine = AlertEngine([
+        {"id": "pp", "name": "Pulled size", "kind": "pulled_size", "enabled": True,
+         "params": {"min_size": 0.5, "max_distance_ticks": 10.0}, "cooldown_s": 0, "channels": ["ui"]},
+    ])
+    fired = engine.evaluate("BTCUSDT", "pulled_size",
+                            {"ts_ms": NOW(), "size": 1.240000000000009, "side": "bid",
+                             "distance_ticks": 0.5000000000109139, "price": 100.50000000000001,
+                             "traded": 0.0})
+    assert fired, "the pull should fire"
+    text = fired[0].message
+    assert "1.24 pulled from the bid" in text
+    assert "1.240000000000009" not in text and "0.5000000000109139" not in text
+    assert "0.5 ticks from mid" in text and "100.50" in text
+
+    sweep = AlertEngine([
+        {"id": "sw", "name": "Sweep", "kind": "sweep", "enabled": True, "params": {},
+         "cooldown_s": 0, "channels": ["ui"]},
+    ])
+    fired = sweep.evaluate("", "sweep",
+                           {"ts_ms": NOW(), "side": "buy", "levels": 5, "size": 12.48000000001,
+                            "duration_ms": 220, "through_price": 100.0})
+    assert fired, "the sweep should fire"
+    assert fired[0].message.startswith("BUY sweep through 5 levels")
+    assert not fired[0].message.startswith(":")
+
+
 def test_intent_normalises_second_precision_book_timestamps():
     """The extras book feed stamps seconds; the tape uses ms — must not skew."""
     from orderflow_system.atlas.intent import ParticipantIntent
@@ -1068,6 +1101,38 @@ def test_scanner_caches_and_states_that_it_cached():
     second = hub.snapshot_scanner()
     assert first["cached"] is False and second["cached"] is True
     assert hub.scanner.stats()["cache_hits"] == 1
+
+
+def test_a_bad_rule_or_a_bad_payload_cannot_stop_the_tick_loop():
+    """AB-05 (§148): `_dispatch` runs inside the per-tick detection loop for the whole market.
+
+    A rule authored with a non-numeric threshold used to throw out of `evaluate` and through an
+    unguarded `_dispatch`, aborting detection for every symbol; so could a payload shape nobody
+    expected. Both are now counted (`counters["dispatch_errors"]` / the engine's unreadable tally),
+    logged, and the next tick still lands."""
+    hub = FeatureHub({"extras_enabled": False, "tape": {"big_min_size": 1.0}, "alert_rules": [
+        {"id": "typo", "name": "big (typo)", "kind": "big_trade", "enabled": True,
+         "params": {"min_multiple": "big"}, "cooldown_s": 0, "channels": ["ui"]},
+        {"id": "solid", "name": "big", "kind": "big_trade", "enabled": True,
+         "params": {"min_multiple": 1.5}, "cooldown_s": 0, "channels": ["ui"]},
+    ]})
+    now = NOW()
+    for i in range(40):
+        hub.on_tick("BTCUSDT", tick(now + i * 20, 63_000.0, 8.0, "sell"))
+
+    assert hub.counters["ticks"] == 40, "the loop never stopped"
+    assert hub.counters.get("dispatch_errors", 0) == 0
+    assert hub.alerts._unreadable.get("typo", 0) > 0, "the typo was counted, not silently fine"
+    assert hub.counters["alerts"] > 0, "the rule beside the typo still fires"
+
+    class Bomb:
+        def to_dict(self):
+            raise RuntimeError("a payload shape nobody expected")
+
+    hub._dispatch("BTCUSDT", "big_trade", Bomb())
+    assert hub.counters["dispatch_errors"] == 1, "nothing raises out of a dispatch"
+    hub.on_tick("BTCUSDT", tick(now + 5_000, 63_000.0, 8.0, "sell"))
+    assert hub.counters["ticks"] == 41, "and the next tick still lands"
 
 
 def test_trade_detector_ignores_eating_a_small_level():

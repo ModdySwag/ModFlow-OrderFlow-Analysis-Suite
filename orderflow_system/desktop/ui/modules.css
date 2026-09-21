@@ -304,9 +304,9 @@ textarea.mb-input { min-width: 300px; resize: vertical; }
 .app.status-hidden .statusbar { display: none; }
 .app.zen .rail, .app.zen .topbar, .app.zen .menubar { display: none; }
 
-/* §92 — the physical controls for the chrome: each bar hides itself, and its reveal twin exists
-   only while the bar is hidden, so no control is ever dead and none is ever missing. */
-.mb-grow { flex: 1 1 auto; }
+/* §92/§119 — the physical controls for the chrome: the rail keeps its own hide button and its
+   edge reveal (only while hidden); the menu bar's single control is the boxed topbar toggle —
+   its in-bar duplicate "hide" was removed, so no hide can fold its own way back away. */
 /* The persistent in/out toggles in the topbar (rail + menu bar): always visible — a control
    must never vanish with the bar it controls — quiet until hovered, pressed-face while hidden. */
 .chrome-toggle { align-self: center; margin-left: 6px; width: 22px; height: 22px; padding: 0;
@@ -335,9 +335,14 @@ textarea.mb-input { min-width: 300px; resize: vertical; }
   background: transparent; color: var(--of-ink-dim2); border: 0; border-radius: 4px;
   font-size: 15px; line-height: 1; cursor: pointer; opacity: .45; }
 .rail-collapse:hover { opacity: 1; background: rgba(var(--of-steel-rgb),.2); color: var(--of-ink-hi); }
-.mb-hide { margin-left: 6px; background: transparent; color: var(--of-ink-dim2); border: 0;
-  font: 500 11px system-ui, sans-serif; cursor: pointer; padding: 2px 8px; border-radius: 4px; }
-.mb-hide:hover { color: var(--of-ink-hi); background: rgba(var(--of-steel-rgb),.18); }
+/* §119 — navreturn.js: the "← Back to X" chip a context jump leaves in the destination view's
+   head, first position: the place the eye already is, quiet until hovered. */
+.nav-back { align-self: center; margin-right: 4px; padding: 3px 10px 3px 8px;
+  border: 1px solid rgba(var(--of-steel-rgb),.45); border-radius: 999px;
+  background: rgba(var(--of-steel-rgb),.1); color: var(--of-ink-2);
+  font: 600 11px ui-monospace, monospace; letter-spacing: .02em; cursor: pointer; white-space: nowrap; }
+.nav-back:hover { color: var(--of-ink-hi); border-color: rgba(var(--of-steel-hi-rgb),.7);
+  background: rgba(var(--of-steel-rgb),.22); }
 
 /* ═══ Drawing layer ═══════════════════════════════════════════════════════════════════════════
    A canvas overlay plus a compact tool strip, cloned from the reference program's workflow: pick a
@@ -481,12 +486,20 @@ textarea.mb-input { min-width: 300px; resize: vertical; }
     letter-spacing: .04em; pointer-events: none; user-select: none; }
 
 /* ── T5/A10: minimal mode (heatmap) + the collapsed card ─────────────────── */
-.view[data-view="heatmap"].hm-minimal .view-head .field { display: none; }
+/* §119: the pro bar lives inside one of these fields, and that field is the way back — minimal
+   once hid its own restore button with the rest of the chrome. */
+.view[data-view="heatmap"].hm-minimal .view-head .field:not(:has(.hm-pro-bar)) { display: none; }
 .view[data-view="heatmap"].hm-minimal .hm-pro-bar > *:not([data-hm-pro="minimal"]):not([data-hm-pro-info="1"]) { display: none; }
 .hm-pro-bar [data-hm-pro="minimal"].on { border-color: var(--of-warn); color: var(--of-warn); }
 .card.card-collapsed .card-body { display: none; }
 .card.card-collapsed .card-head { opacity: .72; }
 .card.card-collapsed .card-head::after { content: ' \25b8'; color: var(--text-secondary); }
+
+/* §149b: the systems board folds on request — the header stays (score, Re-check, Show),
+   the tiles go. Persistent (ui.systems_hidden), unlike the double-click fold's session
+   posture. */
+#systemsCard.systems-hidden .card-body { display: none; }
+#systemsCard.systems-hidden .card-head { opacity: .72; }
 
 /* ── T7/B1: the settings search surface ──────────────────────────────── */
 .set-search { min-width: 320px; flex: 1; }

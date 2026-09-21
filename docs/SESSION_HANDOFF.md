@@ -1,11 +1,109 @@
 # Session handoff — ModFlow OrderFlow Analysis Suite
 
-**Date:** 2026-09-15 · **Tree:** `C:\Users\<you>\OrderFlow-Analysis-Pro` · **HEAD:** `b2ff4ee`
+**Date:** 2026-09-21 · **Tree:** `C:\Users\<you>\OrderFlow-Analysis-Pro` · **HEAD:** `797eea0`
 **Committed:** nothing. The working tree is dirty on purpose; every change from this session is on disk.
 
 **Run it:** `orderflow_system.desktop` (the owner's shortcut: `.venv\Scripts\pythonw.exe -m
-orderflow_system.desktop`, binds 127.0.0.1:8080). Frozen build: `dist/OrderFlowAnalysisPro/OrderFlowAnalysisPro.exe`
+orderflow_system.desktop`, binds 127.0.0.1:8080). Frozen build: `dist/ModFlowOrderFlowAnalysisSuite/ModFlowOrderFlowAnalysisSuite.exe`
 (`scripts/build_exe.py`). Scratch scripts belong in `$LOCALAPPDATA/Temp`, not the repo.
+
+---
+
+## §148 (2026-09-21) — the final audit, closed
+
+Ran the brief in `C:\Users\Moddy\Desktop\final audit prompt.txt` against HEAD `797eea0` (dirty tree,
+213 entries): the true baseline re-established (2,389/3/0 → 2,489/3/0 as pins landed), every in-repo
+gate re-run, the seven read-only module audits consolidated into `AUDIT_REGISTER.md`, and each
+confirmed defect fixed with its missing regression pin, proven to bite. Register: **113 [FIXED] / 0
+open** + 1 [VERIFIED] compose check.
+
+**Headline fixes.** The seven P1s (footprint marks layer, ladder route template, risk-gate binding,
+retention persistence, entry-time R, DST zones, the two why-card honesty items) · the alert block's
+scope gates, quarantine, legal-cap and window-bound defects (AB-01..AB-04) · the T3 journal cluster
+(13), the sessions/synthetic tail, both T5 waves (derivatives + data-quality; the id audit 162→344) ·
+T6 wave 1 (bar-time reader, depth-history poll + new-level + retention keys, covered-span labels) ·
+the switcher waves (steadyGuard's promise contract, the ring owning the settle, the Engine picker's
+notifier, `adoptSymbol`/`persistSymbolNow`/`refreshPicker`) · the program-wide control-pair matching
+audit (dials adopt the store's answer, chips re-sync, replay verifies its symbol, the source switch
+re-seeds Settings) · the close-out (`context_block`'s crash fallback says `evidence block failed:
+internal error`, never "").
+
+**Gates (final bytes).** pytest **2,494 passed / 3 skipped / 0 failed** · 57/57 node selftests ·
+`audit_ui_refs` CLEAN (346 ids; the live app's own table: 201 paths / 192 `/api` + `/ws`) ·
+`audit_metric_hygiene` CLEAN · ruff 0.16.7 clean · pin-proof harness **154 cases, 0 problem(s) — every pin bites**; the §149b fold case makes it **155** — re-run complete: **0 problem(s), every pin bites**.
+
+**Docs re-derived.** README badges (2,494 / ~129k lines / 192 routes), the file-inventory table (296
+files / 129,624 lines), the UI paragraph (154 modules, 56 selftests), CONTRIBUTING's baseline + its
+57-selftest command (now matching CI), and the upgrade package's per-module tallies.
+
+**§149 supplement (same day).** The storage card gained **Clear app cache** (WebView2 caches freed
+live; the locked rest goes at the next start through a boot flag the launcher honours) and **archive
+open / delete quarantine** controls — routes `/storage/clear_cache`, `/storage/clear_archive`, plus
+`archive` in the folder-open allow-list; the DB size budget was set to 2 GB (his call, wired live).
+Gates re-run on the final bytes: **2,493 passed / 3 skipped / 0 failed**, harness **154 cases /
+0 problems**; the four new pins live in `test_storage.py`.
+
+**§149b supplement (same day).** The Overview's Systems board gained a **hide/show button**
+(`#systemsHide` in the card head; `applySystemsHidden` / `saveSystemsHidden` in `ui.js`, the fold
+in `modules.css`, default + sanitize `ui.systems_hidden` in `config_store.py`). The fold is a
+config setting, not a browser one — the storage card's cache clear wipes webview2's localStorage,
+and a view choice that vanished with the caches would read as a bug. Verified live on the running
+app: served == disk on all three files, `ui.systems_hidden` round-trips true → false through
+`/api/control/config`, the id audit counts 346 with 0 missing, and the suite is **2,494 / 3 / 0**
+with the pin `test_the_systems_board_fold_is_a_ui_setting` (the 155th harness case proves it
+bites).
+
+**Receipts.** `runtime/ofap_s148/`: `AUDIT_REGISTER.md` (head carries `§148 — CLOSED`) + the batch
+receipts (t6a verification/live, switcher notifier + convergence, program-wide matching) +
+`pin_run_s148_close.txt`.
+
+**Owed (owner's word).** The rebuild, the commit/push, and the physical multi-monitor pass. Nothing
+committed — the standing rule.
+
+## §147 (2026-09-20) — the upgrade package, applied
+
+The competitive analysis (`docs/COMPETITIVE_ANALYSIS_2026-09.md`) compiled into an upgrade package and
+applied to the build (`docs/UPGRADE_PACKAGE_2026-09.md` is the package). **Paid features excluded by
+instruction**: nothing added needs a subscription or a paid key.
+
+**What it delivered.** Nine workstreams plus the cross-cutting items: the execution layer
+(`desktop/atm.py` templates/brackets/OCO/break-even/trail/time-stop, `desktop/orders.py` with risk
+gates and a refusal-only bridge, the paper account extended, the ladder's plan bar) · footprint
+configurability (`atlas/footprint_config.py`, 21 controls, an in-panel drawer, annotation marks) ·
+depth history (`atlas/depth_history.py` + strip panel) · the alert condition builder and the evidence
+snapshot on every channel (`atlas/alerts.py`, `atlas/notify.py`, the builder card) · deep trade
+analytics (`desktop/journal.py`, per-setup/session stats, P&L calendar, sentences) · the data-quality
+cockpit (`atlas/dataquality.py`) · session templates and the roll calendar (`atlas/sessions.py`) ·
+crypto derivatives context (`atlas/derivatives.py`, live public endpoints) · synthetic instruments
+(`atlas/synthetic.py`) · the companion monitor page (`ui/monitor.html` + `ui/monitor.js`, five GETs) ·
+the explainability registry (`ui/why.js`, 25 reads labelled measured/inferred/computed, wired to 19
+readouts) · `docs/PERFORMANCE.md` · seven help topics.
+
+**Gates.** pytest **2,389 passed / 3 skipped / 0 failed** (baseline 1,900) · ruff clean on every
+touched file · 13 UI selftests, 455 checks, 0 failed · `audit_ui_refs` **CLEAN** (187 routes, 0 missing
+calls/ids, 0 duplicate ids) · `ast.parse` sweep clean · config golden, param registry, wiring, timer
+guards and the listener ledger all green · live smoke through the real app on a throwaway config:
+36 route objects, ten GETs 200, the refusal sentence on the live route, a template on the paper order
+receipt, a live funding read.
+
+**Wiring facts worth keeping.** Seven new routers mount in `launcher.py`; nine config blocks are owned
+by their modules (`config_store._feature_defaults` / `_feature_sanitise` — each feature cleans its own
+block); the registry states the store's bounds (five were auto-aligned to the modules' real clamps);
+`index.html` carries five new views, nine script tags and 19 `data-why` readouts (25 across 11 views as
+of §148 — `test_why.py` measures the live page, and the count only grows); the listener ledger
+and the audit's module/route lists gained the new files.
+
+**Self-caught in this pass.** `atlas/footprint_config.clean()` does not seed missing keys, so the
+footprint block is registered as the module's DEFAULTS in `default_config` (the registry test reads
+that path) · a depth-history bound (200 ms) disagreed with its own clamp (1000 ms) — the registry now
+states the store's numbers · two help `related` ids pointed at topics that never existed · a shipped
+alert-builder assertion raised `ValueError` instead of skipping when there is no `alerts.js` (the `or`
+fallback could never run after `index()`); rewritten to check absence first.
+
+**Owed.** The §129c frozen rebuild (dist/zip/SBOM/Setup) — already owed, unchanged by this pass ·
+commit/publish on his word · the physical multi-monitor pass. The honest remainder (broker adapters,
+MAE/MFE writers, chart tabs, study packs, options×flow confluence, depth-history retention persistence,
+a render-side FPS harness, mobile host policy) is listed in `docs/UPGRADE_PACKAGE_2026-09.md` §3.
 
 ---
 
@@ -5372,3 +5470,591 @@ Integration: the rail gained Journal + Calendar; every new view carries a Help t
 - **Two internal measurements the next live pass should not re-learn.** (1) The Heatmap's paint governor (`market-pressure.js` `GOVERNOR`) **skips same-signature repaints** within its 400 ms frame budget — pixel probes must vary `data.version` and space paints ≥ ~600 ms, or every reading is the previous paint (this cost three false "no change" readings). (2) The Engine bar's listeners attach **lazily in `ofxInit` on the first Engine-view visit** — dispatching a change event before opening the view proves nothing (also cost a false negative).
 - **Gates.** pytest **1584 / 3 skipped / 0 failed** over the final tree (session start 1561/3; +23 net = ladder 11 · ledger 5 + 2 journal · paper 3 · B2 2); AUDIT CLEAN; ruff clean (0.16.7); **35/35** node selftests (ladder 30 new · ramp 49 · scopes 5); both goldens regenerated; live sandbox (8099) with **0 `client error:` lines in the final run**; sandbox stopped, port 8099 clear. HEAD `45172b1`, worktree dirty, **nothing committed**.
 - **Owed.** Unchanged: **commit/publish on his word** (drafts first), then the standing follow-ups (radar walls / big-trade zones, spent-state persistence, config slots). Notes for a future execution pass: the ladder's window is ±10 ticks (recentres on the print — a coarse "N ticks per row" step is the refinement if crypto ladders want it), and session persistence (`to_dict`/`from_dict`) is still unused — the ledger CSV is the record today.
+
+**§119 — The owner's list.txt, attended: one menu hide · the heatmap panel's way back · wheel/fit polish · the "← Back to X" context chip. (2026-09-19; nothing committed, live-verified)**
+- **One menu hide.** The bar carried its own “hide” button beside the boxed topbar toggle (§94) — two controls for one action, and a hide that folds its own face away with the bar. Removed: the in-bar button + its listener (`menubar.js`), its chrome pair and shortcut prompt (`chrome.js`, `keys.js`), its styles (`modules.css`); the boxed “menu hide / menu show” toggle is the single control (B on the keys). `test_keys_ui` now pins the inversion.
+- **The heatmap's “fit… it hides and no way back” — reproduced and fixed.** The real trap: minimal mode hid `.view-head .field` wholesale, and the interactive panel (the pro bar, carrying its own “minimal: on” restore) lives inside one of those fields — the way back hid itself (live receipt: zero visible bar children while minimal was on). Fix: the field carrying the pro bar is exempt (`:not(:has(.hm-pro-bar))`); the on-face reads “minimal: on — restore”; a `say()` hint teaches the return; **`m`** toggles (OFAPKEYS, Heatmap scope, clicking the real button); the stats tip names fit/m. And `fit` — a silent no-op when the window was already a list value — now truly fits: clears the selection, resets Window/Rows through their own dials (one pipeline), and always answers (“view fitted — 4 min window · 200 rows”).
+- **Wheel on the heatmap: already there, now discoverable.** wheel = zoom window · shift+wheel = price rows (live-verified 240 → 480 → 240); the tip + `m` join the documented controls. The hide-sweep confirmed every hide keeps a visible way back: rail (edge reveal + R), menu bar (boxed toggle + B), zen (Alt+Z, live-checked), card-fold (a title now states “Double-click to unfold this card”, live-checked).
+- **The “← Back to X” chip (list.txt item 4).** New `ui/navreturn.js` (+ selftest, + `test_navreturn.py`, + listener-ledger entry): one slot of context memory wrapped around `window.showView`; every route INTO help records the origin (menu, F1, buttons, palette), and registered task-transfer jumps call `OFAPNAV.jump(to)` — wired at the hint card's “instruments”, the Engine look-up → Instruments, heatmap region → Replay, and seven menu task rows (MT5 → Market Watch, the NinjaTrader and Platforms rows, Show log file, Instruments…, Feed health, Client errors). The chip paints first in the destination head (“← Back to Heatmap”, the rail's own label); plain navigation clears the slot; it never ping-pongs. Live: help jump → chip → return; jump → replay → chip → return; manual nav → slot cleared, 0 chips anywhere.
+- **Gates.** pytest **1594 / 3 skipped / 0 failed** (session start 1584/3; +10 = `test_navreturn`); AUDIT CLEAN (116 modules — navreturn joins JS_FILES); ruff clean 0.16.7; **36/36** node selftests (navreturn 12 new); both goldens clean; live sandbox (8099, scratch APPDATA): all four items verified in-browser + a visual QA of the chip. HEAD `797eea0`, worktree dirty, **nothing committed**. Count deltas for the push pass: tests 1584→1594, UI modules 115→116, selftests 35→36.
+- **Owed.** Commit/publish on his word (drafts first — his gate). Standing follow-ups unchanged: radar walls / big-trade zones, spent-state persistence, config slots.
+
+**§120 — The liquidity map, audited end to end: click, box, wheel, one fetch. (2026-09-19; nothing committed, live-verified)**
+- **Reported:** "when i click anywhere in the liquidity map it goes darker and i have to click again to return the colours and the scroll wheen + shift doesnt function sealessly or at all." Four defects, all reproduced live before any edit:
+  1. **The click-darken.** `mousedown` built the selection immediately — a zero-size box whose outside-dim (`rgba(6,10,18,0.62)` over everything outside it) covered the whole canvas, so any click darkened the map; a second click made another degenerate box; only a dblclick cleared it. Receipt: `sel = {x0:733,y0:259,x1:733,y1:259}` after one synthetic click.
+  2. **The double fetch.** Every wheel tick / select change ran the change handler's `loadHeatmap` AND a `setTimeout(() => pull(true), 280)` — two fetches of the same endpoint, with the overlay only aligning on the second (the sluggish wheel).
+  3. **The unsequenced loader.** `loadHeatmap` had no in-flight guard — overlapping responses could land out of order and paint the wrong window under a fast scroll.
+  4. **The canvas-only drag.** Box extension lived on the canvas listener, so a drag stopped extending at the plot edge (and the click-refresh hook spent a fetch on every click inside the view).
+- **Fixes (all in `heatmap-pro.js` + `atlas.js`):** mousedown anchors; the box is born only after `DRAG_PX` (4 css px) of real movement and tracks on the **window** (mirroring mouseup — the box now follows the pointer past the canvas edge); `loadHeatmap` owns the single fetch, is sequence-guarded (`A.heatSeq`), and dispatches `ofap:heat-offer` — the overlay adopts that exact payload (`HEATMAP_PRO.state.last === A.heat.last`, live identity check) instead of re-fetching; the refresh hook repaints from cache (`if (P.last) { draw(); hud(); } else { pull(true); }`); rapid scrolls coalesce to one fetch through the repo's own `deferKeyed('heatmap','snap')`; stepping is pure (`listStep`) and end-stops answer out loud ("widest window already — 15 min" / "tightest… — 2 min" / "most rows already — 300"); `fit` fires ONE change for the pair (the loader reads both dials fresh); mark toggle and clear-markers speak. New `heatmap-pro.selftest.js` (14 checks) + `test_heatmap_pro.py` (5 pins); listener ledger `heatmap-pro.js (14,0)`.
+- **Live receipts (8099, real engine feed, auto-refresh off so counts isolate):** click → `sel:null`, overlay alpha 0, **0 fetches**; drag → box + outside-dim alpha 158 + "selected 21 × 57 cells · resting 2443.3 · heaviest 81361"; wheel ×1 → cols 240→480, **1 fetch**, `state.last === A.heat.last` true; 3 rapid ticks → end state cols 120, **1 fetch** (coalesced), correct stop message; shift+wheel → rows 200→300, 1 fetch; keys `-`/`=`/ArrowUp → 1 fetch each; at 900 wider → "widest window already — 15 min", 0 fetches; fit → both dials reset, 1 fetch, "view fitted"; mark mode → click pins a marker (0→1) with no box; clear-markers → 2→0 with its message.
+- **Audit sweep (checked, found sound):** hover readout + OFAPCURSOR publish, region stats + the Alert hand-off (live: stats row populated, alert button present), markers save/load per symbol, region/markers CSV export (queueWrite path), to-Replay jump (§119 chip present), minimal + fit (§119 fixes hold), pause chip, auto refresh toggle, columns rail observe, freshness stamp.
+- **Gates.** pytest **1599 / 3 skipped / 0 failed** (session start 1594/3; +5 = `test_heatmap_pro`); AUDIT CLEAN (**117 modules** — the new selftest joins the parse sweep); ruff clean 0.16.7; **37/37** node selftests (`heatmap-pro.selftest.js` 14 new); both goldens untouched; sandbox stopped, port 8099 clear. HEAD `797eea0`, worktree dirty, **nothing committed**. Count deltas for the push pass: tests 1594→1599, selftests 36→37, audit module line 116→117.
+- **Owed.** Commit/publish on his word (drafts first — his gate). Standing follow-ups unchanged: radar walls / big-trade zones, spent-state persistence, config slots.
+
+**§121 — The liquidity map, at industry standard: the real zoom, pan, and the anchor that was missing. (2026-09-19; nothing committed, live-verified)**
+- **Reported, round two:** "still not seeing any correct zoom functions and the shift middle scroll wheel does nothing… drawing a box does not disappear on off click… compare it against market and competitor norms… REALLY fix." This time the mechanics were audited end to end, server included — and the headline cause was NOT in the map at all.
+- **THE root cause of "zoom does nothing" (real input only): the intent gate deferred it away.** `intent.js` leases the surface on every wheel event for **900 ms** (`ev === 'wheel' ? 900 : 1400`) and `loadHeatmap` refused to load while the lease was held — it filed a `deferKeyed('heatmap','snap')` instead. Every further wheel tick re-leased and REPLACED that deferred run, so with continuous wheeling the repaint only landed ~1 s AFTER the user stopped — and a single tick looked like nothing happened for a full second. §120's live test missed it because the probe slept 1.2 s per tick (past the lease) and counted the deferred fetch as if it were immediate. **Law: a user-commanded view change (wheel, pan, dropdown) must FORCE past the hold; the hold exists to keep the FEED's pollers from fighting a gesture, never to mute the user.** `loadHeatmap(force)` now skips the gate for deliberate paths; the auto/slow poll keeps deferring.
+- **The missing primitive — a time anchor — now exists server-side.** `depthmap.snapshot(columns, max_rows, until_ms)` slices the store so the window ENDS at the anchor; `/api/atlas/heatmap/{symbol}` takes `until` (epoch ms, 0 = live edge); the payload carries `bucket_ms`, `have_from_ms`, `have_to_ms`, `until_ms`; an anchor before the buffer answers empty + `note` ("no depth history at this time — the buffer holds N min"). Pinned by `test_heatmap_anchor.py` (10 tests: slice ends at the anchor, matrix columns follow the slice, clamps, cache key, route/hub threading).
+- **The viewport module — `desktop/ui/heatview.js`** (+ node selftest, 31 checks; `test_heatview.py` gates the wiring): owns `{cols, rows, until, bucket, haveFrom, haveTo}` and the pure maths: `zoomTime` (live stays live — right edge pinned to the feed; panned anchors the time under the cursor), `zoomRows`, `panBy` (grab semantics), `panStep`, `snapLive`, `absorb`, `params`, `label`. Ladders widened to what "more zoom options" means: windows **1/2/3/4/6/8/12/15 min**, rows **60–400 in 7 steps** — index.html's dropdowns and the module's arrays are compared by a pin (the three-places-drift class that opened this audit).
+- **The industry grammar, Bookmap-grounded** (their KB: wheel zooms centered on the cursor, drag pans, arrows nudge, zoom-by-drag, live edge): wheel up = zoom IN (was inverted); shift+wheel OR the wheel over the price gutter = rows; wheel reads deltaX too (tilt wheels / shift-converted axes); **middle-drag or shift+left-drag = pan** (throttled live state, final load on release); `←/→` pan one bucket, `shift+arrows` ten; `Home` = live; `fit` also snaps live; a **live chip** ("● live" / "▶ back to live") sits in the pro bar and is clickable; the info line reads `… · live` or `… · 3 min back`; tooltip documents the grammar. Click-off CLEARS a lingering box (his exact ask: "does not disappear on off click") — a plain click on the map deselects, with a spoken confirmation; the box is still born only on a real drag (4 px).
+- **Live receipts (real engine feed; synthetic events DO lease — the immediacy measurement is the proof):** wheel tick → **1 fetch within 300 ms** (the old code: 0 until ~1 s — the deferral), cols 240→180→120→60 with "tightest window already — 60 s" at the floor; shift+wheel → rows 200→140; wheel on the gutter → rows; box → off-click → `sel:null` + "selection cleared"; middle-drag → `until` set, say "60 s · 6 s back", chip "▶ back to live", map's last bucket = the panned edge; `Home` → live; cursor-anchored zoom while panned: cols 240→180 with cursor-time drift **952 ms ≈ one bucket** (the grid's own resolution); pan clamps at `haveFrom+W`; auto-refresh paused while panned (**0 fetches / 6 s** with auto on); `shift+ArrowLeft` moved exactly −10 buckets (the first probe read 0 — it was already clamped at the oldest window; sequence artifact, not a bug); chip → live; `fit` → "view fitted — 4 min window · 200 rows · live".
+- **Gates.** pytest **1614 / 3 skipped / 0 failed** (session start 1599/3; +15 = anchor 10 · heatview 5); AUDIT CLEAN (**119 modules**); ruff clean 0.16.7 (caught one unused var in the new test — fixed); **38/38** node selftests (heatview 31 new); goldens untouched; the T5/A12 pin updated to the new arrow grammar (arrows pan; zoom = wheel + the ± pair). Sandbox stopped, port 8099 clear. HEAD `797eea0`, worktree dirty, **nothing committed**. Count deltas for the push pass: tests 1599→1614, selftests 37→38, audit modules 117→119.
+- **Owed.** Commit/publish on his word (drafts first — his gate). Standing follow-ups unchanged: radar walls / big-trade zones, spent-state persistence, config slots. Open refinement notes: vertical pan (Bookmap auto-recenters; ours does too — manual vertical pan would need a price-centre param), and the ladder could add 30 min / 1 h if the store's 900-bucket retention grows (`atlas.heatmap.max_columns`).
+
+**§122 — Why the map dulled, and the deep end of zoom. (2026-09-19; nothing committed, live-verified on the owner's own install)**
+- **Reported:** "why does the market depth indicator map initially look bright and then dulls to a lesser colour… and is there ENOUGH zoom and map control for a really deep and examinatory view?" Both answers were measurable, and one was a genuine defect.
+- **The dulling, measured before any edit:** the colour ceiling is "the top share of the visible window" (`upper_cutoff_pct` = 5% saturate; balanced scheme). While the window fills, that statistic drifts hard — sampled live every 14 s from engine start: **3.27 → 6.02 (x1.84) over 3.75 minutes**, with jump-steps (3.47 → 4.76 inside one 14 s sample). Every cell slides from bright to dull as the ceiling rises underneath it. `scale_max` == the recomputed p95 in every sample, so the percentile mechanism is confirmed as the source.
+- **The fix — a leashed ceiling (`_stabilise_scale`).** The percentile stays the TARGET; the APPLIED ceiling walks toward it by 25% of the gap per build, capped at **5% of itself per minute of wall time** (a heap-light, like a level meter). Post-fix re-measure, same recipe: raw target 3.45 → 4.24 (still free) while applied moved 3.452 → 4.069 = **x1.18 over 3.7 min in smooth 0.3%-per-14 s steps** — no jumps, no visible recalibration; the map you see at minute 1 looks like the map at minute 4. An explicit pin (`upper_cutoff_abs`) is NOT leashed — it applies at once (the user's own number). `clear()` forgets the regime (a fresh buffer is a fresh start); the payload now carries `scale_target` (the raw statistic) beside `scale_max` (applied) for exactly this kind of receipt. Pinned by `test_heatmap_scale.py` (9 tests: cap maths, 4-minute bound, pin instant, reset on clear, integration via a fake clock).
+- **The deep end of zoom: the Detail control (column width).** The zoom range was capped by the fixed 1 s bucket — the real key to deep examination is `atlas.heatmap.bucket_ms` (registry: 100–10000 ms), which existed only in Settings and did not apply to a running hub. Now: a **Detail** select in the heat bar (100 ms / 250 / 500 / 1 s / 2 s / 5 s) posting the registered param, which — new — **applies live to the running hub**: the params endpoint re-tunes the atlas block after a save (`hub.configure`). A width change RESTARTS the depth buffer (mixing widths under one time axis would lie about time) with a spoken note; the Window dropdown's labels are TIME = columns × width and are relabelled from the running width (they follow the payload's own `bucket_ms`). Range now: **6 s (60 × 100 ms) … 75 min (900 × 5 s)**, with 8 window steps and rows 60–400; raising `max_columns` (dial, up to 4000) extends the long end to ~5.5 h. Verified live: switch to 250 ms → labels re-derived (60 s → 15 s at 60 cols), buffer restarted, `bucket_ms: 250` on the wire; wheel to the tightest window reads "tightest window already — 15 s".
+- **Also live-proven on the owner's own installation** (his app, his profile, port 8080): engine streaming, heatmap ingesting (40 → 65 cols while sampling), applied 3.80 → 3.772 against target 3.80 → 3.688 — the leash visibly holding on the real desk.
+- **Gates.** pytest **1623 / 3 skipped / 0 failed** (session start 1614/3; +9 = the scale battery); AUDIT CLEAN; ruff clean 0.16.7; 38/38 node selftests; the T5 pin and the listener ledger updated for the Detail dial (`heatmap-pro.js (15,0)`). Worktree dirty, **nothing committed**. Count deltas for the push pass: tests 1614→1623.
+- **Ops lesson this pass paid for (the hard way): a diagnostic script that ENDS with a destructive call is a loaded gun.** The window-check helper carried its `Close` line from the close helper, so every "is it visible?" invocation sent WM_CLOSE — it killed the owner's app three times (each exit logged the app's own clean "Engine stop requested at exit", which is why it read as a mystery crash until the script was re-read). Read-only checks and actions live in separate files; never `Invoke-Expression` a script whose tail is an action.
+
+**§123 — The wizard, the help and the guides, audited against industry norms (owner's wizard.txt). (2026-09-19; nothing committed; every change live-verified)**
+- **The brief:** strict review of the wizard module, the help module and the in-app guides against "industry norms and expected user interactions"; correct abnormal or confusing paths; make the help/wizard a star feature; sound, safe, stream-lining fixes only. Full autonomy granted.
+- **Recon first:** `guide.js` (2619 lines) owns the tooltips, the Guide view, the first-run wizard (12 express steps = 9 static + 3 runtime splices; +10 professional), the inline walkthrough cards (HELP_TOPICS, **extended at runtime by studies.js / platforms.js / ofx-view.js**), the MT5/NinjaTrader notices, and the delegated `data-help` handler. `help.js` is the Help Centre (rail view + dock + FAB + About), `help.py` the facts/check engine. guide.js had **no gate of any kind**.
+- **Findings (each live-reproduced before any edit):**
+  1. **The wizard had no keyboard interface at all** — Esc did nothing, Enter did nothing, focus stayed on `BODY` at open (aria-modal without focus management). Industry: Esc dismisses, Enter advances, focus enters the dialog, Tab stays inside.
+  2. **The ✕ lied:** "Close without changing anything" — closing keeps your place (it persists the resume step) and can collect the step's edits. The truth is the nicer behaviour.
+  3. **Progress dots were decorative** — a 12+ step wizard with no way back except N clicks of Back.
+  4. **Dead clicks (real):** `data-help="bridges"` (Platforms) and `data-help="start.identity"` (About card) opened nothing — `openHelp()` returned silently on an unknown id. (`studies` looked dead to a static audit but its inline topic is added at runtime by studies.js — a static read of guide.js alone gives false negatives.)
+  5. **Inline walkthrough cards were dead ends** — no path from the quick card to the full searchable topic in the Centre.
+  6. **Seven menu rows named real panels and said "planned"** (Replay…, Notifications…, Performance…, History & retention, Studies library, Import profile…, Export data…) — dead rows for things that exist; the internal hints even said "the Replay view exists".
+  7. **focus/F1 were fine** — F1 answers for the panel in focus (verified via `help.recents`), the Simple/Advanced gate, dock, system check and About all behave.
+- **Fixes shipped:**
+  - **`overlayKeys`** (one document keydown, top-most `.wiz-overlay` only): **Esc** dismisses through the overlay's OWN close control (so a wizard close keeps its place), **Enter** advances when the dialog holds focus (native behaviour wins on buttons/inputs), **Tab** wraps inside the dialog. Focus now rides into the card on open and on every step change (a step mid-typing keeps its focus).
+  - **Truthful close:** ✕ tooltip "Close — your place is kept; the assistant resumes at this step" + a spoken confirmation ("Setup assistant closed — it resumes at this step next time.") on both ✕ and Esc.
+  - **Visited dots go back** — clickable, titled ("Step N — click to go back"), jumping through the ordinary renderer (collect runs).
+  - **Dead-click class closed:** a `data-help` id with no inline topic now continues in the Help Centre via `OFAPHELP.open(id)` (navigates + searches; `openTopic`'s unknown-id path searched invisibly and landed nowhere). Live: bridges → Centre searching "bridges"; start.identity → Centre searching "start.identity"; studies → its inline card (runtime topic) as before.
+  - **Every inline card carries a door:** "Open in the Help Centre →" (`CENTRE_QUERY` covers the 10 static ids + the 3 runtime-extended ones; exact Centre topics where they exist, queries elsewhere). The **Guide view** gained the same door ("Search the Help Centre").
+  - **Seven menu rows are doors now:** Replay…→Replay view (via the navreturn jump), Notifications…/History & retention…/Performance…→Settings with a spoken pointer to the exact section, Studies library→Studies, Import profile…→Profiles, Export data…→opens the exports folder. Live: Replay→replay view; Studies library→studies view; History & retention→settings view.
+  - **A gate for the whole layer: `test_guide.py` (8 tests)** — module parses; the overlay keyboard contract; the truthful close copy; focus + dot wiring; **every wizard door target must be a real view** (index.html ∪ runtime-created views); **every inline topic (static + runtime-extended) must have a Centre continuation**; the step contract (9 static + ≥3 runtime splices, the footer labels); the promoted menu rows (no dead rows for existing panels). The layer that could silently rot now cannot.
+- **Mechanics worth remembering:** the visible "Step N of 12" = 9 static steps + 3 `WIZ_STEPS.splice` additions (MT5, broker, before-the-end); `wizGo`'s `openGuide()` fallback is dead code (no such function — the deep-link check already guards); a wiring script that mutates its buffer and writes at the END loses every edit when a later anchor aborts (two of this pass's scripts did exactly that and were re-applied — write per edit, or verify after).
+- **Gates.** pytest **1631 / 3 skipped / 0 failed** (session start 1623/3; +8 = test_guide); AUDIT CLEAN; ruff clean 0.16.7; 38/38 node selftests; listener ledger `guide.js (3,0) → (4,0)` for the overlay keyboard layer. Sandbox stopped, port 8099 clear; the owner's app relaunched from the current tree (visible, engine streaming). Worktree dirty, **nothing committed**. Count deltas for the push pass: tests 1623→1631.
+- **Owed.** Commit/publish on his word (drafts first — his gate). Standing follow-ups unchanged: radar walls / big-trade zones, spent-state persistence, config slots.
+
+**§124 — The staged fixes, executed: the truth close-out after the v2 reanalysis. (2026-09-19; nothing committed; every change live-verified on a sandboxed install — port 8099, scratch APPDATA)**
+
+- **The brief:** the owner's word — *"go for all staged fixes"*: execute the fix list staged in `docs/COMPETITIVE_REANALYSIS_v2_2026-09-19.md` §7 (Priority 1 items 1–5, Priority 2 items 6/8/10/11/12), under the standing gates (broker execution out; Windows-only accepted).
+- **Shipped, each receipt-backed (file · test · live):**
+  1. **Trackers wired (F1, item 1).** Five live `/api/atlas` routes had no UI caller while the view's own menu copy promised "correlation, dots, cross-venue reads": **cross-venue book, correlation, trade clusters, feed history, participants' intent** now render as five cards on the module's own 4 s beat. Live: cross-venue answered *"best bid 81012.40 (alpaca) · spread 3.0 bps"*; 30 live Bybit prints in the feed-history card; honest empty states everywhere else. `test_trackers_wiring.py` (3 tests).
+  2. **Control-surface one-liners (F-1…F-7, item 2).** *Frames* gains the sixth family — `delta` (option + view copy + route docstring); the *Bars* menu no longer lists "candles" twice ("default" / "classic candles"); the Logs filter can name **DEBUG**; hover-help resolves case-insensitively and covers every option of all four decorated selects ('1W'/'1M' finally have their helps; the `all levels` row does too); the Settings Data-source dropdown is built from `/api/control/sources` at boot (live: **9 options** — 7 venues + both + all — replacing a five-value fallback); registry `both` dropped (store + engine never had it); calendar filters persist (store defaults + clamps + save/restore). `test_control_surface.py` (6) + the markup-bounds pin.
+  3. **Bounds unified + pinned (item 3).** registry = markup = store for `ofx.lambda_ms` (100–5000), `ofx.min_block` (0–1e6, step 0.01), `imbalance_threshold` (1–50). A generic round-trip pin now proves **every registry enum choice survives the store** — and immediately caught a second lie: `search.default_view` offered 13 landing views, the store kept 6; the store now accepts all 13.
+  4. **Tools ▸ Export (F2, item 4).** The three server CSV routes (tape / heatmap / alerts) have their door: fetch → `/api/control/export/save` → the saved path is reported. **Prune was already shipped** — `storage.js` wires `/storage/prune` + vacuum + sweep; the audit's F3 line was stale (status addendum added to `CONTROL_SURFACE_AUDIT.md`).
+  5. **Stubs decided (item 5).** 'Reset rail order' removed (rail order isn't user-editable; view defaults cover it); **'Recent' promoted** to a real recents list (config `ui.recent`, whitelisted + clamped + capped; written by workspace/profile/layout opens; File ▸ Recent re-applies — live write→read proven through the config); **'Edit list' built** (list-kind params editable end-to-end — `/params` accepts lists); 'Exit' is a disabled-with-reason row ("close the window (✕) — no in-app quit by design"); 'Record session…' stays an honest phase-5 stub.
+  6. **Show-original tightened (item 6).** The staging surface already had Show-original-values; a **staged row now says what the value WAS** — the number Revert restores.
+  7. **Preset comboboxes (item 10).** `presets.js` (new; 39th selftest) decorates **19 controls** from `data-presets` specs — pick a common value, or "Custom…" hands the field back; decorations drive the input's own change path. Live: 19 wraps, specs intact.
+  8. **Wiring + chrome (item 12).** Toasts carry a **Help →** door (one delegated click; wired: engine fault, skipped instruments, instrument-save failure); the status bar carries the **active profile name** (click → Profiles).
+  9. **Verified already-shipped (item 11a + part of 8):** the columns rail's manual/scheduled/conditional resets, double-click reset and "Reset all" exist; the ladder already has held-⇧ = market, position grammar (limit/stop by side, last-price = market) and a decision line. The *remaining* halves of 7/8/9/11 are the open set below.
+- **Found while executing (both fixed in-pass):** the source-list fill only fired when Settings first rendered (moved to boot; live re-verified 9/9); the `search.default_view` enum lie (store widened to the registry's 13).
+- **Gates.** pytest **1653 / 3 skipped / 0 failed** (pass start 1631/3; +22 = control_surface 6 · param_registry +2 · menus_pass 5 · trackers_wiring 3 · presets 6); AUDIT CLEAN (**121 modules**); **39/39** node selftests (38 + presets); ruff clean 0.16.7; ledger: ui.js (10,0) with reasons, presets.js (4,0); live pass on the sandbox — no client errors in the sandbox log.
+- **Open (staged; unchanged gates).** Novelty-gated tips layer (§7-7); MT5-ingest provenance counter (§7-9); range-to-table events list (§7-11b); rebuild dist/zip/SBOM/installer (§7-13, owed); commit/publish (his word; drafts first). Broker execution stays out; Windows-only accepted.
+- **Nothing committed; HEAD `797eea0`** — 52-file dirty worktree (was 33 at session start).
+
+**§125 — The last staged three and the rebuild: novelty-gated tips, the ingest-provenance counter, Bookmap's range-to-table; dist/zip/SBOM/installer rebuilt over the whole tree. (2026-09-19; nothing committed; live-verified on a sandboxed install — port 8099, scratch APPDATA; packaging receipts on the frozen artifacts)**
+
+- **The brief:** the owner's word — *"go for all"*: the remaining staged set from `docs/COMPETITIVE_REANALYSIS_v2_2026-09-19.md` §7 (7 tips · 9 provenance counter · 11b range-to-table) and the rebuild (13); commit/publish stays on his word.
+- **Shipped, each receipt-backed (file · test · live):**
+  1. **Ingest-gap provenance counter (§7-9).** `engine.tick_gaps()` — a pure function of the retained tick window: a gap is an interval wider than `max(5000 ms, 10 × the symbol's own median)`, so a thin symbol's cadence is never miscalled and a real silence in a busy tape is; an empty window answers `{"window": 0}` (claims nothing); unsorted/duplicate stamps are safe. `/api/control/engine/status` carries `gaps` per symbol; the data pill's tooltip appends `BTCUSDT: last tick 6.4 s ago — gaps ≥ 5.0 s in the last 133 ticks: 0 (worst 4.2 s)`. `test_engine_gaps.py` (7 tests). Live, engine on 8099: `ticks 425 · window 135 · median 72 ms · threshold 5000 · count 0 · worst 3686 ms`; tooltip read on the running page.
+  2. **Range-to-table events list (§7-11b).** `heatmap-pro.js` `regionEvents()` — the boxed band's own record, straight from the payload's `events` (no new route): price band from the selected rows, time window from the boxed columns × the live bucket width. "Events in region" in the selection strip paints the table (time/kind/price/side/size/detail, ≤100 rows, newest first) with an honest empty sentence, and "Export events CSV" writes through the same `/export/save` door. `test_heatmap_pro.py` (+1 = 6 pins; the strip lists events in region and loses the list with the selection). Live: strip → *"Events in region — 0 of 120 level events in the boxed band (80971–81028.2)"* + the honest note — the record held **118 walls + 2 stacks** (`eventPriceRange 80947.3–81004`), the box simply spanned older columns, the time filter correctly strict; export wrote `exports/heatmap_events_1789798377359.csv` (43 bytes — header only, the band held none) through export/save.
+  3. **Novelty-gated tips (§7-7).** `tips.js` (new module; the 40th node selftest): the "Try next" card mounts into the Guide view; four tips (layouts · workspaces · alerts · journal) gated on the STORE, never on clicks — each retires when the feature genuinely exists in the config/data; each tip is a launcher (view · help topic · ☰ menu — doors are object properties, the module owns no views); `N of 4 un-tried`; the card empties and removes itself; a check that cannot run must not nag. Registered in `index.html`, `audit_ui_refs.py` JS_FILES, listener ledger `tips.js (1, 0)`. `test_tips.py` (4). Live: card painted *"TRY NEXT — 3 of 4 un-tried"* with its remaining doors.
+- **Gates.** pytest **1,665 / 3 skipped / 0 failed** (pass start 1,653/3; +12 = engine_gaps 7 · heatmap_pro 1 · tips 4); AUDIT CLEAN (**123 modules**); **40/40** node selftests; ruff clean 0.16.7; goldens exact (analytics 40 cases / 2,196 leaves, max diff 0.000e+00; config 31 factories / 18 crypto majors / 49 instruments). Live pass on the sandbox (port 8099, scratch APPDATA, real engine feed) — pill tooltip, tips card, events box, export; **no client errors**. Sandbox stopped, ports clear.
+- **The crash, stated plainly:** the pass died at its certification batch — its first command was `taskkill /F /IM python.exe` (intended as a stray-process sweep; it killed the agent host itself, not any app process). The sandbox stop before it had succeeded; the certification was re-run on the frozen tree with identical results and the failure cost only time. **Law: never `taskkill /F /IM python.exe` on this machine — kill by PID or by cmdline match** (the sandbox's own stop is `process(kill)` on its session id).
+- **The rebuild (§7-13).** `scripts/build_exe.py` (15.3 MB exe; 232 developer files pruned; 896-file payload; `BUILD_INFO.json` = commit `797eea0`, worktree dirty, built 2026-09-19T16:03:35+0930) → `installer/make_installer.ps1` (Inno Setup 6) → `scripts/make_release.py`. Artifacts: **Setup 37,659,252 bytes, sha256 `5B8BF8B46DEAB5F7F004E58530353D340F353EBEC076EEFD7C625A8E2ACE699A`**; zip 42,998,781 bytes, sha256 `917a48b2556633f5a23662e365a43efd75662c38896e498f573706baec5beb9a`; SBOM sha256 `eb51942bd71e95d92aaae290e19fa3293cc5b373ee2cb129dd768cf0485c9bac`; dist exe sha256 `b2eb32d8f6fb15064fa6cd92f071332024a701e573c63d17295c01abcc31b8e2`. `installer/modflow.iss` needed no edit; `installer/README.md` carries the dated journey paragraph.
+- **Packaging receipts (rerun on this pass).** Frozen smoke **18/18** — incl. asset parity **78 shell refs** + 11 help PNGs + corpus/search/pane byte-identical to the tree, WS 101/403, `frozen=true`, 0 client errors. **Setup journey 17/17 ALL PASS** — silent install exit 0 (898 files = 896 payload + unins000.exe/.dat; installed exe hash == dist exe; Start Menu entry created; desktop icon correctly skipped; ARP `HKCU\...\Uninstall\{C2042089-3E19-410D-ABA6-C32BC9C13D80}_is1`), installed smoke (healthz / candles 200 / unknown → `[]` / /desktop 200), silent uninstall exit 0 (dir, ARP and Start Menu gone; `%APPDATA%\OrderFlowAnalysisPro` untouched; his dev desktop shortcut backed up first and left as found).
+- **Nothing committed; HEAD `797eea0`** — 58-file dirty worktree (34 tracked + 24 untracked; was 52 at the §124 record). Count deltas for the push pass: tests 1,653→1,665; selftests 39→40; audit modules 121→123; smoke shell refs 73→78.
+- **Owed.** Commit/publish on his word (drafts first — standing gate). Standing follow-ups unchanged: radar walls / big-trade zones, spent-state persistence, config slots.
+
+**§126 — The final release assurance audit (the Desktop directive): SHIP ONLY AFTER REQUIRED FIXES — two new defects confirmed live, everything else re-verified on this tree; report-only pass, nothing committed. (2026-09-19)**
+
+- **The brief:** the owner's word — *"final security audit prompt.txt"*: an executive final-release assurance audit (security / zero-leak / market-data integrity / performance / public-GitHub ship readiness; the 14 prescribed sections; evidence only; no code changes). Report: `docs/FINAL_RELEASE_ASSURANCE_AUDIT_v0.1b.md`; evidence log: `Desktop\OFAP_v0.1b_release_assurance_audit\00_EVIDENCE_LOG.md`.
+- **Decision: SHIP ONLY AFTER REQUIRED FIXES** — one small source pass (RA-01 + RA-02; RA-03 in the same pass), then the gates + packaging battery + rebuild:
+  1. **RA-01 (Medium, confirmed live).** The Engine readout interpolates the symbol into `innerHTML` unescaped (`ofx-view.js:597/614`) and instrument symbols are stored without a charset clamp (`config_store.py:1466`; the house rule already exists at `:1690`). A crafted symbol driven through the app's own controls produced a REAL element in the DOM: `<img src="X" onerror="WINDOW.__RA_XSS=1">`. Script execution on this field blocked by the store's `.upper()` (JS case-sensitivity) + CSP — element injection, not RCE; escape-at-sink + clamp + pins required.
+  2. **RA-02 (Low, confirmed live).** `/api/control/data/export` answers 500 on a fresh profile (no DB yet: `sqlite3.OperationalError`) and on a `/`-bearing symbol (`BTC/USDT` → `FileNotFoundError` on a bogus `ticks-BTC/USDT-…csv` path); the filename tag lacks the paper-export sanitiser. No traversal reachable (the error itself proves the intermediate dir is never created). Fix: sanitise + graceful 400s.
+  3. **RA-03 (Low, code).** `engine.bybit_validate()` interpolates the symbol into the venue URL unquoted (the SS-12 class, one site) → `quote()`.
+- **Re-verified green on this tree (fresh receipts):** guard family live on the frozen exe (hostile Host 403, cross-origin POST 403, cross-site POST 403, loopback POST 200, WS 101/403, `/docs|/redoc|/openapi.json` 404, served `/desktop` hash == packaged, CSP meta present); CSP sweep over 33 driven views → **0 violations / 0 page errors**; churn probe **flat** (timers 14→14, 0 same-node accumulation, 0 detached-retained); secrets clean four ways (worktree incl. untracked / full history pickaxe / frozen payload / `git add -An` dry-run); `uv lock --check` green; `pip-audit` clean (59 pkgs); SBOM 45 components; zip 896 entries / 0 corrupt; frozen smoke **18/18** + Setup journey **17/17** (the §125 artifacts); 30/30 non-test deques bounded; no execution-capable code (Alpaca orders = read-only history); newest screenshots re-sampled clean (only the Telegram placeholder `12345:ABC-DEF`); bandit dispositions refreshed (1 High B324 SHA1-mutex + 29 Medium, all triaged — 20 fixed/loopback urlopen, 7 fixed-identifier SQL, 1 DTD-mitigated, 1 test-only).
+- **Carry (unchanged, non-blocking):** F-05 log-noise filter and F-08 `usedforsecurity=False` queue with the RA fixes; F-07 docs-publication decision stays the owner's.
+- **This pass changed no code** — records only (this block, RESUME, the report + its evidence tree). **Owed:** the Stage-1 fixes on his word → gates + battery + **rebuild**, then the standing commit/publish pass. Worktree now 59 files (was 58; +the report; the evidence tree lives outside the repo).
+
+**§127 — The release-assurance fix pass: RA-01 (+ its second live sink), RA-02, RA-03, F-05, F-08 in one source pass with pins; gates green; dist/zip/SBOM/installer rebuilt and re-batteried. (2026-09-19; nothing committed; live-verified on a sandboxed dev server — port 8099, scratch APPDATA)**
+
+- **The brief:** the owner's word — *"GO WITH ALL FIXE, NO VERY LONG SOAK TESTS THOUGH"*: execute every fix the §126 audit named (Stage 1 + the queued Stage-2 cosmetics); no long soaks.
+- **Fixed, each receipt-backed (file · pin · live):**
+  1. **RA-01 (Medium).** The readout branches escape the symbol (`` ${esc(sym)} ``) — **plus RA-01b, found by this pass's own live re-probe: the Engine legend panel** renders `OFX.legend()`'s `live` string (built as `` `${state.symbol} · Ns bars` `` at `ofx.js:1502`) into innerHTML at `ofx-view.js:427`; after the readout fix the crafted symbol still parsed into a real `<img>` under `#ofxLegendBody`. `paintLegend()` now escapes every interpolated field (+ the swatch glyph/sample). Store-side clamp `_clean_symbol` (A-Z 0-9 `. _ -`, ≤24; rows that clean to nothing are dropped) on `instruments[].symbol` — the palette lanes keep their own contract (`BTC/USD` survives; pinned by `test_config_store`). Live: crafted symbol driven through the app's own controls renders as TEXT in both sinks, `imgs[src=X] = 0`, no execution, no paint errors (`evidence\x127_sink_receipt.txt`; the receipt also records the stale-cache false alarm and its cache-cleared re-probe).
+  2. **RA-02 (Low).** `dataport.export_rows` clamps the filename tag (the `ticks-BTC/USDT-…csv` bogus-subpath class); `api.data_export` catches `sqlite3.OperationalError`/`OSError` → 400 + sentence. Live 10/10 (`evidence\x127_http_receipt.txt`): fresh profile → `400 {"detail":"no tick history to export yet — start the engine or import a CSV first (OperationalError)"}`; symbol `BTC/USDT` → `ticks-BTCUSDT-20260919-073357.csv` (rows=1) inside `exports/`; all-symbols → `ticks-ALL-…`; the exports folder stays flat.
+  3. **RA-03 (Low).** `engine.bybit_validate` → `urllib.parse.quote(str(sym), safe='')`; the pin drives a fake `urlopen` and asserts `%26/%2F/%3D` on the wire.
+- **Stage-2 cosmetics, executed:** **F-05** — `logs.AbortedSocketFilter` drops `ConnectionResetError`/`ConnectionAbortedError` records at every sink (unit pin; live attempt: 6 aborted sockets, 0 reset tracebacks in the log). **F-08** — `usedforsecurity=False` on the mutex sha1; the count/prune loops in `database.py` use static statement strings.
+- **Pins:** `orderflow_system/test_ra_fixes.py` (8 tests). **Gates:** pytest **1,673 / 3 skipped / 0 failed** (start 1,665/3; +8) · AUDIT CLEAN (123 modules) · ruff clean 0.16.7 · 40/40 node selftests · goldens exact. One battery run transiently read 1,668/8 — the 5 extra skips did not reproduce across three identical-tree reruns (reasons not captured); noted, not hidden.
+- **The rebuild.** `build_exe.py` (15.3 MB exe; 896-file payload; `BUILD_INFO` = commit `797eea0`, dirty, built 2026-09-19T17:06:16+0930) → `installer/make_installer.ps1` → `scripts/make_release.py`. Artifacts: **Setup 37,661,860 B sha256 `0D0BF7C57329ADC02B642CF07B187A398CC8666AA4481CA0662E563981D692E2`**; zip 43,001,835 B sha256 `113be091cd0befb22e187b21b292337e399fa2a80ee6ad45ce060a80d06b4f2f`; SBOM sha256 `8e2fa4b02096d45c00511b7e436eec078a16396a14843bfc4ce6e1ab890f3130`; dist exe sha256 `8ae3b25018dfd89643b23a3b289de28fb18fbd7e45e8e21871ef1e4c26c8896e`. `installer/README.md` carries the dated §127 journey paragraph.
+- **Packaging receipts (this pass).** Frozen smoke **18/18** (asset parity 78 shell refs byte-identical; WS 101/403; `frozen=true`; 0 client errors). Setup journey **17/17 ALL PASS** (silent install exit 0 — 898 files = 896 payload + unins000.exe/.dat; installed exe hash == dist exe; Start Menu created; desktop icon correctly skipped; ARP created; installed smoke 4/4; silent uninstall clean; `%APPDATA%\OrderFlowAnalysisPro` untouched; his dev desktop shortcut left as found).
+- **Nothing committed; HEAD `797eea0`** — 64-file dirty worktree (38 tracked + 26 untracked; was 59 at the §126 record). Deltas for the push pass: tests 1,665→1,673; +`test_ra_fixes.py`; UI/store/api/dataport/engine/logs/single_instance/database touched by the fixes.
+- **Owed.** Commit/publish on his word (drafts first — standing gate). Standing follow-ups unchanged: radar walls / big-trade zones, spent-state persistence, config slots.
+
+**§128 — The multi-monitor system audit (owner's Desktop `monitor.txt`): send-to-any-monitor, snap, pin and the unplug rescue for every panel window in BOTH views; four defects found and fixed (one held the dialog shut entirely, one was introduced and caught in this same pass). (2026-09-19; nothing committed; live-verified on a sandboxed launcher — port 8094, scratch APPDATA, WebView2 driven over CDP, OS windows enumerated)**
+
+- **The brief:** the owner's word — *"a full system audit of the capabilities of the program for multi monitor and complete support for unpinning/moving from any monitor or display of panels from the TERMINAL view to any combination of monitor/screens … creative and 100% functional solutions for BOTH 'TERMINAL' and 'CLASSIC' views."* Audit doc: `docs/MULTIMONITOR_SYSTEM_AUDIT.md`.
+- **What was already there** (§71–§73, §96): the pure placement maths + `WindowHost` seam, the `ui.windows` set restored on launch, the `/api/control/windows` route, the widget-window menu (terminal bar + Classic top bar + the aux window's own bar), the Windows & layouts dialog, §72's window geometry + per-screen layouts, §72's DPI refit.
+- **What was built (the solution set, both views):**
+  1. **Send + snap.** `windows.PRESETS` (10 shapes: four halves, four corners, `fill`, `center`) resolved by the pure `preset_rect` inside any screen's work area; `move_placement` picks the screen (explicit index → `step` monitors over, cyclic → the screen containing the position → primary). New host method `move()` (real `window.move` + `resize`), route actions **`move`** (`{id, screen?/step?/preset?}` — works on an OPEN window and on a stored one from a safe start) and **`arrange`** (Bring them home for every stranded window), `preset` accepted on `open`. The state now answers **`open_geometry`** (each open window's live rect + the monitor it is ON, labelled) and **`stranded`**.
+  2. **The widget's own door.** Every terminal widget frame carries **⧉** on its title bar → `OFAPWINDOWS.openFor(view, btn)` opens the window menu aimed at THAT widget (straight into its send/snap panel when it has a window). Terminal bar menu rows gained a **⇥** per open window; the auxiliary window's bar can move **itself** ("⇥ monitor"), and now says which window it is and which monitor it sits on.
+  3. **Any panel → any monitor, without a focused widget** (Classic's route): the dialog's "Another panel, on any monitor" row (panel · monitor · shape pickers, built from the document's own view sections; live: 34 / 1 / 10) opens it already placed. Every dialog row gained Send buttons (one per monitor, "· here" on its own) and the 10 shape buttons.
+  4. **The rescue.** The dialog banner names the stranded window(s) with **Bring them home**; the menu shows a ⚠ on the Windows chip and offers the same; `reset` stays the per-window version.
+  5. **Keyboard.** `Ctrl+Alt+W` — the focused widget's window menu; `Ctrl+Alt+Shift+→ / ←` — send its window one monitor over (opening it there when it has none). Both modes; both registered in the Keys sheet.
+- **Defects found by the audit, each fixed with a pin and a live receipt:**
+  1. **F-1 (high):** `windowing.js` and `windows-ui.js` both assigned `window.OFAPWINDOWS`; the later load won and the View menu's "Windows & layouts…" called an undefined `open` — the dialog was unreachable. One global per module now (`OFAPWINMGR` / `OFAPWINDOWS`), pinned, re-proven from the real menu in Terminal AND Classic.
+  2. **F-2 (high):** `stranded()` read only the store. Measured live: a window pushed to (9000, 40) kept a record saying (0, 0) (the store trails the window) → the app said "nothing stranded" while a window was off every screen. `stranded(records, screens, live=…)` now takes both; live: banner + Bring them home returning the real window to (640, 0).
+  3. **F-3 (medium, found by running it):** "send to next monitor" on a ONE-monitor machine resolved cyclically to the same screen and re-centred a hand-placed window. Fixed at both layers (UI no-op with `screens.length < 2`; API answers `moved: ""` + "already on that monitor" for a step-move with nowhere to go; an explicit `preset` still centres). Live: geometry identical across the real keystroke.
+  4. **F-4 (low):** an aux window re-acquired `#view` after §73 cleared it — two writers (`ui.js showView`, `shell.js focusView`); both skip when `window.OFAPAUX`. Live: `location.hash == ''` on a fresh aux window.
+  5. **F-5 (medium, self-inflicted, caught live):** the dialog rewrite gated every row on `payload.view`, killing every button in it (Bring them home clicked, nothing moved). Fixed; pinned; re-proven live.
+- **Receipts (sandbox, scratch APPDATA, 8094; CDP 9223; `EnumWindows` as OS truth — the store and the OS window agreed exactly in every check):** widget ⧉ menu rows; open → real window (730, 312) 1100×760; aux bar "⧉ Overview · window w9ef12e4 · Monitor 1 · 2560x1440 · ⇥ monitor · 📍 pin · × Close" with exactly 1 frame / 1 active section; **fill → OS (0, 0, 2560, 1384)** and **left → (0, 0, 1280, 1384)**; dialog from the View menu in both modes; TAPE opened left-half from the dialog; hotkeys in `OFAPKEYS.recent`; the stranded banner + rescue; the single-monitor send key changing nothing; WM_CLOSE sweeping every aux window (§94 intact); **0 client errors**.
+- **Gates.** pytest **1,740 / 3 skipped / 0 failed** (start 1,696/3; +44 = `test_aux_windows.py` 31→69 collected, `test_windowing_ui.py` 4→10) · identical counts under CI semantics (`PYTHONUTF8=0`) · AUDIT CLEAN (123 modules) · ruff (0.16.7 via uvx) clean · **40/40 node selftests** (`windows-ui.selftest.js` 10→16 checks) · goldens untouched.
+- **Honest limits.** One physical display on this host: cross-monitor moves and mixed-DPI migration were exercised as pinned maths over every screen shape plus real OS windows on the one screen; the physical two-monitor pass stays the owner's. Literal tear-out dragging remains impossible inside WebView2 (no OS drag can start from the page) — the commands are the shipped form (§73's statement stands). No rebuild: source + tests + docs only, so `dist/`, the zip, the SBOM and the Setup are untouched (§127's artifacts remain the release candidates).
+- **Files.** New: `docs/MULTIMONITOR_SYSTEM_AUDIT.md`. Changed: `desktop/windows.py`, `desktop/launcher.py`, `desktop/api.py`, `desktop/ui/windows-ui.js`, `desktop/ui/windowing.js`, `desktop/ui/shell.js`, `desktop/ui/ui.js`, `desktop/ui/keys.js`, `desktop/ui/menubar.js`, `desktop/ui/atlas.css`, `desktop/ui/guide.js`, `desktop/ui/help-data.js`, `test_aux_windows.py`, `test_windowing_ui.py`.
+- **Owed.** The physical multi-monitor pass (owner). Commit/publish on his word (drafts first — standing gate), and with it the standing question of whether to rebuild `dist/` for a source-only wave. Standing follow-ups unchanged: radar walls / big-trade zones, spent-state persistence, config slots.
+
+**§129 — Layout ▸ Previous versions, made legible: one submenu of the five newest (each naming its time to the second, its age and what it holds), an Auto-cull switch that also culls what is already stored, restores that are themselves recorded, and the why / why-five / auto-cull story told in the help centre, the setup assistant and the Guide. (2026-09-19; nothing committed; live-verified on a sandboxed launcher — port 8094, scratch APPDATA, WebView2 over CDP)**
+
+- **The brief (the owner's screenshot + words):** the Layout menu's bottom section listed `Restore "Moddy" — saved 06:54 pm` three times over, saying nothing about what a version IS, why they exist or how many are kept. The ask: a separate dropdown with only five "saves", an auto-cull option, and an explanation programme-wide (wizard, help) of why the option exists, why five, and the auto-cull.
+- **The menu now.** One row — **Previous versions of this layout**, its value reading `5 kept · auto-cull on` — opening a submenu: `Undo history · <name>`; up to five rows newest-first, each `Restore the 07:52:06 pm version · newest` with `just now · 1 widget · 1 tab` beside it; the **Auto-cull old versions** switch (ticked state); and a last line saying why the feature is there at all (`a save-over, an auto-arrange, a reset or a delete is one click — this is the one click back`). The old shape (a flat `versions.slice(0, 3)` wall) is gone; the row exists even with no versions yet, where it says `nothing kept yet` and explains that one is kept each time.
+- **The store now.** `config_store.LAYOUT_VERSIONS_KEEP = 5` (auto-cull depth) beside the hard ceiling `LAYOUT_VERSIONS_MAX = 10`; new `ui.layout_versions_autocull` (default **ON**, clamped bool) read through `config_store.layout_versions_autocull(cfg)`. Every push obeys it (`_push_layout_version(..., keep)`); `POST /layouts {autocull: true|false}` writes the flag and, when turning it ON, culls what is already stored in the same call (answers `culled: n`); the state answers `autocull`/`keep`/`max` and each version row now carries the shape it would restore (`widgets`, `tabs` — counted from the stored entry, no new storage).
+- **Restores are recorded.** The arrangement a restore replaces is pushed as a version first, so stepping back is itself steppable-forward — the state you were just looking at was previously the one state with no way back (pinned).
+- **The story, programme-wide** (the owner's ask): help topic `work.layouts` gained the block *Previous versions — the one-click undo for a layout* (what it is · why it exists: auto-arrange, reset, save-over, delete, import · why only five: the handful people reach for, and every version is a full copy in the config file · auto-cull: on keeps five, off keeps up to ten, turning it on culls immediately) plus searchable aliases (`undo my layout`, `roll back my layout`, `older version`); the setup assistant's **Professional · Layout & workspaces** step gained the same note; the Guide's identity block mentions the five states.
+- **Receipts (live, sandbox 8094 + CDP 9223).** Seeded a ring through the real route: state `autocull/keep/max = [true, 5, 10]`; with auto-cull off the ring grew to 10; the menu row read **`Previous versions of this layout · 5 kept · auto-cull on`**; the submenu listed `Undo history · Probe v8` + five `Restore the 07:52:06 pm version` rows (age + `1 widget · 1 tab`) + the ticked **Auto-cull** row + the why-line; clicking Auto-cull with eight stored flipped the flag and left exactly 5 (culled 3, via the route's own `culled`); clicking a restore row moved the layout `Probe v8 → Probe v7` and the ring's newest row became `Probe v8` (the replaced state, as designed); the Help Centre rendered all three phrases; **0 client errors**; WM_CLOSE swept and the sandbox was cleaned.
+- **Gates.** pytest **1,747 / 3 skipped / 0 failed** (start 1,740/3; +7 = `test_layout_versions.py` 6→12, `test_menus_pass.py` +2) · identical counts under CI semantics (`PYTHONUTF8=0`) · AUDIT CLEAN (123 modules) · ruff (0.16.7) clean · **40/40 node selftests** · goldens untouched.
+- **Files.** `desktop/config_store.py` (KEEP + the flag + `layout_versions_autocull()`), `desktop/api.py` (state rows with shape, `keep`/`autocull`/`max`, the `autocull` action + cull, restores recorded, per-push depth), `desktop/ui/menubar.js` (the submenu, the switch, `versionStamp`/`versionAge`), `desktop/ui/help-data.js`, `desktop/ui/guide.js`, `test_layout_versions.py`, `test_menus_pass.py`.
+- **Owed.** The owner's physical multi-monitor pass (§128) and commit/publish on his word (drafts first). Rebuild decision for the source-only waves (§128+§129) still his. Standing follow-ups unchanged: radar walls / big-trade zones, spent-state persistence, config slots.
+
+**§129b — The owner's "the top menu bar randomly hides while I change options" report, traced and fixed: every dropdown's own scrollbar closed it. (2026-09-19; nothing committed; live-verified with REAL mouse and wheel events over CDP — 8094/9223)**
+
+- **The report:** *"when clicking the top menu bar now the focus is wrong and randomly hides the bar while trying to change options."*
+- **Measured cause, not a guess.** The dropdowns have grown scrollable — **View: 1,114 px of rows in a 665 px panel; Layout: 787 px** (§129's version submenu added the rows that tipped Layout over). The menubar's close guards run a CAPTURE-phase `scroll` listener that closed every open menu on ANY scroll event — *including a scroll INSIDE the panel*. So every row below the fold (Legend panel, Menu bar, Rail, Status bar, Full screen/zen…) could only be reached by scrolling, and the first wheel tick closed the menu: the owner's "randomly hides while I try to change options". A click aimed at one of those rows then landed on the app underneath — the "focus is wrong" half of the report. Earlier probes had missed it because they used `element.click()`, which neither focuses nor produces a wheel; the reproduction needed real `Input.dispatchMouseEvent` clicks and a real `mouse.wheel`.
+- **The fix** (`desktop/ui/menubar.js`, one guard): the scroll closer now ignores scrolls whose target sits inside `#menuBar` (`ev.target.closest('#menuBar')`) — a scroll in the open dropdown is the user reaching for rows, not "touching something else". The rest of the contract is untouched and now PINNED so it cannot quietly disappear with it: mousedown-outside (capture), focusin-outside, window blur, Tab, Escape.
+- **Receipts (live, sandbox 8094 + CDP 9223).** Wheel over the open View panel (+300) → menu STAYED open, `scrollTop` 300 → the below-the-fold **Status bar** row clicked → status bar hidden (action ran); wheel over the open Layout panel (+400) → stayed open → **Auto-cull** clicked → route answered the flag true→false; a scroll OUTSIDE the bar still closed the menu (`[]` open) while a scroll INSIDE kept it (`['view']`); 0 client errors. Panel geometry measured (`top 25 · bottom 691 · innerHeight 901` — the panel fits the window; nothing was clipped).
+- **Gates.** pytest **1,748 / 3 skipped / 0 failed** (+1: `test_menus_pass.py::test_scrolling_the_open_dropdown_keeps_it_open`) · identical under `PYTHONUTF8=0` · AUDIT CLEAN · ruff (0.16.7) clean · 40/40 node selftests.
+- **Files.** `desktop/ui/menubar.js`, `test_menus_pass.py`. No store, route or layout changes.
+- **Owed.** Unchanged: the owner's physical multi-monitor pass (§128), commit/publish on his word (drafts first), the `dist/` rebuild decision (§128+§129+§129b are source-only).
+
+**§129c — The owner's "rebuild": §128+§129+§129b frozen into dist/zip/SBOM/Setup, and one defect the rebuild itself found. (2026-09-19; nothing committed; battery green — frozen smoke 18/18, frozen features 20/20, installer journey 11/11)**
+
+- **The word.** The owner looked at the build he actually clicks and the version section was the OLD wall of `Restore "Moddy" — saved 06:54 pm` rows: he launches the DEV shortcut (`pythonw -m orderflow_system.desktop` in the repo) and that page had not been reloaded since before §128, so §129's menu was never in front of him. He asked for the rebuild; the artifacts (which he does not run, but which are the release candidates) now carry all three waves.
+- **The rebuild chain, in order** (each step on the SAME tree, so the artifact carries the last source change): gates (1,749/3/0 both interpreters, AUDIT CLEAN, ruff clean, 40/40 selftests) → `scripts/build_exe.py --clean` (payload **896 files**, 232 developer files pruned, 62 licence texts from 19 distributions) → **frozen smoke 18/18** → **frozen features 20/20** → `scripts/make_release.py` (zip + CycloneDX SBOM) → `installer/make_installer.ps1` (Inno 6) → `scripts/verify_installer.ps1` (**11/11 PASS**).
+- **The artifact hashes (this rebuild).** dist exe `1863553f…` (15.3 MB) · zip `b51b1c9f…` (43,032,010 B) · SBOM `cc88e4cc…` (448,822 B) · Setup `E39E3ADC…` (37,693,744 B; WebView2 bootstrapper unchanged at `83004A28…`). `BUILD_INFO.json`: commit `797eea0`, `worktree_state: dirty`, built 2026-09-19T20:20:02+0930. Full numbers + the journey: `installer/README.md` → "Verified journey (Inno pipeline, the §129b rebuild)".
+- **The defect the rebuild caught** (this is why the artifact is probed, not just the tree): `POST /api/control/layouts {autocull: false}` answered **`autocull: True`** while the store held `False` — the return paths of `layouts_post` called `_layouts_state(block_out)` and the helper's `autocull` parameter had a DEFAULT of True, so every write (and the export/refusal paths) reported a state the store had refused. Invisible to the tree's own tests (they pinned the switch's request body, not the answer's flag) and to the UI (it re-reads the state after acting). Fixed by REMOVING the default (the parameter is now mandatory) and passing the flag at every call site — `_layouts_state(block, config_store.layout_versions_autocull(cfg))` — with a new pin (`test_layout_versions.py::test_every_write_answer_reports_the_flag_it_just_stored`, 12→13) that also greps the source for a re-added default or a call site that dropped the flag. The first build of this wave (exe `7aa420d2…`, 20:14) was superseded by the fix and rebuilt; the shipped artifacts are the 20:20 build.
+- **The frozen UI, driven for real.** The artifact's own WebView2 (app 8104, CDP 9224) served the §129b fix: the View menu stayed open through a real wheel (`scrollTop 260`) and the below-the-fold **Rail** row clicked → the rail toggled; the Layout menu stayed open through a wheel, the row read `✓Auto-cull old versions`, clicking it flipped the route's flag. Payload parity checks prove `menubar.js` / `windows-ui.js` / `windowing.js` / `help-data.js` in `_internal/` are byte-identical to this tree, and the route checks prove the Python half (`.py` sources live in the PYZ, so file hashes cannot stand in for them).
+- **Gates.** pytest **1,749 / 3 skipped / 0 failed** (+1 pin) · identical under `PYTHONUTF8=0` · AUDIT CLEAN · ruff (0.16.7) clean · 40/40 node selftests · installer journey 11/11 · nothing installed on this machine afterwards (no ARP entry, no Start Menu entry — his dev shortcut untouched), `%APPDATA%\OrderFlowAnalysisPro` intact, all scratch cleaned.
+- **Owed.** Unchanged: the owner's physical multi-monitor pass (§128), commit/publish on his word (drafts first). To SEE §128+§129+§129b himself he only has to relaunch his dev shortcut (or Ctrl+R the open page) — the rebuild is for the distributable lane.
+
+**§130 — The owner's question about the Order-flow engine's symbol row: "is this functioning correctly, and is there a need for a drop-down with correct associated selections?" — answered by measurement, and one real defect fixed (the frame titles never followed the instrument). (2026-09-19; nothing committed; source-only — the dist/zip/SBOM/Setup built at §129c do NOT carry this fix)**
+
+- **The report.** A screenshot of the engine head: the frame bar reading `ORDER-FLOW ENGINE · BTCUSDT` over a panel whose own symbol box read `ETHUSDT`, beside the quick picker showing `ETHUSDT — Crypto`, with the freshness chip at `aging · 35 s`.
+- **Reproduced against a COPY of his config** (scratch APPDATA, his real `%APPDATA%\OrderFlowAnalysisPro\config.json` never written): 49 instruments, ETHUSDT configured + enabled, engine streaming 7 (BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT, TRXUSDT, SUIUSDT, APTUSDT).
+- **What is functioning (verified live, not inferred).** The top bar lists exactly the STREAMING instruments and drives every panel; the engine's picker lists all 49 configured, grouped `streaming now` → `enabled` → `configured — off`, each labelled `SYMBOL — AssetClass`; picking a streamed symbol moves the panel's own symbol AND mirrors the app-wide one (~1 s, store confirmed through `/api/control/ofx`); picking a switched-off crypto one answers `◌ not enabled` + the Enable&restart sentence; a Stock the feed cannot serve answers `⚠ not on this source`; an unconfigured symbol answers `? unknown` with the reason and the look-up row.
+- **The defect: the widget titles never followed the instrument.** `titleToken()` reads the top bar at paint time, but the refresh lives in the shell's status pass and NOTHING called it on a symbol change — measured: minutes after moving to ETHUSDT / SOLUSDT / XRPUSDT every frame still read `· BTCUSDT`, the symbol it was BUILT with. That is precisely the owner's photographed contradiction (panel on ETHUSDT, title on BTCUSDT). **Fixed**: the top bar's `onchange` now calls `OFAPSHELL.paintStatus()` (the shell's own exported pass) after announcing `ofap:symbol`; pinned in `test_t4_trust.py` (11→12) including the assertion that the shell still exports the pass. Live re-verified: titles follow the top bar and the engine picker, and return when the symbol does.
+- **Two honesty gaps left OPEN for his call (not changed).** (1) The picker's `selected` option is computed from the typed BOX value on focus, so an uncommitted typed symbol reads as the current selection while the app is still on the old one — and a re-pick of that same option fires no `change` at all. (2) The box + Enter path moves only the panel (no top-bar mirror), while a picker pick mirrors — one intent, two behaviours. Both are UX decisions (the Engine deliberately keeps its own symbol, persisted separately), so they are recorded, not silently redesigned.
+- **Gates.** pytest **1,750 / 3 skipped / 0 failed** (+1 pin) · identical under `PYTHONUTF8=0` · 40/40 node selftests · AUDIT CLEAN · ruff (0.16.7) clean · probe receipts `runtime/ofap_s130*` (config-copy recon, the row matrix, the fetch-hook pick trace, the group behaviour, the fix's live verification).
+- **Owed.** A decision on the two honesty gaps; a rebuild if he wants the fix inside the distributables (§129c artifacts predate it); unchanged otherwise: his physical multi-monitor pass, commit/publish on his word.
+
+**§131 — The owner's "3×2 cells on hover" find: a whole-panel tooltip, swept out, and the same class audited app-wide. (2026-09-19; nothing committed; source-only — the §129c artifacts predate this and §130)**
+
+- **The find.** His screenshot: `Guide & setup · 3×2 cells` floating over the panel's own prose. Measured cause: `placeFrame()` set a native `title` on the FRAME element — and a frame spans the entire widget, so every untitled thing inside it (chart, text, table, canvas) showed that box wherever the pointer sat. The suite's own sweep (both modes, menus open, the windows dialog) counted it on EVERY widget: `<section class="widget-frame"> title="Overview · 6×4 cells"` and so on, the single largest hover surface in the app.
+- **The rule applied.** Hover text belongs to a CONTROL, never to a container that spans content — and a container's `title` silently becomes every untitled child's tooltip. The widget's size was the one genuinely useful fact in that string, so it moved to the resize grip, where a user reaches for it: `Drag to resize this widget — now 6×4 cells`, refreshed in `placeFrame()` on every placement change. The frame bar keeps its own `Drag to move this widget`; the frame element now carries no title at all.
+- **The app-wide sweep** (mechanical, not eyeballed): every visible element with a `title`/`data-hint-title` in terminal mode (78), classic mode (92), each top-bar menu (~190 each) and the windows dialog; flagged two classes — internal vocabulary (`px`, `cells`, ids, paths) and "hover text that is the only help for a control" (containers ≥ 4,000 px² holding untitled buttons/inputs/selects). Result: **the frame was the only structural instance**; the remaining flagged strings are deliberate prose the app means to show (the Alpaca card's explanation, the Overview table's column legend, the heatmap smoothing label at 2.5/4 px, the data pill's per-endpoint ages, the storage line's `db:` path) — each on a surface whose content IS that explanation.
+- **Two smaller gaps the static pass found and closed**: the Alpaca banner's *Set up now*, the symbol list's *Add* and *Save list* had no hover text of their own, so hovering them showed the CARD's paragraph (the same class at button scale) — each now says its own one-liner.
+- **Receipts.** pytest **1,751 / 3 skipped / 0 failed** (+1 pin: `test_t4_trust.py::test_a_widgets_hover_text_lives_on_its_grip_not_over_its_content`, which fails if `frame.title` returns, if the grip loses `gripTip()`, or if the bar loses its move hint) · identical under `PYTHONUTF8=0` · 40/40 node selftests · AUDIT CLEAN · ruff clean · live: all four frames `frameTitle: null`, bars `Drag to move this widget`, grips `… now 6×4 cells`, and a pointer over the panel body resolves to the panel's OWN inner control (a `sy-tile`) instead of the frame. Probes `runtime/ofap_s131*`.
+- **Owed.** Unchanged: his call on the §130 picker semantics, a rebuild if these source-only fixes should ride in the distributables, his physical multi-monitor pass, commit/publish on his word.
+
+**§132 — The engine progress bar (the owner's ask): a live stage readout beside Start/Stop — green on the way up, red on the way down, honest about a stop that takes ten seconds. (2026-09-19; nothing committed; source-only — the §129c artifacts predate §130–§132)**
+
+- **The ask.** *"Add a small loading bar near the 'START ENGINE' button that real time shows the loading stage the engine is at whilst loading to a working state… green for loading and red for shutting down… the user may get confused as to the state of the engine progression."*
+- **The measurements that shaped it** (sandbox, his config copied): **START** answers in **0.47 s**, first tick **~1.8 s**; **STOP blocks the request for 10.3 s**, and the stage log shows where: `feeds` 271 ms → `history` 9 ms → **`release` 10,021 ms** (the run's own drain in `system.stop()`), then `closed`. The old shell had nothing to show for any of it — a disabled button and a pill that said "Running" until the stop landed.
+- **The engine now publishes its own stages** (`EngineController.STAGE_PLAN` — keys, not sentences; the route stays the source of truth, the UI owns the words): `starting → config · instruments · build · connect`, `stopping → feeds · history · release`. `_mark()` records each boundary with a measured duration into `stage_log`; `/engine/status` serves `stage`, `stage_at` (epoch, so a bar can interpolate between polls), `stage_ms`, `stage_plan` and `stage_log`.
+- **The bar** (`desktop/ui/engine-progress.js` + `.selftest.js`, mounted into the new `#engineCtl` cluster, styled in `ui.css`): a 152 px caption + 4 px track, **absolutely positioned in the top bar's empty spacer to the left of the buttons — nothing shifts when it appears**, tabular figures so the seconds never twitch, `pointer-events: none`, hidden in zen. Green up (`reading your setup → preparing instruments → building the run → connecting the feed → waiting for ticks → live`), red down (`closing the feed → flushing history → finishing the shutdown → stopped`), a hold of 1.4 s on the closing word, then it fades. **"live" is only ever written after a real print has landed** — until then it says "waiting for ticks" and creeps, and after an 8 s grace it settles honestly as "connected — no ticks yet".
+- **Three defects found by driving the real page** (all fixed and re-verified): (1) the bar **re-flashed "live" every 2 s poll** while running — it now arms only on a transition it witnessed and stays quiet after settling; (2) a **stale status read already in flight when Stop was pressed painted "live / 100 %" over the fresh red bar** and stopped its fast poll, freezing the red bar for five seconds — an `expect` direction guard now drops reads of the state just left (with a 90 s TTL); (3) the **shell's own poll is held during user intent**, so the bar's first frame of a stop arrived ~4 s late — the bar now polls `/engine/status` itself while a transition runs, paints only itself, and the buttons arm it instantly on click (`begin('up'|'down')`) so even a 0.5 s start shows. A fourth, caught by the suite's own timer guard (`test_timer_guards`): the shell cannot carry the bar's beats (ui.js is frozen at 4 timers) — they live in `engine-progress.js` as ONE 120 ms beat (the status re-poll rides every fourth one) handed to `OFAPPause.register`, so `P` freezing the board never leaves a bar animating over it. A fifth, in the last live pass: the pre-click "stopped" read flashed over a fresh green bar — the stale-read guard is now bounded (1.5 s), so a start that FAILS can still land in stopped/error and say so.
+- **Receipts (live, sandbox 8094 + CDP 9223, real clicks).** STOP: t+0.01 `stopping the engine` 3 % (red) → t+0.45 `finishing the shutdown` → seconds tick, fill 69→94 % → t+10.28 `stopped` 100 % (red, done) → hidden at t+13.2. START: t+0.03 `starting the engine` (green) → t+0.24 `waiting for ticks` → t+1.88 `live` 100 % → hidden. An 8 s quiet watch after settling: **0 re-flashes**. 0 client errors. The stop also produced the evidence for the docs' claim: `release` 10,018 ms of a 10.0 s stop.
+- **Gates.** pytest **1,753 / 3 skipped / 0 failed** (+2 pins: `test_wiring` bar wiring incl. the one-beat + pause-registration assertions, `test_control_surface` stage plan + marks + payload) · identical under `PYTHONUTF8=0` · **41/41 node selftests** (the new `engine-progress.selftest.js` covers the phase, the captions, the fill's monotone/bounded arithmetic, the settlement text) · AUDIT CLEAN · ruff clean · probes `runtime/ofap_s132*`.
+- **Files.** `desktop/engine.py` (STAGE_PLAN, `_mark`, the marks, status fields), `desktop/ui/engine-progress.js` + `.selftest.js` (new — the bar, its beat and its pause registration), `desktop/ui/ui.js` (the mount, the payload handover, button visibility through a stop, the three `begin()` calls), `desktop/ui/index.html` (`#engineCtl`, the script tag), `desktop/ui/ui.css` (the bar), `test_wiring.py`, `test_control_surface.py`.
+- **Owed.** A rebuild if §130–§132 should ride in the distributables; his call on the §130 picker semantics; his physical multi-monitor pass; commit/publish on his word.
+
+**§133 — The owner's screenshot: the §132 bar covered the Classic/Terminal switch. Placement fixed, measured. (2026-09-19; nothing committed; source-only)**
+
+- **The report:** a picture of the progress bar's caption ("waiting for ticks · 3 s") drawn straight over the mode switch. My §132 placement assumed the space left of the button cluster was the top bar's empty spacer; it is not — the `.grow` spacer is 577 px wide and sits LEFT of `#modeSwitch`, so an absolutely-positioned bar anchored off the cluster (`right: calc(100% + 12px)`) landed on the switch. Measured before the fix: bar 1928→2080, mode switch 1949→2080, overlap true.
+- **The fix:** the bar is now the cluster's **first child, in flow, with its width reserved** (`flex: 0 1 152px; min-width: 0`, `visibility: hidden` when idle with the `hidden` attribute's `display: none` overridden so the box never collapses). The top bar's spacer absorbs the width, so nothing to its right ever moves — and nothing can ever be overlapped. Crowded bars give way instead of pushing: the slot shrinks via media queries (152 → 118 → 96 px) with the caption ellipsising.
+- **Receipts (live, sandbox 8094 + CDP 9223).** At the app's own width: bar 1934→2086, mode switch ends 1922 — `overlaps: []` idle AND visible, and the list of controls that moved when the bar appeared is **empty**. Narrow-width checks via `Emulation.setDeviceMetricsOverride` (1400/1200/1000 px): at 1200 px the top bar collides with ITSELF (sourcePill ↔ livePill) with the bar hidden — pre-existing, and the reason the media-query give-way exists. A real stop/start still behaves: stop t+0.01 red → `finishing the shutdown` ticking → `stopped` 100 % → faded at ~13 s; start → `waiting for ticks` → `live` at ~2.5 s; 8 s quiet watch = 0 re-flashes; 0 client errors.
+- **Gates.** pytest **1,753 / 3 skipped / 0 failed** · identical under `PYTHONUTF8=0` · 41/41 node selftests · AUDIT CLEAN · ruff clean · probes `runtime/ofap_s133*`.
+- **Files.** `desktop/ui/ui.css` (in-flow slot + media give-way), `desktop/ui/engine-progress.js` (insert as the cluster's first child). Skill: `references/progress-bars.md` gained the placement rule ("the space left of a right-anchored cluster is not empty; reserve the width in flow").
+- **Owed.** Unchanged: a rebuild if §130–§133 should ride in the distributables, his call on the §130 picker semantics, his physical multi-monitor pass, commit/publish on his word.
+
+**§134 — The owner's report: the top menu closed by itself, "fine at first, broken after 10-20 s… or after clicking around the menu bar a lot." Cause: the app scrolls ITSELF, and the menu obeyed every scroll event. (2026-09-19; nothing committed; source-only)**
+
+- **Reproduced by instrumenting the page** (capture hooks for every closer the menubar obeys: scroll / focusin / blur / ofap:relayout / Tab, plus the menu's own state). Early (t+4 s) the menu opened and stayed; late (t+35 s) it closed within the attempt and the log showed why: **`scroll` on `div.wf-body | inBar=false`** — a panel, outside the bar. Registered on the strip scrollers: the suite's strips pin their scroller to the newest print (`strips.js: scroller.scrollTop = newestEnd(st)`) and the signal log sticks to its bottom (`ui.js`), so as soon as data flows a scroll fires every few seconds. My §129b fix had exempted only scrolls INSIDE the dropdown — a scroll event from anywhere else still closed the menu, and the app generates them constantly. The "clicking around a lot" version of the report is the same defect on the same clock (plus the normal toggle: clicking an already-open title closes it).
+- **The fix** (`desktop/ui/menubar.js`): the closer is now the REAL user gesture — **`wheel` / `touchmove` outside the bar** (capture, passive), with the dropdown itself exempt — instead of a scroll event. The other closers are untouched: mousedown-outside (capture), focusin-outside, window blur, Tab, Escape. Tooltips of the change: a dragged scrollbar still lands on the mousedown guard; keyboard scrolling only happens after focus has left the bar, which the focus guard closes first; a programmatic/auto scroll now dismisses nothing.
+- **Receipts (live, sandbox 8094 + CDP 9223).** Instrumented page counted **12 app-generated scroll events within 3 s**; a menu opened during that live scrolling **stayed open for 6 s** (was: closed immediately). A real wheel INSIDE the dropdown → stays open (§129b preserved); a real wheel OUTSIDE → closes (the rule survives); five title clicks in sequence (`view → layout → view → layout → help`) each leave that title's menu open. The original repro re-run: menu at t+35 s now reads `open: ['layout']` (was `[]`).
+- **Guards updated deliberately.** `test_menus_pass.py::test_scrolling_the_open_dropdown_keeps_it_open` now FAILS if a scroll-event closer ever returns (this regression has now bitten twice) and pins the wheel/touchmove pair with the in-bar exemption and the surviving closers. `test_listener_balance.py` frozen count for `menubar.js` moved 20 → 21 with the reason recorded in the entry (one scroll listener out, two real-gesture listeners in).
+- **Gates.** pytest **1,753 / 3 skipped / 0 failed** · identical under `PYTHONUTF8=0` · 41/41 node selftests · AUDIT CLEAN · ruff clean · probes `runtime/ofap_s134*` (the menubar-closer instrument and the four-point verification).
+- **Files.** `desktop/ui/menubar.js`, `test_menus_pass.py`, `test_listener_balance.py`.
+- **Owed.** Unchanged: a rebuild if §130–§134 should ride in the distributables, his call on the §130 picker semantics, his physical multi-monitor pass, commit/publish on his word.
+
+**§135 — The final release audit (the owner's Desktop `final audit prompt.txt`, the 435-line "FINAL RELEASE AUDIT — v0.1b OPEN-SOURCE SHIP GATE"): SHIP ONLY AFTER REQUIRED FIXES — no P0/P1 defect found on this content; the four required items are release mechanics, not product defects. (2026-09-19; report-only — **no code changed**, nothing committed)**
+
+- **The brief:** the owner's word — *"your directive is at final audit prompt.txt"*: phases 0–5 (baseline integrity · architecture map · domains A–F · runtime validation · finding template · staged remediation) with ten prescribed report sections. This directive had never been run on this tree (§126 was the *security* variant).
+- **Decision: SHIP ONLY AFTER REQUIRED FIXES.** Report `docs/FINAL_RELEASE_AUDIT_v0.1b.md`; evidence `Desktop\OFAP_v0.1b_final_audit\00_EVIDENCE_LOG.md` (raw receipts in `evidence\`, aggregates in `receipts\audit_summary.json`, re-runnable probes in `ev\`).
+- **Required before a public release** (all mechanics, no defects):
+  1. **The content is uncommitted (FG-04/P2)** — 96 dirty entries (+4,338/−443 over `797eea0`), so CI has never seen it; the standing push pass is the first step, and its head run is the delta's first CI execution.
+  2. **The distributables lag §130–§134 (FG-03/P2)** — `dist`/zip/SBOM/Setup are the §129c build (`BUILD_INFO` `797eea0`, dirty, 20:20:02; Setup `e39e3adc…`, 37,693,744 B); six UI files differ from source (`alpaca-card.js`, `index.html`, `menubar.js`, `shell.js`, `ui.css`, `ui.js`) and `engine-progress.js` is absent (the packaged `index.html` does not reference it — the artifact is internally consistent and passed the guard probe 23/23). A rebuild is the cheap default; shipping the snapshot is legitimate but must be a decision.
+  3. **README measured claims are stale (FG-01/P3)** — badge `tests 1584` vs **1,753**; `115 vanilla-JS modules (35 selftests)` vs **126/41**; `~45,567L` vs **48,502**; File Inventory rows (Desktop UI 125/49,112 → 136/52,157; Total 246/98,326 → 248/97,356; suite 146/27,729 → 160/30,274; four line-count rows) — one simultaneous re-derivation pass, the one-pass swap rule.
+  4. **Release identity (FG-02/P3)** — `pyproject 0.1.0` / README `v0.1.0-beta` / the release's own name `v0.1b`; `git tag -l` empty. Decide, then tag at the publish commit. (The **API badge is correct**: 185 OpenAPI operations + `/ws` = 186, measured from a running app.)
+- **One behaviour for the owner's call (FG-05/P3, reproduced live):** with the Engine view initialised, **picking an instrument in the top bar starts the engine** — measured `stopped` → `running ['BTCUSDT']` in 2.5 s; a page that never opened the Engine view does nothing (its `ofap:symbol` listener registers on first init). Chain: `ui.js` topbar change → `ofap:symbol` → `ofx-view.js:1300` → `pickSymbol()` → `resolve` `ready` → `runInstrumentAction('start_engine')`. Designed (§82) with visible feedback (pill + the §132 bar) — document it, gate it, or say it in the toast; not a blocker.
+- **Two small cleanups deferred by choice (P3):** `chartLoadWatch()` retries `loadChart()` every 5 s with no attempt cap while the chart view is open (`ui.js:416-424`); `refreshLiveChip()` spends one duplicate `GET /engine/status` per poll for its tooltip (`ui.js:296-325`; payload cost bounded by `_recent_ticks_max = 500`/symbol).
+- **One flaky gate observed and characterised (FG-08/P3):** the third full-suite run of the pass showed `1 failed / 1,752 passed` — `test_hyperliquid_feed.py::test_the_listing_does_not_stop_the_mapping_when_the_rest_call_fails`; the single test then passed 3/3, the whole file 3× (27 each) and two further full runs green (`evidence/flake_check.txt`). The suite is therefore **green in 4 of 5 full runs**; the assertion text was not captured (the run was tailed), so the cause (cross-test logging state vs an async ordering race) is a hypothesis, not a conclusion. Capture `--tb=long -v` + the test order if it recurs; do not widen the assertion.
+- **Re-verified live on this content (fresh receipts):** gates **1,753/3/0 on both interpreters**, **AUDIT CLEAN** (125 modules), ruff clean, **41/41 selftests**, goldens exact (analytics max diff 0.0) · fresh-profile **21/21** on a virgin `%APPDATA%` · **frozen-exe guard probe 23/23** (docs 404 ×3, served==packaged ×8, hostile Host / cross-origin / cross-site 403, loopback 200, WS 101/403) · **CSP sweep 0 violations / 0 page errors over 34 views** · **churn probe: 0 same-node accumulation, 0 detached-retained**, timers 13→14 with the Δ traced to a lazy one-time `context.js` poller (trip-diff: options-view poll released on every leave) · bounded live soak (Bybit BTCUSDT): JS heap 4.51→4.61 MB, listeners 809→810, 0 errors · secrets clean four ways · pip-audit clean (59 pkgs) · SBOM 45 components · zip 896 entries OK · **bandit now 0 High** (the B324 sha1 is gone) with 27 Medium triaged · a plain page load does **not** start the engine.
+- **Carried ledger:** RA-01/02/03 fixed and **re-proven live** (hostile symbol → clamped to `IMGSRCXONERRORWINDOW.__R`, renders as TEXT, 0 parsed elements, `__RA_XSS` unset; fresh-profile export `400 + sentence`); F-05 (`AbortedSocketFilter`) and F-08 (`usedforsecurity=False`) landed; SS-1…SS-14 closed/carried with unchanged dispositions. No Critical; no High; no unpatched prior finding.
+- **Honest limits stated in the report:** one physical display (no real multi-monitor pass); no long soak (owner's standing instruction — bounded stores + the memory audit stand in); no MT5 / NinjaTrader / Alpaca accounts exercised; CI has not run the delta; the frozen artifact predates §130–§134.
+- **Files.** New: `docs/FINAL_RELEASE_AUDIT_v0.1b.md`. Changed: this block, `docs/RESUME.md`. Nothing else — no source file was modified: the audit's own baseline held 96 entries (66 modified + 30 untracked) and the tree now counts 97, the one new file being the report itself. All sandboxes and the frozen-exe probe were stopped; ports 8098/8099 free; scratch profiles under `%LOCALAPPDATA%\Temp\ofap_fa\`.
+- **Owed.** The four required items on the owner's word (commit → README re-derivation → identity → rebuild decision); the FG-05 decision; unchanged: the owner's physical multi-monitor pass, commit/publish on his word.
+
+**§136 — The owner's "go for all fixes": every finding the §135 release audit named, executed in one source pass with pins — README/CONTRIBUTING claims re-derived, the release identity pinned, the pick-starts-engine behaviour documented, the chart retry bounded, the duplicate status fetch removed, the flaky case's capture isolated — then re-gated and re-packaged (frozen smoke 18/18 · features 20/20 · installer journey 11/11 · frozen guard probe 23/23). (2026-09-19; nothing committed — the pass rides the worktree)**
+
+- **The word:** *"go for all fixes"* — the standing trigger to execute the audit's register (required items + the queued cleanups) in one pass, then re-gate, re-package and close the report.
+- **Fixed, each receipt-backed (file · pin · receipt):**
+  1. **FG-01 — README/CONTRIBUTING claim re-derivation.** 10 `(NNNL)` values (database.py 669→673 ×3, aggregator 530→540 ×3, dashboard/app.py 1453→1461 ×2, static/footprint.js 726→749, static/orderbook.js 398→451), the three badges (code ~98k→**~102k**, tests 1,584→**1,753**; API 186 verified **correct**), both prose claims (115 modules/~45,567L → **126/~48,502L**; 35 → **41** selftests), all eight File Inventory rows + the total (246/98,326 → **258/102,412**) and the suite line (146/27,729 → **160/30,274**); CONTRIBUTING's gate baselines (1,584→1,753 passed; 35→41 selftests).
+  2. **FG-02 — the release identity, in-tree.** A **Release identity** line in the README pins the package/artifact version `0.1.0` to the release tag **`v0.1.0-beta`** (the tag itself is the publish pass's act); `SECURITY.md` already used that label.
+  3. **FG-05 — pick-starts-engine, documentation-only** (the least-invasive of the three options; gating it would have changed a §82 workflow the owner built on purpose): the instrument selector's own tooltip and the Instruments help topic now say it.
+  4. **FG-06 — the chart retry is bounded.** `CHART_RETRY_MAX = 12`; the watch stops, the chart head reads *"the chart did not load — reselect the instrument to retry"*, and a landed load or a new selection resets the budget (`ui.js`).
+  5. **FG-07 — one status read per cycle.** `refreshLiveChip(status)` reuses the payload `applyStatus` already holds; a bare call still fetches.
+  6. **FG-08 — the flaky case's capture isolated.** The hyperliquid test attaches its handler to the feed's own logger with the level pinned for the duration (assertion unchanged — never widen one to chase a flake).
+- **Pins:** `test_t4_trust.py` +3 (the chart-retry bound incl. the selection reset · the live chip's payload hand-over · the pick-starts-engine copy in both the tooltip and the help topic).
+- **Two self-caught process defects worth the next pass's memory:** (a) my first wiring script's `apply_edit` **returned before writing** on the newline-free-anchor path — five single-line edits were reported "replaced 1x" and left untouched; only the mandatory read-back caught it. (b) the same script mapped README `(NNNL)` claims **by absolute line number**, and the release-identity line added earlier in the pass shifted every line below it, so all ten claim lookups missed with a `!!` warning that a filtered `grep` hid. Both fixed (the claim pass is now token-based and line-number-free; every wiring run's FULL output is read).
+- **Gates after the pass.** pytest **1,756 / 3 / 0** on both interpreters (1,753 + 3 pins) · **41/41** node selftests · **AUDIT CLEAN** (125 modules) · ruff clean · goldens exact · a 5-run full-suite loop all green (the flake did not recur) · the README claim pass re-verifies **29 claims `ok`, 0 outstanding**.
+- **The rebuild (this content).** `build_exe.py --clean` (233 developer files pruned, 62 licence texts, exe 15.3 MB) → frozen smoke **18/18** (asset parity now **79** shell refs — `engine-progress.js` is in the payload) → frozen features **20/20** → `make_release.py` → `make_installer.ps1` → `verify_installer.ps1` **11/11** → the release audit's frozen guard probe **23/23** → payload markers served from the artifact (selector tooltip, `CHART_RETRY_MAX`, `refreshLiveChip(payload)`, the help sentence).
+- **Artifact hashes (this rebuild).** dist exe `bb503bcd9d9421710699ab39833afe651e1f254a0018933e2b481ae9dc88d15d` (15.3 MB) · zip `6a1926a7411818387d5f60bc0aa4dbdb406507988288102bcaec19b27d2c4907` (43,040,670 B) · SBOM `26dad36f93ee74ac56b8da8e46760c70dfbff5f9fd4b9f113a7904896f377bba` (448,822 B) · Setup `D921D58EF76394879377D978C6A2DA6F4B39AE00A259EEEED05F5B693B3C0A9F` (37,699,102 B; WebView2 bootstrapper unchanged at `83004A28…`). `BUILD_INFO.json`: commit `797eea0`, worktree dirty, built 2026-09-19T22:42:07+0930 — a `--release` build refuses a dirty tree by design, so the release build stays **one commit away**.
+- **The audit report is CLOSED in place:** the closure paragraph sits in §1, each finding's ship status reads CLOSED/HARDENED (FG-04 OPEN-by-design), the validation matrix carries the post-fix gates + the new-artifact battery, and the release checklist ticks items 2, 4, 8, 9, 12, 13.
+- **Nothing committed.** The pass rides the worktree (**dirty count 99** = 68 modified + 31 untracked; the pass touched `README.md`, `CONTRIBUTING.md`, `desktop/ui/ui.js`, `desktop/ui/index.html`, `desktop/ui/help-data.js`, `test_t4_trust.py`, `test_hyperliquid_feed.py` — the last two newly dirty — plus the annotated report and records).
+- **Owed.** Commit/publish on his word (drafts first — the standing gate): the push pass then derives the README/CONTRIBUTING counts (already re-derived here), commits, pushes to `moddy` and watches CI to green. Unchanged: his physical multi-monitor pass.
+- **Files.** `README.md`, `CONTRIBUTING.md`, `desktop/ui/ui.js`, `desktop/ui/index.html`, `desktop/ui/help-data.js`, `test_t4_trust.py`, `test_hyperliquid_feed.py`, `installer/README.md`, `docs/FINAL_RELEASE_AUDIT_v0.1b.md` (annotated), this block, `docs/RESUME.md`; `dist/` + zip + SBOM + Setup rebuilt.
+
+**§137 — The owner's Desktop `final audit prompt.txt` re-run on the partial build: SHIP ONLY AFTER REQUIRED FIXES — the four analytics modules that existed as files and reached nothing are wired end to end (3 new REST routes + 4 UI panels + nav/help/contract entries), every repo gate is green on this content (1,899/3/0 · AUDIT CLEAN 169 routes/133 modules · 45/45 selftests), the README/CONTRIBUTING claims are re-derived again, and the new panels sit inside the listener/timer guards by integration (each poller on `OFAPPause`). (2026-09-19/20; **nothing committed** — the pass rides the worktree)**
+
+- **The brief.** The same 434-line directive as §135, but the tree has moved: a partial build by another LLM (four engines `atlas/{gex,volatility,market_read,option_flow}.py`, three feeds `data/{tradier,marketdata,finnhub}_feed.py`, four view sections in `index.html`, an orphan `atlas/api_new_endpoints.py`) — and the owner's line one: *"audit and survey for any changes made and partial build of anything … remember DONT BREAK FUNCTIONALITY. ONLY ENHANCE."*
+- **The P1 it found.** The four engines were unreachable: **no route served them** (measured 0 `/api/options/*` paths), no `*.js` claimed the views, no Help topic covered them, no `VIEWS` entry — four empty views, and a README that never mentioned the feature at all.
+- **Fixed (each receipt-backed):**
+  1. `atlas/options_api.py` (new, 443 lines) mounted by `launcher.build_app` → `GET /api/options/gex|volatility|flow/{symbol}`; the orphan `api_new_endpoints.py` removed after its concepts landed there; `atlas/api.py`'s `/api/atlas/market-read/{symbol}` payload completed (`_num_or_none` at the boundary).
+  2. `atlas/gex.py` / `volatility.py`: rows now carry **delta, open interest, volume and the expiry stamp** (the surface's 25Δ wings were unresolvable without them; `n_expiries` read 0 on a single-expiry chain), and vanna/charm report **"not published"** rather than a fake `$0.00` (`carried` flags + `not published` in the panel).
+  3. `atlas/market_read.py`: radar levels take the **tracker's real prices**; the `spot * (1+0.001·n)` placeholders survive only as a documented fallback.
+  4. `ui/{gex,volatility,option-flow,market-read}.js` (new) + `index.html` (nav items, script tags, table headers, one **duplicate-id fix**: the new option-flow banner is `ofvBanner`) + `help-data.js` (4 topics + 4 `VIEWS` entries; the file repaired after a mis-anchored edit script spliced it — see the entry's process note in the report).
+  5. `desktop/deribit.py`: the chain note now says when the tickers came from the 3 s cache ("(0 read, 0 failed)" read like a failure on a healthy chain).
+  6. README/CONTRIBUTING/MENU_RECONCILIATION re-derived in one pass (badges ~108k / **190** API / 1,899 tests; modules 130 (45 selftests); tree `~50,285L across 133 files`; inventory rows incl. Atlas 35/11,673, Data 20/8,407, Total **273/48,419/59,164/107,583**, suite 167/31,907; rail rows 29–32 for the new views).
+- **Gates after the pass.** pytest **1,899 / 3 skipped / 0 failed** (the pass began at 2 failed: `test_listener_balance.py` + `test_timer_guards.py`, both now green **by integrating** — every new poller registers with `OFAPPause`, the four modules frozen in the allow-lists with counts and reasons) · **AUDIT CLEAN** (169 routes · 160 ids · 0 missing · **0 duplicate ids** · 133 modules) · **45/45** node selftests (4 new files, 40 checks) · goldens exact · targeted gate set 213 passed.
+- **Live receipts (real data, not fixtures):** GEX BTCUSDT — 36 strikes, forward-anchored window, walls + zero-gamma + DEX/VEX/theta, every row with volume, vanna/charm flagged unpublished; volatility — ATM 20.97%, 25Δ put 19.09 / call 28.38, skew −9.29pp, term structure populated; option flow — 33 prints read, 2 blocks with the venue's own reasons; the four refusal paths (no-key Tradier, no-key Market Data, quote-venue flow, engine-less market read) each answer with an actionable sentence and HTTP 200 + `ok:false`; `build_app(8097)` = **189 OpenAPI operations + /ws = 190**.
+- **Report.** `docs/FINAL_RELEASE_AUDIT_v0.1b_pass2.md` — the directive's ten sections, with a findings register (FG2-01…FG2-08), a validation matrix that says **Not executed** where that is the truth (ruff absent in this environment; frozen-artifact probes need the rebuild; no physical multi-monitor pass), and a coverage matrix.
+- **Files.** New: `atlas/options_api.py`, `ui/{gex,volatility,option-flow,market-read}.js` + their four selftests, `docs/FINAL_RELEASE_AUDIT_v0.1b_pass2.md`. Changed: `launcher.py`, `atlas/api.py`, `atlas/gex.py`, `atlas/volatility.py`, `atlas/market_read.py`, `desktop/deribit.py`, `desktop/engine.py` (the three new feed blocks applied to `settings`), `ui/index.html`, `ui/help-data.js`, `README.md`, `CONTRIBUTING.md`, `docs/MENU_RECONCILIATION.md`, `test_listener_balance.py`, `test_timer_guards.py`. Removed: `atlas/api_new_endpoints.py`. Scratch probes live under `profiles/deepseek/runtime/ofap_*`.
+- **Owed.** Unchanged and now larger: commit/publish on his word (the delta's first CI run), a **rebuild** so `dist`/zip/SBOM/Setup carry §137 (the four panels exist only in source until then), the README badge re-check after that rebuild, his physical multi-monitor pass, and the decision list: Tradier's greeks gap for GEX, and whether the equity chain paths get a live keyed pass.
+
+**§138 — The owner sent a screenshot of the new GEX panel and asked for an audit + repair of that module. What the audit found (the panel renders; the DATA UNDER IT did not add up), and what was repaired.**
+
+- **Method.** A real browser against a headless instance of the app on a scratch profile (`APPDATA=profiles/deepseek/runtime/ofap_gex_audit/appdata`, port **8095**, `--headless`), driven with Playwright from the webkit venv (`profiles/deepseek/runtime/ofap_gex_audit/audit_gex.py`): rail click, Refresh, source switch to Tradier, symbol box to ETHUSDT and back, the injected `?` chip, then the same for the Volatility panel. Measured geometry, DOM text, console/network, and a 21-sample series on the Volatility term field. **0 console messages, 0 page errors, 0 failed requests** on every run.
+- **FG3-01 (P1, units).** `desktop/deribit.py` hands the chain Deribit's `mark_iv`, which is a **PERCENTAGE** (13.87), while every engine in the package takes a **FRACTION** and its tests pin one (`test_gex.py:163 assert r.atm_iv == 0.15`). The live payload proved it: per-strike `iv` 19.33…56.24, `atm_iv` 20.5, `skew_25d` −10.26. The panel had hidden this behind a magnitude heuristic (`n <= 1.5 ? n*100 : n`) that mis-renders any genuinely small IV (a real 1.2% printed as **120%**). **Repaired at the boundary:** `from_deribit_ladder` converts the venue's percentage once (its docstring now says so), and both routes publish `"iv_unit": "fraction"`; both panels scale by 100 for display only, no guessing (`gex.selftest` pins `fmtIv(0.012) === '1.20%'` and `fmtIv(1.2) === '120.00%'`). Live after: `iv` 0.1894…0.5624, `atm_iv` 0.205, `skew_25d` −0.1026 — the same percentages on screen, now correct under the hood.
+- **FG3-02 (P1, data loss).** `compute_gex` rounded `gamma_exp`/`dex` to **4 dp** while a crypto chain's exposures run 1e-4…1e2 — most strikes quantised to exactly `0.0000`, which flattened the ΓEX column, made its "widest exposure first" sort a tie, and coarsened the wall threshold that reads those same values. **Repaired** to 8 dp. Live after: ΓEX renders **−0.161744 / −0.063878 / +0.057342 / −0.042504** in strict descending |value| order, where before the top of the column was `−0.158100` and most rows read `0.000000`.
+- **FG3-03 (P2, honesty).** Nothing said what the Σ figures were made of ("Σ DEX 1.33K" of what). The wire now carries `unit` (the coin the contract is written on — `BTC` — or `shares` for an OPRA 100-share lot) and the panel labels it: table head **ΓEX (BTC)**, card head *"ΔEX and ΓEX: BTC per 1-point move (VEX and Θ stay in the venue's own vega/theta units)"* — VEX/Θ deliberately not claimed as per-point, because the venue's vega/theta units are the venue's.
+- **FG3-04 (P2, formatting).** The γ column printed 8 fixed decimals (`0.00041000`) and the ΓEX column's small end collapsed to `0.000000`. Both now follow the Options panel's own greek rule: **4.40e-4**, exponential below 1e-4, K/M/B above.
+- **FG3-05 (P3, doc/code drift).** `total_vex`'s docstring and inline comment said `|gamma| * oi * iv` while the code multiplies by **vega**; the dataclass line, the comment and the legend now describe what the code does.
+- **FG3-06 (P3, latent).** `subText` escaped `spot_from` before writing it through `textContent`, so an `&` in a venue's own words would have printed as `&amp;`. Plain text now; `esc()` stays where it belongs (table rows).
+- **FG3-07 (P3, hardening + one observed anomaly).** `expiryLabel` guarded `getTime()` but not `toISOString()`, which **throws** a RangeError outside ±8.64e15 ms — a throw there aborts the paint loop and leaves every field after it blank. A single frozen-moment read of the Volatility panel caught exactly that shape once (all four earlier fields set, `volTerm` empty); a 21-sample series afterwards showed the field painted from t=2 s onward, and the throw path is now impossible (bounds check + try/catch, pinned in the selftest). Recorded as observed-once, cause unproven — the hardening removes the only code path that could produce it.
+- **Also corrected while in there:** the Volatility smile column labelled **"Δ proxy"** now labels itself **"Δ"** with a title — the engine prefers the venue's real delta (`from_deribit_ladder` passes it) and only falls back to the linear proxy, so the old label understated the column.
+- **Gates after §138.** pytest **1,899 / 3 skipped / 0 failed** · **AUDIT CLEAN** (169 routes · 160 ids · 0 missing · 0 duplicate ids · 133 modules) · **45/45** selftests · `node --check` clean on both edited modules · live browser pass clean. Files: `atlas/gex.py`, `atlas/options_api.py`, `ui/gex.js`, `ui/volatility.js`, `ui/index.html`, `ui/gex.selftest.js`, `ui/volatility.selftest.js`. Still nothing committed.
+- **What was deliberately NOT changed:** the engine's delta/dex/vega math (the exposure scale is `delta/gamma × OI × multiplier`, so it is coins on Deribit and shares on a 100-share lot — now labelled, not rewritten), and the narrow ±10-strike ladder whose "25Δ" wings are really ±1.2%-from-spot strikes: a wider `?width=` is the lever, and claiming otherwise would be the kind of lie this pass exists to remove.
+
+**§139 — The owner photographed the Volatility + Option-flow pop-outs and asked to audit, optimize, streamline and make both industry-standard. The defect behind his crop was a class-name collision (`<table class="grid">` met the layout utility `.grid { display: grid }`), and the pass rebuilt both panels around what an options desk actually reads: a real table header with right-aligned figures, ATM/ITM marking, call/put colour, open interest as counts, the venue's own contract form, a flow **tape** with premium quoted in money, and the desk numbers each panel was missing (P/C OI, total OI, IV range, days to expiry · call/put/net premium, largest print). (2026-09-20; **nothing committed** — the pass rides the worktree)**
+
+- **Method.** Both pop-outs reproduced exactly as he has them — the launcher's `?aux=<view>&win=<id>` path serves an auxiliary window (`window.OFAPAUX === true`, `body.term-mode`, one widget, no Classic switch) — plus the same panels in the Classic shell. Playwright (webkit venv) drove each load against a headless instance on the scratch profile (port **8095**), capturing DOM text, computed styles (`display`, `text-align`, cell colours), geometry and screenshots. **0 console messages, 0 page errors, 0 failed requests** on all four loads; the two Classic view switches were real clicks (the first-run Setup assistant was skipped through its own control, as a user does).
+- **FG4-01 (P1 — the defect in the screenshot).** The four §137 tables were written `class="grid"`, and `ui.css:197` owns that name for a *layout* utility (`.grid { display: grid; gap: 14px }`). A table given `display: grid` loses table layout: its `thead`/`tr` become grid items and the cells flow as inline text, which is exactly his crop — `2026-09-20 77000.00 put 41.49% -0.0003 82.4000` with no header row and no column alignment. **Fixed:** all four tables now carry the app's own data-table class (`<table class="data">`, the class the other 24 tables use). Measured live: `display: table` in all four renders (aux + classic × both panels).
+- **FG4-02 (P2 — reading rules, Volatility).** Numeric columns are right-aligned (`th.num`/`td.num` added beside `table.data`); the Type cell carries the side's colour (`td.call`/`td.put`); the strike nearest spot is marked (`tr.atm`, an accent bar) and in-the-money rows are shaded (`tr.itm`); strikes read ascending with the same strike's call and put adjacent; expiry prints in the venue's contract form (**20SEP26**, ISO date kept in the cell's title); open interest prints as whole grouped counts (`fmtOi` — `1,235`, never `1234.57`). The smile's sort rule changed from steepest-IV-first to **by strike** — a smile is read left to right — and the card head says so (`34 strike(s) · by strike`).
+- **FG4-03 (P2 — the chain's own desk numbers, Volatility).** New `_chain_stats(chain)` in `atlas/options_api.py` derives them from the same rows the engines read, and the volatility payload now publishes `call_oi · put_oi · total_oi · put_call_oi · iv_min · iv_max · dte`. The Surface card gained a second row: **P/C OI · Total OI · IV range · Days to expiry**. Live: P/C 0.529, total OI 2,692, IV 21.28%–56.24%, DTE 15.4 h.
+- **FG4-04 (P2 — a flow panel must show the tape, not a filtered list).** The old table listed only the classified prints, so a quiet window read as an empty panel while 62 prints had actually traded, and no row said which side paid what. The route now publishes **`tape`** — every print in the window, newest first, each tagged with the class the engine gave it (sweep beats block beats unusual when a print qualifies for more than one) — plus `spot` / `spot_from` / `premium_unit`. The panel's table *is* the tape: **Time · Expiry · Strike · Type · Size · Price · Premium · Side · Class**, with the class as a chip and premium quoted in **money** against the currency's perpetual mark (the contract every crypto desk quotes against), falling back to the contract's own currency when the wire could not name one — never a guessed rate.
+- **FG4-05 (P2 — the fields a flow read exists to produce).** Summary gained **Call premium · Put premium · Net premium** (signed) **· Largest print**. Live and reconciling: 0 sweeps + 1 block + 0 unusual + 99 routine = 100 prints; calls $497.4K, puts $96.2K, net **+$401.2K**; largest `84,000C ×125 · $378.8K`.
+- **FG4-06 (P3 — the count that looked wrong).** The sub-line printed `100 prints read` while the banner said `62 trade(s)`. Both numbers are true and mean different things (what the venue handed back vs what fell inside the window), and a reader who sees one of them alone concludes the panel is broken. The sub now prints both when they differ: `100 prints read · 62 in the window`.
+- **FG4-07 (P3 — one label per expiry).** The term-structure line still used the ISO date while the table used the contract form; both now read **18SEP26**.
+- **Gates after §139.** pytest **1,899 / 3 skipped / 0 failed** · **AUDIT CLEAN** (169 routes · 0 missing · **0 duplicate ids** · 133 modules) · node selftests **49/49** in the four panel files (the whole UI suite: 45 files, 996 checks, 0 failed) · `node --check` clean on every edited module · the live browser pass clean in both window shapes.
+- **Numbers re-derived (README).** Atlas row 35/**11,803** (+130, this pass's `options_api.py`) · Desktop UI row 143/**54,498** (+390: `volatility.js`, `option-flow.js`, `index.html`, `ui.css`, `help-data.js`, both selftests) · **Total 273 / 48,549 / 59,554 / 108,103** · suite unchanged at 167 / 31,907 · UI suite unchanged at 130 modules (45 selftests).
+- **Files.** `atlas/options_api.py` · `ui/volatility.js` · `ui/option-flow.js` · `ui/index.html` · `ui/ui.css` · `ui/help-data.js` (both panels' topics rewritten to describe the new reading rules) · `ui/volatility.selftest.js` · `ui/option-flow.selftest.js` · `README.md` · this block · the pass-2 report's Appendix B.
+- **Not changed, deliberately.** The engines' maths (exposure/premium arithmetic), the ±10-strike ladder width, and the aux windows' own geometry behaviour (§128's multi-monitor pass still owns window placement).
+- **Owed.** Unchanged: commit/publish on his word; the **rebuild** so `dist`/zip/SBOM/Setup carry §137–§139; the badge re-check after that rebuild; his physical multi-monitor pass.
+
+## ### §140 — the depth map: the hover's own truth, a scale legend, and the empty state
+
+Owner screenshot: hovering the Market depth heatmap read the paint governor's counters and a
+developer note ("Repaints: 344 painted · 6 skipped · 1 coalesced (400 ms frame budget) … This is the
+reference layout performance guidance") — diagnostics on a user surface. Asked for that plus any
+metric that could line the panel up with industry practice. Changes:
+
+  * `market-pressure.js` — `GOVERNOR.note()` no longer touches `title`; the counters ride
+    `data-repaints` on the canvas and `window.OFAPGOVERNOR`. The tooltip is index.html's description
+    of the map again. (This was the *second* pass at that bug: the first moved the counters from
+    replacing the description to being appended to it, which still left a paint budget in a hover.)
+  * `atlas.js` — the map now states its colour scale: a legend bar painted from the map's own ramp
+    (`heatColour` through the contrast dial, written once per ramp/cap change so it stays on the
+    governed budget) plus the cap actually in force and the saturating share (`cap 42.10 · top 1%
+    saturates`). A depth map whose brightness has no legend cannot be read at a glance.
+  * `atlas.js` — an empty payload is a state, not a number: the panel printed `step undefined · 0
+    book updates` before the first book frames and a Depth KPI of `undefined`. It now prints the
+    wire's own `note` ("no data yet — start the engine or a replay"), a dash for a step the payload
+    did not state, and `no book yet` for the range sub-line.
+  * `heatmap-pro.js` — the readout gained the desk's own terms: each cell's share of the colour
+    scale (`resting 3.42 · 76% of scale`), the change as a share of the level it moved from
+    (`Δ vs prev +0.42 (+14%)`), and the book's own quote where the payload carries one (`bid · ask ·
+    spread`, decimals from the instrument's tick, never from the price's magnitude). A square with
+    nothing recorded says so instead of printing `undefined ·` and `resting 0.00`.
+
+Verified: `node --check` clean on all five files; `heatmap-pro.selftest.js` **26 ok** (12 new pins —
+tick decimals, share-of-scale, delta-percent, and the null guard for a payload with no cap),
+`market-pressure.selftest.js` **13 ok** (one new pin: the tooltip is the map's, no `el.title =`, no
+guidance sentence); whole UI suite **45 files / 1,009 ok / 0 failed**; `scripts/audit_ui_refs.py`
+**AUDIT CLEAN** (133 modules, no dead ids — the legend ids included); live headless audit
+(`ofap_gex_audit/audit_heatmap.py`, screenshots `hm_view.png` / `hm_page.png`): all five hover points
+read the honest empty-cell sentence, **0 diagnostics in the tooltip**, status line reading the
+wire's note.
+
+Not exercised here: the map with live book data — this sandbox has no engine/replay running, so the
+payload's own note (`no data yet — start the engine or a replay`) is what the map renders. The legend
+paint and the data lines are pinned by the selftests and land on the pixels only when the map has
+columns; on a machine with the engine up they render as described at the first book frame.
+
+## ### §141 — the engine panel: the `– . –` badge, tick-true prices, and a snap grid that follows the instrument
+
+Owner question: the Order-flow engine's chrome carries a small `– . –` (his reading of `— · —`) beside
+the `?` — necessary, or can it be expanded? It is the shared-cursor badge (`cursor-link.js`), the tag
+every panel shows for "what the crosshair is on right now"; its idle reading was three dashes naming
+nothing. Plus: an industry-standard pass over the engine panel.
+
+  * `cursor-link.js` — the idle badge says what it waits for: **`cursor: hover a chart`** (title kept:
+    "the shared cursor: what every panel is reading right now"). Five panels carry it; they now read
+    the same sentence in the same instant, which is what the badge was built for.
+  * `ofx.js` — new `math.dpFromTick(tick)` (returns `null` = no opinion when the tick is unusable), so
+    price precision comes from the instrument's own statement.
+  * `ofx-view.js` — the tick the payload states (`heat.tick`) is kept in `OFX.state.data.tick`, and one
+    module-scope **`pr()`** formats every price the panel prints: hover readout, selection readout, the
+    `price band`/`level` lines. Decimals come from that tick (0.5 → one, 0.01 → two, 1 → none); the old
+    magnitude rule (1000 → 2 dp, ≥1 → 3 dp, else 5 dp) stands in only while no tick is known.
+  * `ofx-view.js` — the drawing layer's attach passed a literal **`tickSize: 0.5`**: the drawings'
+    snap grid was right by luck for one instrument and wrong for every other (BTCUSDT's tick here is
+    0.01). It now reads the wire's tick, with 0.5 only as the never-stated last resort.
+
+Verified live (`ofap_gex_audit/audit_engine.py`, shots `eng_view.png` / `eng_page.png`, real feed
+`data: live · 2 s`): five idle badges reading `cursor: hover a chart`, a hover filling the badge with
+the same price the stage shows (`81678.11`), and prices printing at the instrument's tick (state tick
+0.01 → two decimals). One regression of my own was caught by that run and fixed inside the pass: the
+first `pr()` landed inside the selection readout's scope while three call sites sat in `paintReadout`,
+so the engine panel reported `ReferenceError: Can't find variable: pr` (ofx-view.js) on my first live
+load. `pr()` is now module-scope and the second live run is console-clean.
+
+Gates: `ofx.selftest.js` **220 ok** (8 new `dpFromTick` pins), `cursor-link.selftest.js` **7 ok** (idle
+text pin rewritten), whole UI suite **45 files / 1,024 ok / 0 failed**, `scripts/audit_ui_refs.py`
+**AUDIT CLEAN** (133 modules), pytest unchanged 1,899/3/0.
+
+Owner approved the wording (`cursor: hover a chart`, 2026-09-20) — it stays on all five panels. Open:
+whether the drawings' snap grid moving from the literal 0.5 to the symbol's real tick should be
+re-verified visually on a non-BTC instrument (NQ/ES at 0.25, an equity at 0.01).
+
+## ### §142 — the standing metric sweep (owner: "purely industry standard under EVERY metric")
+
+Asked for a sweep he does not have to re-request panel by panel. Built the instruments first, then
+worked from what they proved:
+
+  * `scripts/audit_metric_hygiene.py` (**in-repo**, stdlib, same shape as `audit_ui_refs.py`) — the
+    three mechanically decidable classes: H1 a price written from the size of the number instead of
+    the instrument's tick, H2 a bare `--` standing in for an absent value, H3 a paint/transfer
+    counter or developer note written onto a user surface. Exit 1 means findings.
+  * runtime `ofap_metric_sweep.py` / `ofap_metric_sweep2.py` (agent side, not shipped) — the wider
+    passes over all 135 UI files + 106 Python modules, including "does this numeric key leave a route
+    without saying its unit", with registers at `metric_sweep.json` / `metric_sweep2.json`.
+  * runtime `ofap_gex_audit/audit_views.py` — the **view walker**: clicks all 38 views, reads each
+    panel's rendered text and console, flags `undefined`/`NaN`/`null`/`Infinity`/stray dots.
+
+Fixed this pass: the last price-by-magnitude site in the engine view (`ofx-view.js:684`, a §141
+leftover); the absence glyph consolidated to the em dash across the desktop UI (35 JS literals, 74
+inline HTML cells, 7 labelled placeholders) **and** across the legacy dashboard widgets the desktop
+embeds (31 more: `OrderbookLadder`'s Bid/Ask Total and Ratio, `MicrostructurePanel`'s level/session
+rows, `app.js`, `performance.js`); and `footprint.js:_fmtPrice` made tick-aware, its magnitude rule
+kept only as the documented fallback.
+
+Coverage hole the sweep found on its own: the desktop UI renders two widgets from
+`orderflow_system/dashboard/static/`, so the sweep had to be extended there — both trees are now
+scanned by the in-repo gate.
+
+Deliberate exception (allow-listed in the gate): **time masks keep their shape** — `--:--:--`, `--:--`.
+A pending timestamp showing its width is a convention, not an absence placeholder.
+
+Triage of the classes that came back clean (recorded so the next sweep does not re-litigate them):
+instrument constants 7 hits → 0 real (drawings.js learns `tickSize` from its adapter at `:811`, and
+§141 made the engine feed it the wire's tick; `alert-format.js`'s 0.5s are operator spin-button
+steps; `atr-signal.js`'s comes from `contractInfo`). Percent-vs-fraction 4 → 0 real (`gex.py`'s
+`/100` *is* the §138 fix; the rest are `int(time.time()*1000)` and a comment). Counts-with-decimals
+8 → 0 real (coin sizes legitimately carry decimals; the two market-pressure hits are percentages).
+Unit-not-stated: 28 numeric route keys state a unit in the same payload; the remaining raw hits are
+internal dicts and file-listing rows, not route payloads.
+
+Live evidence: **38 views walked, 0 forbidden tokens, 0 console errors**; the thin views were read by
+eye and are honest waiting states (`—`, `Waiting for signals...`, `no book yet`), not blanks.
+pytest 1,899/3/0, UI suite 45 files / 1,024 ok / 0 failed, `audit_ui_refs.py` AUDIT CLEAN.
+
+What this does and does not prove: it proves no user surface prints a placeholder, an absence, a
+diagnostic or an unguarded value, and that no view throws. It does not by itself prove every metric's
+*arithmetic* — that is the 1,899 tests plus the live reconciliations of §138–§141 (IV fraction, the
+premium sum 0+1+0+99=100, book/venue cross-checks), and the per-panel reviews continue on that basis.
+
+
+### §143 — the Drawings menu, audited against the charting-tool standard
+
+Owner's ask: audit the Drawings menu (figure list + modes + line colour) and align it to industry
+standard, correcting and expanding where the layer already had the capability but the surface did
+not. The layer (`ui/drawings.js`) mounts on the engine stage (`ofx-view.js`), not on the `chart`
+view — a live probe there finds `OFAPDRAW` loaded but detached.
+
+Added to the surface, all backed by what the layer already supported:
+- **Line width 1–4, line solid/dashed/dotted, fill off/10/20/35%** — a "Style for new drawings"
+  section. Fill alpha is derived from the line colour, so a shape's wash matches its stroke.
+- **Snap to 45° as a mode** — it was Shift-at-drag only; the latch now drives the same
+  `snap45()` for trend line, ray and channel.
+- **Undo / Redo rows with their depths**, and the redo stack itself: the undo entries are closures,
+  so each structural entry now states how to re-apply itself (add re-adds the same object, move and
+  reshape re-apply the geometry they ended on, remove/delete/clear re-drop). A new edit clears the
+  branch, as an editor does. Keys: Ctrl+Shift+Z and Ctrl+Y.
+- **Duplicate the selection (Ctrl+D)** — one undoable step, copies offset five ticks and become the
+  selection; **Delete selected (Del)** and the selection count now appear in the menu.
+
+Found while verifying, fixed in the same pass:
+- The drawing **defaults did not round-trip for the snap latch**: the stored block never carried
+  `snap45`, so the value survived a reload only because `load()` never wrote it back. The sanitiser
+  (`desktop/config_store.py`) and `load()`/`serialize()` now carry it, and the round-trip is proven
+  live (set → `save(true)` → wipe locally → `load()` → all five defaults plus the latch back).
+- Pass note: `save()` is debounced 700 ms; `save(true)` is the immediate path. A first round-trip
+  attempt raced the debounce and looked like a persistence bug — it was the test. Recorded so the
+  next pass does not re-litigate it.
+
+Live evidence: engine view mounted (16 tool buttons, layer canvas connected); a horizontal line placed
+by a real toolbar click + mouse drag (count 1); Ctrl+D → 2; Ctrl+Z → 1; Ctrl+Shift+Z → 2;
+select + Delete → 0; Ctrl+Z → back to 1; zero page errors. Gates: pytest **1,899 passed /
+3 skipped / 0 failed**; `scripts/audit_ui_refs.py` AUDIT CLEAN (169 routes, 0 missing, 0 duplicate,
+133 modules); `scripts/audit_metric_hygiene.py` METRIC HYGIENE CLEAN; UI selftests 45 files / 0 failed.
+
+
+### §144 — the panels drawer (☰), audited as a navigation surface
+
+Owner's ask: scan and audit the panel-directory drawer, reference industry standards, and make it
+friendly, useful and tidy. The bar used is the app's own command palette (Ctrl+K, `search.js`), which
+already had arrows/Enter and a keyword vocabulary per view — a second navigation surface should not be
+worse than the first.
+
+What was wrong, and what it is now:
+- **Search only read the name and the one-line hint.** "ladder", "dom", "vah", "poc", "screener"
+  found nothing. Each panel now carries a keyword vocabulary (the palette's own terms), matched as
+  every-token-must-appear across name + hint + keywords + id, with the matched text highlighted.
+- **No keyboard walk.** Now ↑↓/Home/End move a painted cursor over the visible rows in DOM order,
+  Enter opens it, the cursor follows the mouse, the row scrolls into view, and the input carries
+  `aria-activedescendant` — the same promises the Ctrl+K palette makes.
+- **No result count, no empty state.** The head now shows "21 panels" (or "N matches"), and a miss
+  says which query missed and offers a clear button.
+- **Nothing showed which panel you are already on.** Rows for the open panel now say "· open".
+- **The drawer painted once at boot.** Found live: opened while the app sat on CVD, it still marked
+  Overview as open and showed no recents. It repaints on open now.
+- **No memory.** A **Recent** rail (top five, most recent first, per browser) fills from drawer clicks
+  and from ordinary nav-rail navigation; the row for where you are says so.
+- **Rows read badly**: name left, description far right across a wide gap. The hint now sits next to
+  the name and ellipsises; a footer line states the keys (↑↓ move · Enter open · Esc close ·
+  Ctrl+K the full palette). Scoped to the drawer, so the atlas menus keep their layout.
+- The placeholder was "filter panels… (type here)" — it now says what can be typed.
+
+Verified live: drawer opens with 21 panels / 31 walkable rows; "ladder" → Depth, "poc" → Order Flow +
+Profile, "volume" → Profile, "zzz" → the empty state; Home + ↑↑↑ + Enter moved the app to the
+Engine; typing "heat" + ↓ + Enter landed on Heatmap; Recent rail read
+`Engine · open / you are here`, `Time & Sales`, `Heatmap`; Escape and click-outside both still close;
+zero console errors. Gates: pytest **1,899 passed / 3 skipped / 0 failed**; `audit_ui_refs.py` AUDIT
+CLEAN (169 routes, 0 missing, 0 duplicate, 133 modules); `audit_metric_hygiene.py` METRIC HYGIENE
+CLEAN; UI selftests 45 files / 0 failed. Screenshots: `drawer_full.png`, `drawer_empty.png`,
+`drawer_final.png` (runtime).
+
+
+### §145 — the Chart menu's rows (the view-variable settings), audited as a settings surface
+
+Owner's ask: the same deep dive on this panel — the menubar's Chart tab, which lists the active view's
+registered variables ("Enter lands on", "Imbalance ratio (R)", "Engine bar mode" …) — against industry
+standards, with every metric checked and the result tidy.
+
+The registry behind it was already sound: 130 variables, and an audit of the data found **zero**
+defects — every one has a meaning, a default the store actually keeps, bounds, a valid applies-flag,
+and (for enums) choices the store accepts. The surface and the wiring around it were where it fell
+short:
+
+- **Stored ids were printed raw** — `orderflow`, `same_price`, `deutan`. Rows, submenus and the editor's
+  options now show human labels (Order Flow, Same price, Deuteranopia-safe), with the raw id still the
+  option's value and the `path:` line unchanged. The labels come from the drawer's one view table
+  (`window.OFAPVIEWS`), so a panel rename cannot drift.
+- **Nothing said whether a value was still the default.** A changed row now says "· changed", offers
+  "Restore default (Default)", and when it is at the default says "already at the default (…)" instead
+  of an action that would do nothing.
+- **Numbers printed as JavaScript stringified them.** They now print at the precision of the control's
+  own step (0.7, not 0.6999999999999999).
+- **The editor never stated what it was editing inside.** It now carries the registry's own words:
+  "range 1 – 20 · step 0.5", "6 choices: Default · Delta body · …", "comma-separated numbers" —
+  beside the applies-live / needs-restart note it already had.
+- **46 numeric variables carried no unit.** 34 now state the dimension the meaning already named (x,
+  quantile, share, opacity, gain, size, score); the other 12 name it in the label ("levels", "columns",
+  "prints", "fills", "samples", "rows") where a unit would be noise. `atlas.footprint.equal_tolerance`
+  is the one left: its dimension is not stated anywhere, so it needs your word rather than a guess.
+- **Three hand-written bounds in the markup disagreed with the registry the store enforces**
+  (`ofxLambda` min 100 vs 50, `ofxMinBlock` max 1,000,000 vs 1,000, `ofImbThresh` min 1 vs 0), and the
+  registry offered an imbalance mode (`"both"`) that the store, the dashboard route and
+  `analytics/footprint.py` do not implement. The markup now follows the registry and the third mode is
+  gone — an option that silently does nothing is worse than no option. Two tests pin exactly this
+  (`test_param_registry.py`); they were red in the tree when this pass started (verified red with this
+  pass's registry change stashed away, so they were not this pass's doing) and are green now.
+
+Verified live on the Engine view: rows read "Imbalance ratio (R) (x) = 4", "Value area (share) = 0.7",
+"Engine bar mode — Default ›"; the submenu reads meaning, "range 1 – 20 · step 0.5", "Change…",
+"already at the default (4)", "path: ofx.R"; the editor lists six labelled options whose values are the
+raw ids; changing the bar mode gave "Delta body · changed" and a "Restore default (Default)" action, and
+restoring returned the row to "Default" with "already at the default (Default)". Zero console errors.
+Screenshots (runtime): `chartmenu.png`, `chartmenu_sub.png`, `chartmenu_editor.png`, `enum_editor2.png`.
+Gates: pytest **1,899 passed / 3 skipped / 0 failed**; `audit_ui_refs.py` AUDIT CLEAN (169 routes, 0
+missing, 0 duplicate, 133 modules); `audit_metric_hygiene.py` METRIC HYGIENE CLEAN; UI selftests 45
+files / 0 failed.
+
+
+### §145 addendum — the answer to the one open question, and the seven bounds it uncovered
+
+The owner's word on `atlas.footprint.equal_tolerance` came back as "best option", and the code already
+states it: `analytics/footprint.py` compares `abs(bid - ask) <= tol * (bid + ask)` with the comment
+that the tolerance "is relative to the row's own size, so it behaves the same on a 0.0001-lot crypto
+row and a 100-lot futures row" — a **share**, bounded 0–1 by the store and by the dashboard route.
+So it carries `unit="share"`, and its meaning now says what the code says.
+
+That question turned out to be the tip: the registry printed bounds the store rewrites. A probe that
+writes every numeric variable's registry minimum and maximum through the real store (temp config dir,
+the test fixture's own isolation) found **seven**:
+
+| variable | registry said | the store keeps |
+| --- | --- | --- |
+| `ofx.R` | 1.0 – 20 | **1.5** – 20 |
+| `ofx.stack` | 2 – 12 | 2 – **8** |
+| `ofx.text_px` | 8 – 60 | **20** – 60 |
+| `ofx.sweep_c` | 0.2 – 5.0 | 0.2 – **4.0** |
+| `ofx.lambda_ms` | 50 – 5000 | **100** – 5000 |
+| `atlas.footprint.imbalance_threshold` | 0.0 – 50 | **1.0** – 50 (0 is rewritten to the 3.0 default) |
+| `atlas.footprint.equal_tolerance` | 0.0 – 10.0 | 0.0 – **1.0** |
+
+The store is the enforcement point — it clamps every write — so the registry now states the store's
+numbers; the two markup lines this pass had bent the other way (lambda ms 50, threshold 0) are back to
+the floors the store enforces, and `ofxMinBlock`'s markup ceiling stays at the registry's 1,000 (the
+store clamps no ceiling there, so the registry is the authority). The pass's own bounds change to
+`ofx.R` (1.0 → 1.5) also corrected a stale constant in `test_dump_shape_and_live_values`, which had
+pinned the old registry value while the markup already said 1.5.
+
+Then the invariant is pinned, not just fixed: `test_every_registry_bound_survives_the_store` writes
+every numeric variable's bounds through the store and requires them back unchanged — the same promise
+`test_every_registry_enum_choice_survives_the_store` makes for choices. 12 tests in that file, all
+green; the full suite is 1,900 passed / 3 skipped / 0 failed.
+
+Verified live, Engine view Chart menu: "Imbalance ratio (R) (x) = 4 — range 1.5 – 20 · step 0.5";
+"Liquidity decay (ms) = 500 — range 100 – 5000 · step 50"; **"Equal tolerance (share) = 0 — range 0 –
+1 · step 0.1"**; "Imbalance threshold (x) = 3 — range 1 – 50 · step 0.5"; "Cell text threshold (px) = 45
+— range 20 – 60 · step 1"; "Stacked run (levels) = 3 — range 2 – 8 · step 1". Zero console errors.
+Screenshot (runtime): `bounds_live.png`.

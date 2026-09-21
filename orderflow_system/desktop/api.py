@@ -927,6 +927,20 @@ async def params_set(payload: dict = Body(default={})) -> dict[str, Any]:
             value = str(raw)
             if param.choices and value not in param.choices:
                 return {"ok": False, "error": f"{value} is not one of {list(param.choices)}"}
+        elif param.kind == "list":
+            # The list kind (numbers): an array or a comma-separated string; finite values only,
+            # never empty — the store clamps afterwards like every other write.
+            items = raw if isinstance(raw, list) else str(raw).split(",")
+            value = []
+            for item in items:
+                try:
+                    num = float(str(item).strip())
+                except (TypeError, ValueError):
+                    continue
+                if num == num and abs(num) < 1e12:
+                    value.append(num)
+            if not value:
+                return {"ok": False, "error": "the list needs at least one number"}
         else:
             return {"ok": False, "error": f"{path} is a {param.kind} variable and is edited elsewhere"}
     except (TypeError, ValueError):
@@ -942,6 +956,18 @@ async def params_set(payload: dict = Body(default={})) -> dict[str, Any]:
     node[parts[-1]] = value
     saved = config_store.save_config(cfg)
     found, applied = param_registry._walk(saved, path)
+    # §122: save-then-apply for the Depth-heat dials — the RUNNING hub re-tunes from the saved
+    # atlas block, so bucket width, ceilings, floors and schemes take effect without a restart
+    # (the registry's restart notes stay as the conservative fallback wording).
+    if path.startswith("atlas."):
+        try:
+            from orderflow_system.desktop import engine as engine_mod
+            system = engine_mod.engine.system
+            hub = getattr(system, "_atlas_hub", None)
+            if hub is not None:
+                hub.configure(saved.get("atlas") or {})
+        except Exception:
+            pass   # engine not running: the next start reads the same config anyway
     return {"ok": True, "path": path, "value": applied if found else None,
             "default": param_registry.current(config_store.default_config(), param),
             "applies": param.applies,
@@ -964,6 +990,7 @@ async def folder_open(payload: dict = Body(default={})) -> dict[str, Any]:
         "logs": config_store.log_path().parent,
         "exports": config_store.config_path().parent / "exports",
         "backups": _backups_dir(),          # R6: wherever the user pointed the backup job
+        "archive": config_store.config_path().parent / "archive",   # the quarantine folder
     }
     if which not in targets:
         return {"ok": False, "error": f"unknown folder: {which}", "known": sorted(targets)}
@@ -2705,6 +2732,32 @@ async def storage_report_mail() -> dict[str, Any]:
             "preview": body}
 
 
+@router.post("/storage/clear_cache")
+async def storage_clear_cache() -> dict[str, Any]:
+    """Clear the WebView2 app cache: the cache folders now, the locked rest at the next start.
+
+    The open window holds its own profile, so most of it cannot be deleted while the app runs;
+    the flag this pass may leave behind is honoured by the launcher before WebView2 starts.
+    """
+    from orderflow_system.desktop import storage as storage_mod
+
+    result = await asyncio.to_thread(storage_mod.clear_app_cache, config_store.config_dir())
+    _storage_cache["at"] = 0.0
+    _storage_cache["data"] = None
+    return result
+
+
+@router.post("/storage/clear_archive")
+async def storage_clear_archive() -> dict[str, Any]:
+    """Delete the archive/quarantine folder's contents — the folder itself stays (it is the app's)."""
+    from orderflow_system.desktop import storage as storage_mod
+
+    result = await asyncio.to_thread(storage_mod.clear_archive, config_store.config_dir())
+    _storage_cache["at"] = 0.0
+    _storage_cache["data"] = None
+    return result
+
+
 # ──────────────────────────────────────────────────────────────
 # Program updates (R7): check on load, regularly while open, download on request
 # ──────────────────────────────────────────────────────────────
@@ -2921,9 +2974,14 @@ def _journal_rows(limit: int = 1000) -> list[dict[str, Any]]:
         # fall back to an empty string rather than letting the missing column blank the journal.
         cols = {row[1] for row in conn.execute("PRAGMA table_info(trade_journal)").fetchall()}
         profile_col = "profile_id" if "profile_id" in cols else "'' AS profile_id"
+        # §148: the excursion columns arrived with the MAE/MFE writers — a file written before them
+        # (or before the data layer's migration ran) reads as no excursion rather than failing.
+        mae_col = "mae_ticks" if "mae_ticks" in cols else "NULL AS mae_ticks"
+        mfe_col = "mfe_ticks" if "mfe_ticks" in cols else "NULL AS mfe_ticks"
         cursor = conn.execute(
             "SELECT id, instrument, direction, entry_time_ms, exit_time_ms, entry_price, "
             "exit_price, stop_loss, take_profit, pnl_ticks, rr_ratio, signals_json, notes, "
+            f"{mae_col}, {mfe_col}, "
             f"{profile_col} "
             "FROM trade_journal ORDER BY COALESCE(exit_time_ms, entry_time_ms, 0) DESC LIMIT ?",
             (int(limit),))
@@ -3003,29 +3061,217 @@ def _calendar_cache_path() -> Path:
     return config_store.config_dir() / "calendar-cache.json"
 
 
+def _calendar_lane(cfg: dict[str, Any], override: str = "") -> str:
+    """Which feed the calendar VIEW reads: "builtin" (the keyless weekly JSON) or "finnhub".
+
+    The stored `calendar.source` is the default and a caller may override it for one read (the
+    settings card's own check). Anything unknown falls back to the keyless lane, so a hand-edited
+    file can never make the view read nothing at all.
+    """
+    stored = str((cfg.get("calendar") or {}).get("source") or "builtin").lower()
+    lane = str(override or "").strip().lower() or stored
+    return lane if lane in ("builtin", "finnhub") else "builtin"
+
+
+def _finnhub_key() -> str:
+    """The Finnhub key the app holds: the settings copy first (what the engine applied), then the
+    stored config block. Read-only, never logged, never echoed back."""
+    from orderflow_system.config import settings
+
+    key = str(getattr(settings.FINNHUB, "api_key", "") or "").strip()
+    if key:
+        return key
+    block = (config_store.load_config() or {}).get("finnhub") or {}
+    return str(block.get("api_key") or "").strip()
+
+
+def _finnhub_calendar(category: str, days: int):
+    """The Finnhub economic calendar — blocking, so every caller runs it on a worker thread."""
+    from orderflow_system.data import finnhub_feed as fh
+
+    return fh.FinnhubFeed(api_key=_finnhub_key()).calendar(category=category, days=days)
+
+
 @router.get("/calendar")
 async def calendar_view(hours: int = Query(default=48, ge=1, le=720),
                         currencies: str = Query(default=""),
-                        impact: str = Query(default="high")) -> dict[str, Any]:
+                        impact: str = Query(default="high"),
+                        source: str = Query(default="")) -> dict[str, Any]:
     """The releases coming up, filtered — with the honest state of the feed it came from.
 
-    The feed is cached for four hours by the module; when it cannot be reached the payload carries
-    ``stale`` and the error, and the panel says "the feed is unreachable" instead of inventing dates.
+    Two lanes, one shape. ``builtin`` (the default) is the keyless weekly JSON, cached for four
+    hours by the module; ``finnhub`` is the Finnhub economic calendar read with the key from
+    Settings ▸ Feed keys (`calendar.source` in the config picks the lane). Either lane answers
+    ``ok: false`` with the reason when its feed cannot be read — the panel says so instead of
+    inventing dates. The alert line (main.py's calendar tick) keeps reading the built-in lane:
+    a keyed lane is a view, not a background dependency.
     """
     import time as _time
 
     from orderflow_system.desktop import calendar as calendar_mod
 
-    payload = await asyncio.to_thread(calendar_mod.fetch_events_cached, _calendar_cache_path(),
-                                      ttl_s=4 * 3600)
-    events = [e for e in (payload.get("events") or []) if isinstance(e, dict)]
-    up = calendar_mod.upcoming(events, now_ms=int(_time.time() * 1000), within_hours=float(hours),
+    cfg = config_store.load_config()
+    lane = _calendar_lane(cfg, source)
+    now_ms = int(_time.time() * 1000)
+    error_text = ""
+
+    if lane == "finnhub":
+        block = cfg.get("finnhub") or {}
+        if not _finnhub_key():
+            return {"ok": False, "stale": False, "lane": "finnhub", "fetched_at_ms": None,
+                    "error": "no Finnhub key — add one in Settings ▸ Feed keys to read this lane",
+                    "events": [], "upcoming": 0, "total": 0, "currencies": [],
+                    "window_hours": hours, "min_impact": impact,
+                    "source": "Finnhub economic calendar (needs a key)"}
+        failure = ""
+        payload = None
+        try:
+            payload = await asyncio.to_thread(_finnhub_calendar,
+                                              str(block.get("calendar_category") or "all"),
+                                              int(block.get("calendar_days") or 7))
+        except Exception as exc:                       # pragma: no cover - the feed never raises
+            failure = f"{type(exc).__name__}: {exc}"
+        if payload is None or getattr(payload, "error", None):
+            reason = failure or str(getattr(payload, "error", "") or "the calendar could not be read")
+            return {"ok": False, "stale": False, "lane": "finnhub", "fetched_at_ms": None,
+                    "error": f"the Finnhub calendar answered: {reason}",
+                    "events": [], "upcoming": 0, "total": 0, "currencies": [],
+                    "window_hours": hours, "min_impact": impact,
+                    "source": "Finnhub economic calendar (your key)"}
+        from orderflow_system.data import finnhub_feed as _fh
+        events = _fh.to_calendar_rows(getattr(payload, "events", None))
+        fetched_ms = int(getattr(payload, "fetched_ms", 0) or now_ms)
+        stale, ok = False, True
+        source_label = "Finnhub economic calendar — your key (events labelled by country)"
+    else:
+        payload = await asyncio.to_thread(calendar_mod.fetch_events_cached, _calendar_cache_path(),
+                                          ttl_s=4 * 3600)
+        events = [e for e in (payload.get("events") or []) if isinstance(e, dict)]
+        fetched_ms, stale = payload.get("fetched_at_ms"), bool(payload.get("stale"))
+        ok = bool(payload.get("ok"))
+        error_text = str(payload.get("error") or "")
+        source_label = "Forex Factory weekly calendar JSON (nfs.faireconomy.media) — keyless"
+
+    up = calendar_mod.upcoming(events, now_ms=now_ms, within_hours=float(hours),
                                currencies=currencies or None, min_impact=impact)
-    return {"ok": bool(payload.get("ok")), "stale": bool(payload.get("stale")),
-            "error": str(payload.get("error") or ""), "fetched_at_ms": payload.get("fetched_at_ms"),
+    # §130: the currencies this window holds at this impact — the filter chips' own domain.
+    # Computed WITHOUT the currency filter: a chip row that collapsed to the current selection
+    # could never widen it again. Each code carries the count it would show, so a chip reads
+    # before it is clicked.
+    available: dict[str, int] = {}
+    for e in calendar_mod.upcoming(events, now_ms=now_ms, within_hours=float(hours),
+                                   currencies=None, min_impact=impact):
+        code = str(e.get("currency") or "").upper()
+        if code:
+            available[code] = available.get(code, 0) + 1
+    return {"ok": ok, "stale": stale, "lane": lane, "error": error_text,
+            "fetched_at_ms": fetched_ms,
             "events": up, "upcoming": len(up), "total": len(events),
+            "currencies": [{"code": c, "count": n} for c, n in sorted(available.items())],
             "window_hours": hours, "min_impact": impact,
-            "source": "Forex Factory weekly calendar JSON (nfs.faireconomy.media) — keyless"}
+            "source": source_label}
+
+
+# ──────────────────────────────────────────────────────────────
+# Feed keys (the optional REST feeds: OPRA option chains + Finnhub)
+# ──────────────────────────────────────────────────────────────
+
+#: The optional REST feeds, in the card's order: block name, display name, what a key buys, and the
+#: leaves this route accepts for it. The whitelist lives here because the store keeps whatever a
+#: block holds — the route is the only place a leaf set is decided, so a hand-crafted POST cannot
+#: add one. `enabled` is deliberately NOT offered: nothing reads it (a key's presence is what makes
+#: a lane work), and a switch no layer honours is the kind of lie this suite removes.
+_FEED_KEY_BLOCKS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("tradier", "Tradier",
+     "real-time OPRA option chains for US equities — a free brokerage account is enough",
+     ("key_id", "secret", "chain_width", "sandbox")),
+    ("marketdata", "Market Data",
+     "OPRA chains with server-side greeks — a marketdata.app account",
+     ("api_key",)),
+    ("finnhub", "Finnhub",
+     "the economic calendar and market headlines — Finnhub's free tier",
+     ("api_key", "calendar_category", "calendar_days", "news_category")),
+)
+
+
+def _feed_key_row(name: str, label: str, buys: str, leaves: tuple[str, ...],
+                  cfg: dict[str, Any]) -> dict[str, Any]:
+    """One card row: the stored values, with every credential reduced to a hint.
+
+    A stored key never travels back to the page — the row carries ``key_hint`` (first four and
+    last two characters, ``alpaca.mask_key``'s shape) and ``has_secret``, so the card can say
+    "saved" without holding the value. A blank field means "leave what is stored".
+    """
+    from orderflow_system.desktop import alpaca as alpaca_mod
+
+    block = cfg.get(name) or {}
+    row: dict[str, Any] = {"id": name, "label": label, "buys": buys, "leaves": list(leaves),
+                           "key_hint": "", "has_secret": False, "values": {}}
+    for leaf in leaves:
+        value = block.get(leaf)
+        if leaf in ("key_id", "api_key"):
+            row["key_hint"] = alpaca_mod.mask_key(str(value or ""))
+            row["values"][leaf] = ""
+        elif leaf == "secret":
+            row["has_secret"] = bool(str(value or "").strip())
+        else:
+            row["values"][leaf] = value
+    row["ready"] = bool(row["key_hint"] or row["has_secret"])
+    return row
+
+
+def _feed_keys_state(cfg: dict[str, Any]) -> dict[str, Any]:
+    """The card's whole payload: one row per feed, plus the two lanes' own choices."""
+    cal = cfg.get("calendar") or {}
+    ctx = cfg.get("context") or {}
+    return {"feeds": [_feed_key_row(name, label, buys, leaves, cfg)
+                      for name, label, buys, leaves in _FEED_KEY_BLOCKS],
+            "lanes": {"calendar": str(cal.get("source") or "builtin"),
+                      "news": str(ctx.get("news_source") or "feeds")}}
+
+
+@router.get("/feedkeys")
+async def feed_keys() -> dict[str, Any]:
+    """The optional REST feeds' stored state, credentials masked (the card's only read)."""
+    return {"ok": True, **_feed_keys_state(config_store.load_config())}
+
+
+@router.post("/feedkeys")
+async def feed_keys_save(payload: dict = Body(default={})) -> dict[str, Any]:
+    """Save the optional REST feeds' keys and lanes, then make them live.
+
+    The body carries per-feed blocks of the whitelisted leaves and an optional ``lanes`` block for
+    the calendar / news source pickers. Credential semantics are the store's own, and the card is
+    built around them: a leaf the body does NOT mention keeps its stored value (that is how a blank
+    field behaves — it is left out of the request), an explicit empty string clears it, and the
+    bullet mask a masked round-trip carries is replaced by the stored value. `apply_settings` runs
+    after the write, so the chain panels, the calendar lane and the news lane read a key that was
+    typed a second ago — no engine restart, no stale settings copy. The answer is the fresh state,
+    masked, exactly like the GET.
+    """
+    body = dict(payload or {})
+    patch: dict[str, Any] = {}
+    for name, _label, _buys, leaves in _FEED_KEY_BLOCKS:
+        block = body.get(name)
+        if isinstance(block, dict):
+            patch[name] = {leaf: block[leaf] for leaf in leaves if leaf in block}
+    lanes = body.get("lanes") if isinstance(body.get("lanes"), dict) else {}
+    if "calendar" in lanes:
+        lane = str(lanes.get("calendar") or "builtin").strip().lower()
+        patch["calendar"] = {"source": lane if lane in ("builtin", "finnhub") else "builtin"}
+    if "news" in lanes:
+        lane = str(lanes.get("news") or "feeds").strip().lower()
+        patch["context"] = {"news_source": lane if lane in ("feeds", "finnhub") else "feeds"}
+    if not patch:
+        return {"ok": False, "error": "no feed block in the body"}
+    saved = config_store.merge_config(patch)
+    applied = True
+    try:
+        engine_mod.apply_settings(saved)
+    except Exception as exc:                            # pragma: no cover - the cast never raises
+        logger.warning("apply_settings after feed keys failed: %s", exc)
+        applied = False
+    return {"ok": True, "applied": applied, **_feed_keys_state(saved)}
 
 
 @router.post("/data/import")
@@ -3093,6 +3339,8 @@ async def data_export(payload: dict = Body(default={})) -> dict[str, Any]:
     RFC 4180, CRLF, ISO 8601 UTC stamps — the same shape the backup writer uses, so an export can be
     re-imported through /data/import (pinned by test_dataport.py). Big tables travel gzipped.
     """
+    import sqlite3
+
     from orderflow_system.desktop import dataport
 
     body = dict(payload or {})
@@ -3109,10 +3357,16 @@ async def data_export(payload: dict = Body(default={})) -> dict[str, Any]:
         limit = max(1, min(5_000_000, int(body.get("limit") or 2_000_000)))
     except (TypeError, ValueError):
         limit = 2_000_000
-    done = await asyncio.to_thread(dataport.export_rows, str(config_store.db_path()), kind,
-                                   str(_exports_dir()), symbol=symbol,
-                                   from_ms=_ms(body.get("from_ms")), to_ms=_ms(body.get("to_ms")),
-                                   limit=limit)
+    try:
+        done = await asyncio.to_thread(dataport.export_rows, str(config_store.db_path()), kind,
+                                       str(_exports_dir()), symbol=symbol,
+                                       from_ms=_ms(body.get("from_ms")), to_ms=_ms(body.get("to_ms")),
+                                       limit=limit)
+    except (sqlite3.OperationalError, OSError) as exc:
+        # RA-02: a fresh profile has no database yet — answer a sentence, not a traceback.
+        raise HTTPException(status_code=400, detail=(
+            "no tick history to export yet — start the engine or import a CSV first "
+            f"({type(exc).__name__})")) from exc
     logger.info("[data] exported %d %s row(s) to %s", done["rows"], kind, done["path"])
     return {"ok": True, "kind": kind, "instrument": symbol, **done}
 
@@ -3266,20 +3520,63 @@ async def workspaces_post(payload: dict = Body(default={})) -> dict[str, Any]:
 # (docs/DX_TERMINAL_AND_QUANTOWER_PLAN.md: one store, no second copy in browser storage)
 # ──────────────────────────────────────────────────────────────
 
-def _layouts_state(block: dict[str, Any]) -> dict[str, Any]:
+def _layouts_state(block: dict[str, Any], autocull: bool) -> dict[str, Any]:
+    """The state the store holds. `autocull` has NO default on purpose: it is read from the config
+    the caller just saved, and a default once made every write answer with a stale `True` (found by
+    the §129b rebuild probe — turning the switch OFF answered `autocull: True` while the store held
+    `False`). Callers must pass `config_store.layout_versions_autocull(<the config in hand>)`."""
     items = block.get("items") if isinstance(block.get("items"), dict) else {}
     versions_in = block.get("versions") if isinstance(block.get("versions"), dict) else {}
     versions: dict[str, list[dict[str, Any]]] = {}
     for ident, ring in versions_in.items():
         if isinstance(ring, list) and ring:
-            versions[str(ident)] = [{"at": int(row.get("at") or 0), "name": str(row.get("name") or "")}
-                                    for row in ring[:10] if isinstance(row, dict)]
+            rows: list[dict[str, Any]] = []
+            for row in ring[: config_store.LAYOUT_VERSIONS_MAX]:
+                if not isinstance(row, dict):
+                    continue
+                # The version's own shape, so the menu can say WHAT would come back ("6 widgets,
+                # 1 tab") and not only when it was saved (§129).
+                entry = row.get("entry") if isinstance(row.get("entry"), dict) else {}
+                tabs = entry.get("tabs") if isinstance(entry.get("tabs"), list) else []
+                widgets = 0
+                for tab in tabs:
+                    if isinstance(tab, dict) and isinstance(tab.get("widgets"), list):
+                        widgets += len(tab["widgets"])
+                rows.append({"at": int(row.get("at") or 0), "name": str(row.get("name") or ""),
+                             "tabs": len(tabs), "widgets": widgets})
+            if rows:
+                versions[str(ident)] = rows
     return {"mode": block.get("mode") or "classic", "active": block.get("active") or "",
-            "items": items, "count": len(items), "versions": versions}
+            "items": items, "count": len(items), "versions": versions,
+            "autocull": bool(autocull), "keep": config_store.LAYOUT_VERSIONS_KEEP,
+            "max": config_store.LAYOUT_VERSIONS_MAX}
 
 
-def _push_layout_version(block: dict[str, Any], ident: str, entry: dict[str, Any]) -> None:
-    """Keep the layout as it was before this write — newest first, capped (T2's undo)."""
+def _layout_versions_keep(cfg: dict[str, Any]) -> int:
+    """How deep a ring may grow right now: the auto-cull depth, or the hard ceiling when it is off."""
+    if config_store.layout_versions_autocull(cfg):
+        return config_store.LAYOUT_VERSIONS_KEEP
+    return config_store.LAYOUT_VERSIONS_MAX
+
+
+def _cull_layout_versions(block: dict[str, Any], keep: int) -> int:
+    """Drop every ring's rows past `keep`; returns how many rows went. The store's clamps already
+    bound each ring, so this is only ever the user's own depth arriving."""
+    versions = block.get("versions")
+    if not isinstance(versions, dict):
+        return 0
+    dropped = 0
+    for ident, ring in list(versions.items()):
+        if isinstance(ring, list) and len(ring) > keep:
+            dropped += len(ring) - keep
+            del ring[keep:]
+        if not ring:
+            versions.pop(ident, None)
+    return dropped
+
+
+def _push_layout_version(block: dict[str, Any], ident: str, entry: dict[str, Any], keep: int) -> None:
+    """Keep the layout as it was before this write — newest first, culled to `keep` (T2's undo)."""
     import time as _time
 
     versions = block.get("versions")
@@ -3290,7 +3587,7 @@ def _push_layout_version(block: dict[str, Any], ident: str, entry: dict[str, Any
         ring = versions[ident] = []
     ring.insert(0, {"at": int(_time.time() * 1000), "name": str(entry.get("name") or ident)[:40],
                     "entry": json.loads(json.dumps(entry))})
-    del ring[config_store.LAYOUT_VERSIONS_MAX:]
+    del ring[max(1, int(keep)):]
 
 
 @router.get("/layouts")
@@ -3298,7 +3595,7 @@ async def layouts_get() -> dict[str, Any]:
     """Every saved terminal layout, the boot mode and the active layout (straight from the store)."""
     cfg = config_store.load_config()
     block = cfg.get("layouts") if isinstance(cfg.get("layouts"), dict) else {}
-    state = _layouts_state(block)
+    state = _layouts_state(block, config_store.layout_versions_autocull(cfg))
     if os.environ.get("OFAP_SAFE_START") == "1":
         # T2: a safe start boots Classic no matter what the store says; the store is not written.
         state["mode"] = "classic"
@@ -3326,17 +3623,19 @@ async def layouts_post(payload: dict = Body(default={})) -> dict[str, Any]:
     actions: list[str] = []
     refused = ""
     wanted_save = ""
+    culled = 0
 
     if payload.get("export"):
         ident = str(payload["export"]).strip().lower()
         entry = items.get(ident)
+        flag = config_store.layout_versions_autocull(cfg)      # nothing has been written yet: the state in hand
         if not isinstance(entry, dict):
             return {"ok": False, "action": "export", "error": f"no layout with id {ident!r}",
-                    **_layouts_state(block)}
+                    **_layouts_state(block, flag)}
         safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(entry.get("name") or ident))[:60] or ident
         # the UI hands this straight to /export/save — a bundle is a file the user can keep
         return {"ok": True, "action": "export", "filename": f"layout-{safe}.json",
-                "text": json.dumps({"layout": entry}, indent=2), **_layouts_state(block)}
+                "text": json.dumps({"layout": entry}, indent=2), **_layouts_state(block, flag)}
 
     def _taken() -> set[str]:
         return {str(x.get("name")) for x in items.values() if isinstance(x, dict)}
@@ -3346,6 +3645,20 @@ async def layouts_post(payload: dict = Body(default={})) -> dict[str, Any]:
         while name in _taken() and n < 50:
             name, n = f"{base} {n}", n + 1
         return name
+
+    # §129: how deep a version ring may grow right now — read once, so every push below obeys the
+    # same rule (auto-cull on → the 5 newest; off → up to the hard ceiling of 10).
+    keep_versions = _layout_versions_keep(cfg)
+
+    if isinstance(payload.get("autocull"), bool):
+        # The switch itself, and the cull when it is turned ON: the depth the user chose must apply
+        # to what is already stored, not only to the next save.
+        ui_block = cfg.get("ui") if isinstance(cfg.get("ui"), dict) else {}
+        cfg["ui"] = ui_block
+        ui_block["layout_versions_autocull"] = payload["autocull"]
+        actions.append("autocull")
+        keep_versions = _layout_versions_keep(cfg)
+        culled = _cull_layout_versions(block, keep_versions)
 
     if isinstance(payload.get("mode"), str):
         actions.append("mode")
@@ -3368,7 +3681,7 @@ async def layouts_post(payload: dict = Body(default={})) -> dict[str, Any]:
             wanted_save = entry["id"] = "ly" + uuid.uuid4().hex[:8]
         previous = items.get(wanted_save)
         if isinstance(previous, dict):
-            _push_layout_version(block, wanted_save, previous)
+            _push_layout_version(block, wanted_save, previous, keep_versions)
         items[wanted_save] = entry
 
     if payload.get("duplicate"):
@@ -3393,7 +3706,7 @@ async def layouts_post(payload: dict = Body(default={})) -> dict[str, Any]:
         ident = str(payload["delete"]).strip().lower()
         if ident in items:
             actions.append("delete")
-            _push_layout_version(block, ident, items[ident])       # a delete is recoverable
+            _push_layout_version(block, ident, items[ident], keep_versions)   # a delete is recoverable
             items.pop(ident, None)
             if block.get("active") == ident:
                 block["active"] = ""
@@ -3410,6 +3723,12 @@ async def layouts_post(payload: dict = Body(default={})) -> dict[str, Any]:
                     and int(row.get("at") or 0) == at), None) if isinstance(ring, list) else None
         if isinstance(hit, dict) and isinstance(hit.get("entry"), dict):
             actions.append("restore_version")
+            # A restore is a write like any other: the arrangement it is about to replace is kept
+            # first, so stepping back is itself steppable-forward (§129). Without this the state
+            # you were just looking at was the one state with no way back.
+            current = items.get(ident)
+            if isinstance(current, dict):
+                _push_layout_version(block, ident, current, keep_versions)
             items[ident] = json.loads(json.dumps(hit["entry"]))
         else:
             refused = refused or f"no version of {ident!r} at {at}"
@@ -3424,13 +3743,13 @@ async def layouts_post(payload: dict = Body(default={})) -> dict[str, Any]:
 
     saved = config_store.save_config(cfg)
     block_out = saved.get("layouts") if isinstance(saved.get("layouts"), dict) else {}
-    state = _layouts_state(block_out)
+    state = _layouts_state(block_out, config_store.layout_versions_autocull(saved))
     if wanted_save and wanted_save not in state["items"]:
-        return {"ok": False, "action": "save", **_layouts_state(block_out), "actions": actions,
+        return {"ok": False, "action": "save", **state, "actions": actions,
                 "error": "the store refused this layout — its id must be a lowercase slug "
                          "(letters, digits, _ or -, starting with a letter or digit)"}
     return {"ok": True, "action": actions[-1] if actions else "read", "actions": actions,
-            "error": refused, **_layouts_state(block_out),
+            "error": refused, "culled": culled, **state,
             "note": "layouts live in your config file; the browser keeps no copy"}
 
 
@@ -3558,12 +3877,36 @@ def _windows_state() -> dict[str, Any]:
             open_ids = list(host.open_ids())
         except Exception:
             logger.debug("window enumeration failed", exc_info=True)
+    # Where the open windows actually ARE (§128): a live position beats the store's copy, which a
+    # drag may trail by the save throttle. The screen each window sits on is what the UI says out
+    # loud ("on Monitor 2") and what makes "send it to the next monitor" a one-click command.
+    geometry: dict[str, dict] = {}
+    for wid in open_ids:
+        try:
+            rect = host.geometry(wid) if host is not None else None
+        except Exception:
+            logger.debug("window geometry read failed", exc_info=True)
+            rect = None
+        if not isinstance(rect, dict):
+            continue
+        try:
+            row = {"x": int(rect.get("x")), "y": int(rect.get("y")),
+                   "width": int(rect.get("width")), "height": int(rect.get("height"))}
+        except (TypeError, ValueError):
+            continue
+        index = windows_mod.screen_index_of(screens, row["x"], row["y"])
+        row["screen"] = index if index is not None else -1
+        row["screen_label"] = labelled[index]["label"] if index is not None else ""
+        geometry[wid] = row
+    records = windows_mod.records()
     return {
         "native": host is not None,
         "host": getattr(host, "kind", "") if host is not None else "",
         "screens": labelled,
         "open": open_ids,
-        "windows": windows_mod.records(),
+        "open_geometry": geometry,
+        "stranded": windows_mod.stranded(records, screens, live=geometry) if host is not None else [],
+        "windows": records,
         "max": config_store.WINDOWS_MAX,
     }
 
@@ -3628,6 +3971,19 @@ async def windows_post(payload: dict = Body(default={})) -> dict[str, Any]:
         screen_index = payload.get("screen")
         placement = windows_mod.place_aux(record, screens, count=len(open_ids),
                                           screen_index=screen_index if isinstance(screen_index, int) else None)
+        preset = str(payload.get("preset") or "").strip().lower()
+        if preset and preset in windows_mod.PRESETS and preset != "center":
+            # Open it already snapped (the menu's "Open on Monitor 2, left half"): the requested
+            # shape replaces the centred placement, on the screen place_aux just chose.
+            rects = windows_mod.valid_screens(screens)
+            landed = placement.get("screen")
+            if isinstance(landed, int) and 0 <= landed < len(rects):
+                placement.update(windows_mod.preset_rect(rects[landed], preset,
+                                                         want_w=placement.get("width"),
+                                                         want_h=placement.get("height")))
+                placement["screen"] = landed
+                placement["screen_label"] = windows_mod.screen_label(rects[landed], landed,
+                                                                     rects[landed].get("scale"))
         try:
             host.open(placement)                 # the host owns everything native
         except Exception as exc:
@@ -3638,6 +3994,97 @@ async def windows_post(payload: dict = Body(default={})) -> dict[str, Any]:
         placed = next((r for r in stored if r["id"] == placement["id"]), placement)
         return {"ok": True, "action": action, "opened": placed,
                 "screen_label": placement.get("screen_label", ""), "windows_set": stored,
+                **_windows_state()}
+
+    if action == "move":
+        # §128: send an existing window to a monitor, or snap it to a shape where it is. Works
+        # whether the window is open (it moves now) or closed (its record is re-placed, so it opens
+        # there next time) — and it is the command form of the OS drag that WebView2 cannot start.
+        wid = str(payload.get("id") or "").strip().lower()
+        if not wid:
+            return {"ok": False, "action": action, "error": "which window?", **_windows_state()}
+        record = next((r for r in windows_mod.records() if r["id"] == wid), None)
+        if record is None:
+            return {"ok": False, "action": action, "error": "no window with id %r" % wid,
+                    **_windows_state()}
+        try:
+            screens = host.screens()
+        except Exception:
+            screens = []
+        try:
+            live = host.geometry(wid) or {}          # the live rect is the truth about "where it is"
+        except Exception:
+            logger.debug("window geometry read failed", exc_info=True)
+            live = {}
+        if isinstance(live, dict) and live:
+            record = {**record, "x": live.get("x"), "y": live.get("y"),
+                      "width": live.get("width") or record.get("width"),
+                      "height": live.get("height") or record.get("height")}
+        step = payload.get("step")
+        preset = str(payload.get("preset") or "center")
+        placed = windows_mod.move_placement(
+            record, screens,
+            screen_index=payload.get("screen") if isinstance(payload.get("screen"), int) else None,
+            preset=preset,
+            step=step if isinstance(step, int) else 0)
+        if (isinstance(step, int) and step and "preset" not in payload
+                and placed.get("screen") == windows_mod.screen_index_of(
+                    screens, record.get("x"), record.get("y"))):
+            # "Move it one monitor over" with nowhere to go (one screen, or a single-monitor
+            # machine): doing nothing is the honest answer. The old shape resolved step cyclically
+            # to the SAME screen and re-centred the window — a key that silently moves a hand-
+            # placed window is worse than a key that does nothing.
+            return {"ok": True, "action": action, "moved": "", "note": "already on that monitor",
+                    **_windows_state()}
+        if wid in set(_windows_state()["open"]):
+            try:
+                ok = bool(host.move(wid, placed["x"], placed["y"], placed["width"], placed["height"]))
+            except Exception:
+                logger.warning("window move failed", exc_info=True)
+                ok = False
+            if not ok:
+                # The store is NOT written on a failed move: the window is where it was, and the
+                # record must keep saying so.
+                return {"ok": False, "action": action,
+                        "error": "the window host could not move %r" % wid, **_windows_state()}
+        windows_mod.add_record(placed)
+        return {"ok": True, "action": action, "moved": wid, "screen_label": placed.get("screen_label", ""),
+                **_windows_state()}
+
+    if action == "arrange":
+        # §128: the unplug rescue, for every window at once — each window on no screen is re-placed
+        # on the primary (a live window moves there now, a closed one opens there next time).
+        # Windows that still have a screen are left exactly alone. The stranded set comes from the
+        # state, so it covers both a stale record and a live window the OS left off-desktop.
+        try:
+            screens = host.screens()
+        except Exception:
+            screens = []
+        state = _windows_state()
+        rows_by_id = {r["id"]: r for r in windows_mod.records()}
+        open_now = set(state["open"])
+        moved: list[str] = []
+        for ordinal, wid in enumerate(state["stranded"]):
+            record = rows_by_id.get(wid)
+            if record is None:
+                continue                     # an open window with no record is not ours to move
+            live = state["open_geometry"].get(wid) or {}
+            home = windows_mod.place_aux(
+                {**record, "x": None, "y": None,
+                 "width": live.get("width") or record.get("width"),
+                 "height": live.get("height") or record.get("height")},
+                screens, count=ordinal, screen_index=0)
+            if wid in open_now:
+                try:
+                    if not host.move(wid, home["x"], home["y"], home["width"], home["height"]):
+                        continue             # it stays open where it is; the record stays true
+                except Exception:
+                    logger.debug("window move failed during arrange", exc_info=True)
+                    continue
+            windows_mod.add_record(home)
+            moved.append(wid)
+        return {"ok": True, "action": action, "moved": moved,
+                "note": ("brought %d window(s) home" % len(moved)) if moved else "nothing was stranded",
                 **_windows_state()}
 
     if action == "reset":

@@ -235,6 +235,18 @@
             return Math.max(1, Math.ceil(Number(minRowPx) / rowPx));
         },
 
+        /* How many decimals a price needs on THIS instrument: read from the tick the payload states,
+           never guessed from the price's magnitude (a 0.5-tick instrument prints one decimal, a cent
+           tick two, a whole-number tick none). Returns null when the tick is unknown so the caller
+           keeps its own fallback instead of inventing a precision. */
+        dpFromTick(tick) {
+            const t = Number(tick);
+            if (!isFinite(t) || t <= 0) return null;
+            const text = String(t);
+            const dec = text.indexOf('.') >= 0 ? text.split('.')[1].replace(/0+$/, '').length : 0;
+            return Math.min(8, dec);
+        },
+
         /* Sum N adjacent ticks into one drawn row, preserving the totals and the band. */
         groupLevels(levels, k) {
             const n = Math.max(1, Math.floor(Number(k) || 1));

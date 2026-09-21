@@ -294,6 +294,14 @@ function makeWorld(spec) {
         assert.strictEqual((src.match(/clearInterval\(/g) || []).length, 1, 'and it is cleared by the same code');
     });
 
+    /* §140: the tooltip is the map's, not the paint budget's — the counters are inspectable instead. */
+    await check('the hover readout is the map, not the repaint counters', () => {
+        assert.ok(mpSrc.indexOf('data-repaints') > 0, 'the counters ride data-repaints on the canvas');
+        assert.strictEqual(mpSrc.indexOf('el.title ='), -1, 'and are never rewritten into the tooltip');
+        assert.strictEqual(mpSrc.indexOf('reference layout performance guidance'), -1,
+            'nor a developer note about the guidance');
+    });
+
     console.log('market-pressure selftest: ' + ok + ' ok, ' + failed + ' failed');
     process.exit(failed ? 1 : 0);
 })();

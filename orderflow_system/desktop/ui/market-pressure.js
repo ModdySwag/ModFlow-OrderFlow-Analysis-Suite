@@ -48,7 +48,7 @@ const MP_STYLE = `
 `;
 
 function mpNum(n, digits) {
-    if (n === null || n === undefined || Number.isNaN(n)) return '--';
+    if (n === null || n === undefined || Number.isNaN(n)) return '—';
     const abs = Math.abs(n);
     if (abs >= 1e6) return (n / 1e6).toFixed(2) + 'M';
     if (abs >= 1e3) return (n / 1e3).toFixed(1) + 'K';
@@ -188,7 +188,7 @@ function mpRender(data) {
             <div class="mp-kpi" title="Buy minus sell across the window. Sign matches the CVD slope.">
                 <span class="lbl">Window delta</span>
                 <span class="val ${delta >= 0 ? 'mp-buy' : 'mp-sell'}">${delta >= 0 ? '+' : ''}${mpNum(delta)}</span>
-                <span class="sub">slope ${data.slope === undefined ? '--' : data.slope}</span></div>
+                <span class="sub">slope ${data.slope === undefined ? '—' : data.slope}</span></div>
             <div class="mp-kpi" title="Each bar is one bucket: green above the midline is buying, red below is selling.">
                 <span class="lbl">Buckets plotted</span><span class="val">${rows2.length}</span>
                 <span class="sub">${rows2.length ? new Date(rows2[0].t).toLocaleTimeString().slice(0, 5) + ' → ' + new Date(rows2[rows2.length - 1].t).toLocaleTimeString().slice(0, 5) : ''}</span></div>`;
@@ -344,17 +344,16 @@ function mpGovernor() {
     };
     wrapped.__governed = true;
     window.drawHeatmap = wrapped;
+    /* §140: the counters are diagnostics, and a hover is not where a diagnostic belongs — the
+       readout on this canvas is the map's data. They ride data-repaints (and window.OFAPGOVERNOR)
+       so the performance work can still read them, and the tooltip stays whatever index.html
+       describes the map as. */
     GOVERNOR.note = () => {
+        window.OFAPGOVERNOR = GOVERNOR;
         const el = document.getElementById('heatmapCanvas');
-        if (!el) return;
-        /* Hover-info audit: this used to REPLACE the canvas's tooltip with repaint counters, so a
-           user hovering the depth map got diagnostics instead of what they were looking at. The
-           counters are appended to the description now (and the static title lives in index.html). */
-        const baseTitle = el.getAttribute('data-base-title') || el.title || '';
-        if (!el.getAttribute('data-base-title')) el.setAttribute('data-base-title', baseTitle);
-        el.title = baseTitle + ` Repaints: ${GOVERNOR.painted} painted · ${GOVERNOR.skips} skipped · `
-            + `${GOVERNOR.throttled} coalesced (${GOVERNOR.minGapMs} ms frame budget). `
-            + 'This is the reference layout performance guidance: redraw sparingly, upload only on change.';
+        if (!el || typeof el.setAttribute !== 'function') return;
+        el.setAttribute('data-repaints', GOVERNOR.painted + ' painted · ' + GOVERNOR.skips
+            + ' skipped · ' + GOVERNOR.throttled + ' coalesced (' + GOVERNOR.minGapMs + ' ms frame budget)');
     };
     return true;
 }

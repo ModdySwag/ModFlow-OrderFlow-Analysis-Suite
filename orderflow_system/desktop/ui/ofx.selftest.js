@@ -875,6 +875,16 @@ check('level reads: empty reads are an empty answer, not a throw',
     OFX.levelReadSegments(rbars, null).unfinished.length === 0
     && OFX.levelReadSegments([], {}).nodes.length === 0);
 
+/* §141: price decimals come from the instrument's own tick, never from the price's magnitude. */
+check('dpFromTick: a half-tick instrument prints one decimal', math.dpFromTick(0.5) === 1);
+check('dpFromTick: a quarter tick prints two', math.dpFromTick(0.25) === 2);
+check('dpFromTick: a cent tick prints two', math.dpFromTick(0.01) === 2);
+check('dpFromTick: a whole-number tick prints none', math.dpFromTick(1) === 0);
+check('dpFromTick: a ten-point tick prints none', math.dpFromTick(10) === 0);
+check('dpFromTick: a trailing zero is not a decimal place', math.dpFromTick(0.10) === 1);
+check('dpFromTick: an unknown tick has no opinion (null, not a guess)', math.dpFromTick(null) === null);
+check('dpFromTick: a zero or negative tick has no opinion', math.dpFromTick(0) === null && math.dpFromTick(-1) === null);
+
 console.log(`ofx selftest: ${ok} ok, ${failures.length} failed`);
 for (const f of failures) console.log('  FAIL', f);
 process.exit(failures.length ? 1 : 0);

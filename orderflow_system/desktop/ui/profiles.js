@@ -214,9 +214,28 @@
     }
 
     function refresh() {
-        return window.api('/api/control/profiles').then(reload).catch(function () {
+        return window.api('/api/control/profiles').then(function (d) {
+            var out = reload(d);
+            paintProfileChip();
+            return out;
+        }).catch(function () {
             $('pfList').innerHTML = '<div class="hint">profiles unavailable — the server did not answer</div>';
         });
+    }
+
+    /* The active playbook, always visible: the status bar carries its name (click → this view).
+       The MT5 habit — template + profile names live in the status bar — in this app's own words.
+       `onclick` property, not a listener: the chip re-renders on every refresh, the ledger stays flat. */
+    function paintProfileChip() {
+        var chip = document.getElementById('statusProfileChip');
+        if (!chip) return;
+        var active = null;
+        try { active = activeRow(); } catch (e) { active = null; }
+        if (!active) { chip.hidden = true; chip.textContent = ''; return; }
+        chip.hidden = false;
+        chip.innerHTML = 'profile: <b>' + esc(active.name || active.id) + '</b>';
+        chip.title = 'The active playbook — click to open Profiles';
+        chip.onclick = function () { if (typeof window.showView === 'function') window.showView('profiles'); };
     }
 
     /* The block picker: which parts of the setup the new playbook carries. Every block is ticked
@@ -308,6 +327,7 @@
     function doApply(ident) {
         post({ apply: ident }).then(function (out) {
             if (!out.ok) { banner(out.error || 'the store refused that switch', 'warn'); return; }
+            if (window.OFAPMENUBAR_RECENT) { try { window.OFAPMENUBAR_RECENT('profile', out.name || ident, ident); } catch (e) {} }
             if (typeof toast === 'function') toast(document.body, 'Applied "' + (out.name || '') + '" — reloading the workspace', 'ok');
             setTimeout(function () { location.reload(); }, 650);
         });

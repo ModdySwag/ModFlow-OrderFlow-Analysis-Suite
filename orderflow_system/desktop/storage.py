@@ -178,17 +178,27 @@ def usage_snapshot(db_path: Path | str, *, config_dir: Path | str,
     """What this program occupies on disk, by area. Pure I/O, no engine required.
 
     The database is measured as the file plus its WAL (a writer-heavy hour lives in the WAL until
-    the next checkpoint, and counting only the .db is how a storage panel lies small).
+    the next checkpoint, and counting only the .db is how a storage panel lies small); the logs are
+    the whole rotation ring; the WebView2 cache and the archive folder are the app's by-products
+    and belong in the total.
     """
     db = Path(db_path)
     cfg_dir = Path(config_dir)
     backups_dir = Path(target) if target else default_backup_dir(cfg_dir)
-    log_bytes = sum(_file_bytes(cfg_dir / name) for name in ("orderflow.log", "desktop.log"))
+    # The whole log RING, not just the live file (`orderflow.log.1…3` hold as much again — the
+    # panel called it "rotating ring" while counting one file of it).
+    log_bytes = sum(_file_bytes(p) for pattern in ("orderflow.log*", "desktop.log*")
+                    for p in cfg_dir.glob(pattern))
     parts = {
         "db_bytes": _file_bytes(db),
         "wal_bytes": sum(_file_bytes(Path(str(db) + sfx)) for sfx in WAL_SUFFIXES),
         "log_bytes": log_bytes,
         "exports_bytes": _tree_bytes(cfg_dir / "exports"),
+        # The app's own by-products the first cut left out of the total, so "Total on disk" (and
+        # the size-budget alert built on it) under-reported the real footprint: the WebView2
+        # user-data cache the desktop shell creates, and the archive/quarantine folders.
+        "webview2_bytes": _tree_bytes(cfg_dir / "webview2"),
+        "archive_bytes": _tree_bytes(cfg_dir / "archive"),
         "backups_bytes": _tree_bytes(backups_dir),
     }
     parts["total_bytes"] = sum(parts.values())
@@ -603,6 +613,96 @@ def vacuum_now(db_path: Path | str, *, allow_full: bool = True,
     after = _file_bytes(path)
     return {"ok": True, "mode": mode, "bytes_before": size, "bytes_after": after,
             "reclaimed_bytes": max(0, size - after)}
+
+
+
+# ──────────────────────────────────────────────────────────────
+# Clearing what the window holds open (R6b): the app cache and the quarantine
+# ──────────────────────────────────────────────────────────────
+
+#: Written when the WebView2 cache could not be fully cleared while the window was open.
+#: The launcher honours it at the next start, before WebView2 opens its profile.
+CLEAR_CACHE_FLAG = "clear-cache-on-start"
+
+
+def _remove_entry(entry: Path) -> int:
+    """Delete one file or folder, best-effort; returns the bytes it held when it went."""
+    size = _tree_bytes(entry) if entry.is_dir() and not entry.is_symlink() else _file_bytes(entry)
+    try:
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entry.unlink()
+    except OSError:
+        logger.debug("could not remove %s", entry, exc_info=True)
+    return size if not entry.exists() else 0
+
+
+def clear_app_cache(config_dir: Path | str) -> dict[str, Any]:
+    """Clear the WebView2 app cache: cache folders now, the locked rest at the next start.
+
+    The open window holds its own profile, so most of it cannot be deleted while the app runs —
+    and nothing outside cache-named folders may be touched live (the shell's cookie/leveldb files
+    belong to the running window). So: remove the cache folders, then, if anything is left, arm
+    the flag the launcher reads before WebView2 starts.
+    """
+    base = Path(config_dir) / "webview2"
+    before = _tree_bytes(base)
+    for path in sorted(list(base.rglob("*")), key=lambda p: len(p.parts), reverse=True):
+        if path.is_dir() and not path.is_symlink() and "cache" in path.name.casefold():
+            _remove_entry(path)
+    remaining = _tree_bytes(base)
+    scheduled = remaining > 0
+    if scheduled:
+        try:
+            (Path(config_dir) / CLEAR_CACHE_FLAG).write_text(_iso(time.time()) + "\n", encoding="utf-8")
+        except OSError:
+            logger.debug("could not write the clear-cache flag", exc_info=True)
+    freed = max(0, before - remaining)
+    logger.info("[storage] app cache: %d bytes freed now, %d left, scheduled=%s",
+                freed, remaining, scheduled)
+    return {"ok": True, "freed_bytes": freed, "remaining_bytes": remaining,
+            "scheduled": scheduled, "webview2_dir": str(base)}
+
+
+def apply_pending_cache_clear(config_dir: Path | str) -> dict[str, Any]:
+    """Honour the clear-cache flag: delete the whole WebView2 profile, called at start pre-lock."""
+    base = Path(config_dir) / "webview2"
+    flag = Path(config_dir) / CLEAR_CACHE_FLAG
+    if not flag.exists():
+        return {"cleared": False, "freed_bytes": 0}
+    before = _tree_bytes(base)
+    shutil.rmtree(base, ignore_errors=True)
+    freed = before - _tree_bytes(base)
+    try:
+        flag.unlink()
+    except OSError:
+        logger.debug("could not remove the clear-cache flag", exc_info=True)
+    logger.info("[storage] WebView2 profile cleared at boot: %d bytes freed", freed)
+    return {"cleared": True, "freed_bytes": freed}
+
+
+def clear_archive(config_dir: Path | str) -> dict[str, Any]:
+    """Delete the archive/quarantine contents — the folder itself stays (it is the app's).
+
+    Only entries under ``<config>/archive`` are ever touched, so a caller cannot aim this at
+    anything else; the folder is re-created on demand and measured either way.
+    """
+    base = Path(config_dir) / "archive"
+    removed: list[str] = []
+    freed = 0
+    if base.exists():
+        for entry in sorted(base.iterdir()):
+            try:
+                freed += _remove_entry(entry)
+                if not entry.exists():
+                    removed.append(entry.name)
+            except OSError:
+                continue
+    remaining = _tree_bytes(base)
+    logger.info("[storage] archive cleared: %d entr(ies), %d bytes freed", len(removed), freed)
+    return {"ok": True, "removed": removed, "freed_bytes": freed, "remaining_bytes": remaining,
+            "archive_dir": str(base)}
 
 
 # ══════════════════════════════════════════════════════════════

@@ -67,6 +67,18 @@ class Database:
                 await self._db.commit()
         except Exception as exc:                       # noqa: BLE001
             logger.warning("trade_journal.profile_id not added: %s", exc)
+        # §148: the excursion columns the journal's analytics read (mae_ticks/mfe_ticks). Same
+        # one-statement migration as the two above, so trades written by this build land their
+        # excursions on files created before the columns existed.
+        for column in ("mae_ticks", "mfe_ticks"):
+            try:
+                cur = await self._db.execute("PRAGMA table_info(trade_journal)")
+                cols = {row[1] for row in await cur.fetchall()}
+                if cols and column not in cols:
+                    await self._db.execute(f"ALTER TABLE trade_journal ADD COLUMN {column} REAL")
+                    await self._db.commit()
+            except Exception as exc:                   # noqa: BLE001
+                logger.warning("trade_journal.%s not added: %s", column, exc)
         logger.info(f"Database connected: {self.db_path}")
 
     async def close(self):
@@ -149,6 +161,8 @@ class Database:
                 take_profit REAL,
                 pnl_ticks REAL,
                 rr_ratio REAL,
+                mae_ticks REAL,
+                mfe_ticks REAL,
                 signals_json TEXT,
                 notes TEXT
             );
@@ -307,9 +321,13 @@ class Database:
             out["reclaimable_bytes"] = out["freelist_pages"] * out["page_size"]
         except Exception:                              # noqa: BLE001 — accounting is a bonus
             pass
-        for table in ("ticks", "candles", "volume_profiles", "signals", "trade_journal"):
+        for table, count_sql in (("ticks", "SELECT COUNT(*) FROM ticks"),
+                                 ("candles", "SELECT COUNT(*) FROM candles"),
+                                 ("volume_profiles", "SELECT COUNT(*) FROM volume_profiles"),
+                                 ("signals", "SELECT COUNT(*) FROM signals"),
+                                 ("trade_journal", "SELECT COUNT(*) FROM trade_journal")):
             try:
-                cur = await self._db.execute(f"SELECT COUNT(*) FROM {table}")
+                cur = await self._db.execute(count_sql)
                 row = await cur.fetchone()
                 out["tables"][table] = int(row[0]) if row else 0
             except Exception:                              # noqa: BLE001 — a missing table is 0-ish, not fatal
@@ -411,11 +429,11 @@ class Database:
         else untouched). A missing table (an older file) reports -1 instead of raising.
         """
         out: dict[str, int] = {}
-        for table, column in (("candles", "timestamp_ms"), ("signals", "timestamp_ms"),
-                              ("atlas_events", "ts_ms")):
+        for table, delete_sql in (("candles", "DELETE FROM candles WHERE timestamp_ms < ?"),
+                                  ("signals", "DELETE FROM signals WHERE timestamp_ms < ?"),
+                                  ("atlas_events", "DELETE FROM atlas_events WHERE ts_ms < ?")):
             try:
-                cur = await self._db.execute(
-                    f"DELETE FROM {table} WHERE {column} < ?", (int(cutoff_ms),))
+                cur = await self._db.execute(delete_sql, (int(cutoff_ms),))
                 out[table] = int(cur.rowcount or 0)
             except Exception:                          # noqa: BLE001 — a missing table is not fatal
                 out[table] = -1
@@ -591,6 +609,8 @@ class Database:
         entry_time_ms: int = 0,
         exit_time_ms: int = 0,
         profile_id: str = "",
+        mae_ticks: Optional[float] = None,
+        mfe_ticks: Optional[float] = None,
     ):
         signals_json = json.dumps([
             {"type": s.signal_type.value, "strength": s.strength,
@@ -600,11 +620,11 @@ class Database:
         await self._db.execute(
             "INSERT INTO trade_journal "
             "(instrument, direction, entry_time_ms, exit_time_ms, entry_price, "
-            "exit_price, stop_loss, take_profit, pnl_ticks, rr_ratio, "
-            "signals_json, notes, profile_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "exit_price, stop_loss, take_profit, pnl_ticks, rr_ratio, mae_ticks, mfe_ticks, "
+            "signals_json, notes, profile_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (instrument, direction, entry_time_ms, exit_time_ms,
              entry_price, exit_price, stop_loss, take_profit,
-             pnl_ticks, rr_ratio, signals_json, notes, profile_id),
+             pnl_ticks, rr_ratio, mae_ticks, mfe_ticks, signals_json, notes, profile_id),
         )
         await self._db.commit()
 def readonly_snapshot(db_path: str) -> dict:

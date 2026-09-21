@@ -15,8 +15,9 @@
      · kinds  — `alerts.KINDS` plus `wall_age`, the kind the depth map emits (P1-6).
      · params — read by `AlertEngine._passes()`, one branch per kind, and by nothing else.
      · scope  — `at_price` / `at_tol` are checked generically BEFORE any kind-specific threshold
-                (alerts.py:179) and `min_age_s` bounds how long a level must have held, so those
-                three are the rule's scope rather than one kind's fields. A rule the heatmap
+                (the shared `_scope_gates` reader — `alerts.py`, called by both the live engine and
+                the Test-fire rehearsal) and `min_age_s` bounds how long a level must have held, so
+                those three are the rule's scope rather than one kind's fields. A rule the heatmap
                 creates carries all three (`heatmap-pro.js` alertOnLevel).
    ══════════════════════════════════════════════════════════════════ */
 (function () {

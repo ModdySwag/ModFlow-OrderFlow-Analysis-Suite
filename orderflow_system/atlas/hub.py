@@ -86,7 +86,12 @@ class SymbolFeatures:
     def apply_config(self, cfg: dict[str, Any]) -> None:
         """Re-tune the analyzers from the GUI config (tick_size stays authoritative)."""
         hm = cfg.get("heatmap") or {}
-        self.heatmap.bucket_ms = int(hm.get("bucket_ms", self.heatmap.bucket_ms))
+        # §122: columns are bucket-widths. Re-bucketing mid-buffer would mix widths under one
+        # time axis (a lie about time), so a width change restarts the buffer on the new grid.
+        new_bucket = int(hm.get("bucket_ms", self.heatmap.bucket_ms))
+        if new_bucket != self.heatmap.bucket_ms:
+            self.heatmap.clear()
+        self.heatmap.bucket_ms = new_bucket
         self.heatmap.max_columns = int(hm.get("max_columns", self.heatmap.max_columns))
         self.heatmap.pull_pct = float(hm.get("pull_pct", self.heatmap.pull_pct))
         self.heatmap.pull_window_ms = int(hm.get("pull_window_ms", self.heatmap.pull_window_ms))
@@ -207,7 +212,23 @@ class FeatureHub:
         self.config = cfg
         self.symbols: dict[str, SymbolFeatures] = {}
         self.alerts = AlertEngine(cfg.get("alert_rules") or DEFAULT_RULES,
-                                  webhook_url=(cfg.get("webhook_url") or ""))
+                                  webhook_url=(cfg.get("webhook_url") or ""),
+                                  settings=cfg.get("alert_builder"))
+        # §147: an evidence snapshot reads the hub's own tape, prints, walls and session state at
+        # the moment a rule fires. Attached here so the provider sees exactly what the hub sees.
+        try:
+            from orderflow_system.atlas.alerts import context_from_hub
+            self.alerts.context_provider = lambda symbol: context_from_hub(self, symbol)
+        except Exception:
+            pass
+        # §147 W3: the depth-history store records one column per book update so the strip can be
+        # read back. The route serves the same object — get_store() is the singleton both use.
+        try:
+            from orderflow_system.atlas import depth_history as _depth_history
+            self.depth_history = _depth_history.get_store()
+            self.depth_history.configure(cfg.get("depth_history") or {})
+        except Exception:
+            self.depth_history = None
         self.history: Optional[Any] = None          # atlas.history.EventHistory
         self.notifier: Optional[Any] = None         # atlas.notify.TelegramNotifier
         self._sink: Optional[Sink] = None
@@ -247,6 +268,11 @@ class FeatureHub:
             self.alerts.set_rules(config["alert_rules"])
         if "webhook_url" in config:
             self.alerts.webhook_url = config.get("webhook_url") or ""
+        # §148: a saved depth-history block reaches the running store here, not only on the next boot.
+        # Measured before the fix: /api/control/params persisted `atlas.depth_history.*` and the value
+        # never arrived — the dial moved in the file and the store kept its old ceilings.
+        if self.depth_history is not None and isinstance(config.get("depth_history"), dict):
+            self.depth_history.configure(config["depth_history"])
         for feats in self.symbols.values():
             feats.apply_config(config)
 
@@ -501,6 +527,32 @@ class FeatureHub:
                 self._radar_register(symbol, feats, price, "area_poc", ts_ms, 65.0, tol=tol)
 
     def on_orderbook(self, symbol: str, snapshot: OrderbookSnapshot) -> None:
+        """The repo feed's own book (50 levels).
+
+        Superseded wherever the extras connection carries this symbol's deep book: painting both
+        into one heatmap alternates two books of different depth and cadence under a single map,
+        double-counts the venue's depth and feeds the intent/detector readers two different books.
+        The primary book therefore feeds the map only where no FRESH extras book exists (extras
+        off, another venue, or an extras connection that has died) — a stale map is worse than a
+        shallow one.
+        """
+        if self._extras_live(symbol):
+            self.counters["orderbooks_primary_skipped"] = self.counters.get("orderbooks_primary_skipped", 0) + 1
+            return
+        self._apply_book(symbol, snapshot)
+
+    #: An extras book older than this is treated as dead and the primary book resumes (milliseconds).
+    EXTRAS_BOOK_TTL_MS = 20000
+
+    def _extras_live(self, symbol: str) -> bool:
+        feed = self._feeds.get(symbol)
+        age = getattr(feed, "book_age_ms", None)
+        if age is None:
+            return False          # a feed that cannot prove freshness is not authoritative
+        return age(symbol) <= self.EXTRAS_BOOK_TTL_MS
+
+    def _apply_book(self, symbol: str, snapshot: OrderbookSnapshot) -> None:
+        """Every book consumer in one place — whichever connection owns this symbol's book."""
         feats = self.ensure(symbol)
         self.counters["orderbooks"] += 1
         # The depth map's own detections are events too. `_dispatch` has mapped "pull"/"stack" to
@@ -509,6 +561,17 @@ class FeatureHub:
         # alert buttons create, could not fire. What the map records is what gets dispatched.
         for event in feats.heatmap.on_orderbook(snapshot):
             self._dispatch(symbol, event.kind, event)
+        # §147 W3: the same book, kept for the depth-history strip (bounded by its own retention).
+        if self.depth_history is not None:
+            try:
+                self.depth_history.record(symbol, int(getattr(snapshot, "timestamp_ms", 0) or 0),
+                                          snapshot,
+                                          tick_size=float(getattr(feats, "tick_size", 0.0) or 0.0))
+            except TypeError:
+                self.depth_history.record(symbol, int(getattr(snapshot, "timestamp_ms", 0) or 0),
+                                          snapshot)
+            except Exception:
+                pass
         # participants' intent: DOM pressure + pulled size, both read from this book
         events = feats.intent.on_orderbook(snapshot)
         for ev in events.get("intent_pressure", []):
@@ -536,38 +599,52 @@ class FeatureHub:
 
     # ── extras feed (deeper book, liquidations, block flags) ──
     async def start_feeds(self, symbols: dict[str, float]) -> dict[str, Any]:
-        """Start one Bybit extras connection per symbol: {symbol: tick_size}."""
+        """Start ONE Bybit extras connection for {symbol: tick_size} — one socket, every topic.
+
+        A socket per symbol meant five broker connections for five instruments, each re-subscribing
+        the trade stream the primary feed already carries. Every symbol's topics now ride the one
+        connection (``feeds`` in the answer counts CONNECTIONS, not symbols).
+        """
         if not self.extras_enabled:
             return {"ok": False, "error": "extras disabled in config"}
-        for symbol, tick_size in symbols.items():
-            if symbol in self._feeds:
-                continue
+        wanted = {s: t for s, t in symbols.items() if s not in self._feeds}
+        if not wanted:
+            return {"ok": True, "symbols": list(self._feeds),
+                    "feeds": len({id(f) for f in self._feeds.values()})}
+        for symbol, tick_size in wanted.items():
             self.ensure(symbol, tick_size)
-            feed = feed_extras.BybitExtras(
-                symbol,
-                on_liquidation=self.on_liquidation,
-                on_orderbook=self._on_ext_orderbook,
-                on_block_trade=self.on_block_trade,
-                depth=200,
-            )
+        feed = feed_extras.BybitExtras(
+            list(wanted),
+            on_liquidation=self.on_liquidation,
+            on_orderbook=self._on_ext_orderbook,
+            on_block_trade=self.on_block_trade,
+            depth=200,
+        )
+        for symbol in wanted:
             self._feeds[symbol] = feed
-            self._feed_tasks.append(asyncio.create_task(feed.start()))
-            logger.info("the reference layout extras feed started for %s", symbol)
+        self._feed_tasks.append(asyncio.create_task(feed.start()))
+        logger.info("the reference layout extras feed started for %s", ", ".join(wanted))
         self.started_at = self.started_at or time.time()
-        return {"ok": True, "symbols": list(self._feeds), "feeds": len(self._feeds)}
+        return {"ok": True, "symbols": list(self._feeds),
+                "feeds": len({id(f) for f in self._feeds.values()})}
 
     async def _on_ext_orderbook(self, symbol: str, msg_type: str, data: dict[str, Any], ts_ms: int = 0) -> None:
         feats = self.ensure(symbol)
         feats.book.apply(msg_type, data, ts_ms)
-        self.counters["orderbooks"] += 1
-        feats.heatmap.on_orderbook(feats.book.to_snapshot())
+        # The extras book is this symbol's ONE book: the same funnel the primary path uses, so the
+        # heatmap, participants' intent and the refill detector all read the deep book — not two.
+        self._apply_book(symbol, feats.book.to_snapshot())
 
     async def stop_feeds(self) -> dict[str, Any]:
-        for symbol, feed in list(self._feeds.items()):
+        stopped: list[Any] = []
+        for feed in list(self._feeds.values()):
+            if any(feed is f for f in stopped):
+                continue                      # one shared connection: stop it once, not per symbol
+            stopped.append(feed)
             try:
                 await feed.stop()
             except Exception:
-                logger.debug("feed stop failed for %s", symbol, exc_info=True)
+                logger.debug("feed stop failed", exc_info=True)
         for task in self._feed_tasks:
             task.cancel()
         if self._feed_tasks:
@@ -603,24 +680,35 @@ class FeatureHub:
             self._dispatch_webhooks(fired)
 
     def _dispatch(self, symbol: str, kind: str, payload: Any) -> None:
-        data = payload.to_dict() if hasattr(payload, "to_dict") else (
-            payload.__dict__ if hasattr(payload, "__dict__") and not isinstance(payload, dict) else payload)
-        # heat events use their own kinds so alerts match (heat_pull / heat_stack)
-        alert_kind = kind
-        if kind in ("pull", "stack"):
-            alert_kind = f"heat_{kind}"
-        elif kind == "liquidation":
-            alert_kind = "liquidation"
-        ts_ms, price, size = _event_fields(payload)
-        fired = self.alerts.evaluate(symbol, alert_kind, payload)
-        self._emit_fired(symbol, fired, price, size)
-        if kind != "pull" and kind != "stack":
-            self._emit(kind, symbol, data)
-            self._record(symbol, kind, ts_ms, price, size)
-        else:
-            # heat events are not broadcast as their own channel, but they are
-            # exactly the kind of thing a post-session review wants on disk
-            self._record(symbol, alert_kind, ts_ms, price, size)
+        """One detection onto the UI / history / alerts paths.
+
+        Guarded on purpose: this runs inside the per-tick detection loop for the whole market, so a
+        throw in here — an authored value nobody can read, a payload shape that is not what the
+        reader expects — must not stop detection for every other rule and symbol. It is counted
+        (``counters["dispatch_errors"]``), logged, and the next detection still goes through.
+        """
+        try:
+            data = payload.to_dict() if hasattr(payload, "to_dict") else (
+                payload.__dict__ if hasattr(payload, "__dict__") and not isinstance(payload, dict) else payload)
+            # heat events use their own kinds so alerts match (heat_pull / heat_stack)
+            alert_kind = kind
+            if kind in ("pull", "stack"):
+                alert_kind = f"heat_{kind}"
+            elif kind == "liquidation":
+                alert_kind = "liquidation"
+            ts_ms, price, size = _event_fields(payload)
+            fired = self.alerts.evaluate(symbol, alert_kind, payload)
+            self._emit_fired(symbol, fired, price, size)
+            if kind != "pull" and kind != "stack":
+                self._emit(kind, symbol, data)
+                self._record(symbol, kind, ts_ms, price, size)
+            else:
+                # heat events are not broadcast as their own channel, but they are
+                # exactly the kind of thing a post-session review wants on disk
+                self._record(symbol, alert_kind, ts_ms, price, size)
+        except Exception:
+            self.counters["dispatch_errors"] = self.counters.get("dispatch_errors", 0) + 1
+            logger.debug("dispatch failed for %s %s", symbol, kind, exc_info=True)
 
     # ── side channels: durable history + Telegram ─────────────
     def _record(self, symbol: str, kind: str, ts_ms: int = 0, price: float = 0.0,
@@ -668,8 +756,11 @@ class FeatureHub:
             logger.debug("sink failed for %s/%s", symbol, channel, exc_info=True)
 
     # ── reads for the REST layer ──────────────────────────────
-    def snapshot_heatmap(self, symbol: str, columns: int = 300, max_rows: int = 260) -> dict[str, Any]:
-        return self.ensure(symbol).heatmap.snapshot(columns=columns, max_rows=max_rows)
+    def snapshot_heatmap(self, symbol: str, columns: int = 300, max_rows: int = 260,
+                         until_ms: Optional[int] = None) -> dict[str, Any]:
+        # §121: `until_ms` anchors the window in history (pan / zoom-at-cursor); None = live edge.
+        return self.ensure(symbol).heatmap.snapshot(columns=columns, max_rows=max_rows,
+                                                    until_ms=until_ms)
 
     def snapshot_tape(self, symbol: str) -> dict[str, Any]:
         feats = self.ensure(symbol)
@@ -781,7 +872,7 @@ class FeatureHub:
     def status(self) -> dict[str, Any]:
         return {
             "symbols": list(self.symbols),
-            "feeds": {s: f.stats for s, f in self._feeds.items()},
+            "feeds": {s: f.stats_for(s) for s, f in self._feeds.items()},
             "extras_enabled": self.extras_enabled,
             "uptime_s": round(time.time() - self.started_at, 1) if self.started_at else 0,
             "counters": dict(self.counters),

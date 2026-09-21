@@ -189,7 +189,7 @@ class SignalCards {
             <div class="signal-card ${dirClass} ${topClass}" data-signal-id="${signal.id}">
                 <!-- ── Header Row ── -->
                 <div class="signal-header">
-                    <div class="signal-symbol">${signal.symbol || '--'}</div>
+                    <div class="signal-symbol">${signal.symbol || '—'}</div>
                     <div class="signal-direction">
                         <span class="signal-dir-arrow">${direction === 'long' ? '↑' : '↓'}</span>
                         <span class="signal-dir-label">${direction.toUpperCase()}</span>
@@ -286,19 +286,19 @@ class SignalCards {
                 <div class="signal-context-grid">
                     <div class="ctx-chip">
                         <span class="ctx-key">Pattern</span>
-                        <span class="ctx-val ctx-pattern">${signal.pattern || signal.signal_type || '--'}</span>
+                        <span class="ctx-val ctx-pattern">${signal.pattern || signal.signal_type || '—'}</span>
                     </div>
                     <div class="ctx-chip">
                         <span class="ctx-key">Model</span>
-                        <span class="ctx-val">${signal.model || '--'}</span>
+                        <span class="ctx-val">${signal.model || '—'}</span>
                     </div>
                     <div class="ctx-chip">
                         <span class="ctx-key">Session</span>
-                        <span class="ctx-val">${signal.session || '--'}</span>
+                        <span class="ctx-val">${signal.session || '—'}</span>
                     </div>
                     <div class="ctx-chip">
                         <span class="ctx-key">Bias</span>
-                        <span class="ctx-val ctx-bias ${(signal.bias || '').toLowerCase()}">${signal.bias || '--'}</span>
+                        <span class="ctx-val ctx-bias ${(signal.bias || '').toLowerCase()}">${signal.bias || '—'}</span>
                     </div>
                     ${signal.market_state ? `<div class="ctx-chip">
                         <span class="ctx-key">Regime</span>
@@ -342,7 +342,7 @@ class SignalCards {
                     </div>
                     <div class="of-metric">
                         <span class="of-label">Initiative</span>
-                        <span class="of-value">${signal.initiative_strength || '--'}%</span>
+                        <span class="of-value">${signal.initiative_strength || '—'}%</span>
                     </div>
                     ${signal.book_imbalance_pct ? `<div class="of-metric">
                         <span class="of-label">Book Imbalance</span>
@@ -435,14 +435,14 @@ class SignalCards {
     }
 
     _formatPrice(price) {
-        if (!price) return '--';
+        if (!price) return '—';
         if (price >= 1000) return price.toFixed(1);
         if (price >= 1) return price.toFixed(2);
         return price.toFixed(4);
     }
 
     _formatAge(timestamp) {
-        if (!timestamp) return '--';
+        if (!timestamp) return '—';
         
         const now = Date.now();
         const diff = now - timestamp;

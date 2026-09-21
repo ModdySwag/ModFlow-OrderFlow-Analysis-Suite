@@ -45,6 +45,10 @@
     }
 
     const AUX = auxRequest();
+    /* §128: the app's own router reads this flag (ui.js) — an auxiliary window hosts one widget
+       and routes nothing, so it must not write a #view hash into its URL (measured: §73 cleared
+       the hash at boot and ui.js's showView put `#overview` straight back). */
+    if (AUX && typeof window !== 'undefined') window.OFAPAUX = true;
 
     /* ══ pure maths — no DOM in this block (shell.selftest.js drives it directly) ═══════════════ */
 
@@ -443,7 +447,7 @@
         btn.title = tip;
         btn.onclick = function (ev) {
             if (ev && ev.stopPropagation) ev.stopPropagation();
-            run();
+            run(btn);                        // §128: the window menu anchors to the button itself
         };
         return btn;
     }
@@ -468,6 +472,13 @@
             function () { openPanelSettings(view); }));
         tools.appendChild(widgetButton('⛶', 'Fill the grid with this widget (F11) — Esc puts it back',
             function () { toggleMax(view); }));
+        /* §128: the widget's own way onto another monitor. The menu opens aimed at THIS widget and
+           anchored to its button, so "put the tape on Monitor 2, right half" never leaves the
+           widget (Ctrl+Alt+W is the keyboard form of the same click). */
+        tools.appendChild(widgetButton('⧉', 'Window: send this widget to a monitor, snap it, or pin it',
+            function (btn) {
+                if (window.OFAPWINDOWS && OFAPWINDOWS.openFor) OFAPWINDOWS.openFor(view, btn);
+            }));
         tools.appendChild(widgetButton('×', 'Take this widget off the tab',
             function () { closeWidget(view); }));
         bar.appendChild(title);
@@ -478,7 +489,7 @@
         body.className = 'wf-body';
         const grip = document.createElement('span');
         grip.className = 'wf-grip';
-        grip.title = 'Drag to resize, in grid cells';
+        grip.title = gripTip();                 // placeFrame() fills in the live size
         grip.addEventListener('pointerdown', function (ev) { beginGesture('resize', ev, view); });
 
         frame.appendChild(bar);
@@ -498,10 +509,22 @@
         return frame;
     }
 
+    /* A widget's size belongs on the RESIZE GRIP, not on the frame: the old whole-frame title
+       (`view · w×h cells` set on the frame element) put a native tooltip over the WHOLE panel, so
+       hovering anywhere inside a widget — over its chart, its text, its table — popped a box
+       covering the thing being read (owner's screenshot, §131). The frame bar already names the
+       widget and carries the move hint; this keeps the one genuinely useful fact (how big it is, in
+       grid cells) where a user reaches for it, and refreshes it on every placement change. */
+    function gripTip(w, h) {
+        const size = (w && h) ? ' — now ' + w + '×' + h + ' cells' : '';
+        return 'Drag to resize this widget' + size;
+    }
+
     function placeFrame(frame, widget) {
         frame.style.gridColumn = (widget.x + 1) + ' / span ' + widget.w;
         frame.style.gridRow = (widget.y + 1) + ' / span ' + widget.h;
-        frame.title = titleOf(widget.view) + ' · ' + widget.w + '×' + widget.h + ' cells';
+        const grip = frame.querySelector ? frame.querySelector('.wf-grip') : null;
+        if (grip) grip.title = gripTip(widget.w, widget.h);
         frame.classList.toggle('wf-max', !!(widget.settings && widget.settings.max));
         paintLinkChip(widget.view);
     }
@@ -1052,8 +1075,15 @@
     function paintBar() {
         if (!S.noteEl || !S.layout) return;
         refreshAdd();
-        const count = math.countWidgets(S.layout);
-        const bits = [count + ' widget' + (count === 1 ? '' : 's')];
+        const bits = [];
+        if (AUX) {
+            /* §128: the window says WHICH window it is — the id is what the API, the dialog and the
+               store all name it by (the "1 widget · focus" wording is the board's, not a window's). */
+            bits.push(AUX.id ? 'window ' + AUX.id : 'widget window');
+        } else {
+            const count = math.countWidgets(S.layout);
+            bits.push(count + ' widget' + (count === 1 ? '' : 's'));
+        }
         if (S.focus) bits.push('focus: ' + S.focus);
         if (S.notice) bits.push(S.notice);
         if (S.error) bits.push('⚠ ' + S.error);
@@ -1207,7 +1237,7 @@
             try { frame.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
             catch (e) { /* engines without the options object simply do not scroll */ }
         }
-        if (location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
+        if (!AUX && location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
         paintBar();
         return true;
     }
@@ -1519,6 +1549,7 @@
         S.notice = 'loaded “' + layout.name + '”';
         paintBar();
         return route('POST', { activate: key }).then(function () {
+            if (window.OFAPMENUBAR_RECENT) { try { window.OFAPMENUBAR_RECENT('layout', layout.name, key); } catch (e) {} }
             return { ok: true, id: key, name: layout.name };
         });
     }

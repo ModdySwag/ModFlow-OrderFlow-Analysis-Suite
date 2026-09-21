@@ -145,6 +145,51 @@ def test_the_end_of_a_session_creates_the_journal_table_it_writes_to(monkeypatch
     assert rows[0][3] == '{"source": "paper"}' and rows[0][4] == "simulated session"
 
 
+def test_a_journal_from_before_the_excursion_columns_still_takes_a_session(monkeypatch, tmp_path):
+    """§148: the route that owns the table migrates it — "End & save" must not fail on an old file.
+
+    Measured shape of a legacy file: a trade_journal with no mae_ticks/mfe_ticks (CREATE TABLE IF
+    NOT EXISTS never alters an existing table). The writer adds them itself before its INSERT, and
+    the rows it writes carry the excursion the position took.
+    """
+    _reset(monkeypatch, tmp_path)
+    db = tmp_path / "orderflow_data.db"
+    monkeypatch.setattr(config_store, "db_path", lambda: db)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "CREATE TABLE trade_journal (id INTEGER PRIMARY KEY AUTOINCREMENT, instrument TEXT NOT "
+            "NULL, direction TEXT NOT NULL, entry_time_ms INTEGER, exit_time_ms INTEGER, "
+            "entry_price REAL, exit_price REAL, stop_loss REAL, take_profit REAL, pnl_ticks REAL, "
+            "rr_ratio REAL, signals_json TEXT, notes TEXT)")
+        conn.execute("INSERT INTO trade_journal (instrument, direction) VALUES ('OLD', 'long')")
+        conn.commit()
+    finally:
+        conn.close()
+
+    _run(atlas_api.paper_start({"symbol": "ESZ6", "tick_size": 0.25}))
+    account = atlas_api._paper["account"]
+    account.submit("buy", 1, ts_ms=1)
+    for fill in account.on_trade(5000.0, 1, "sell", 2):
+        atlas_api._paper["fills"].append(fill)
+    account.submit("sell", 1, ts_ms=3)
+    for fill in account.on_trade(4998.0, 1, "buy", 4):       # 8 ticks against the long
+        atlas_api._paper["fills"].append(fill)
+    done = _run(atlas_api.paper_close())
+    assert done["ok"] is True and done["saved"] == 1, done
+
+    conn = sqlite3.connect(db)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(trade_journal)")}
+        rows = conn.execute(
+            "SELECT instrument, mae_ticks, mfe_ticks FROM trade_journal ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    assert {"mae_ticks", "mfe_ticks"} <= cols, "the writer must migrate the table it writes to"
+    assert rows[0][0] == "OLD" and rows[0][1] is None        # the legacy row reads as no excursion
+    assert rows[1][0] == "ESZ6" and rows[1][1] == 8.0 and rows[1][2] == 0.0
+
+
 def test_the_journal_ddl_describes_the_journal_columns():
     """The DDL and TRADE_COLUMNS are two views of one table; they must agree."""
     import re as _re

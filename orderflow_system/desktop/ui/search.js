@@ -1050,10 +1050,11 @@ const SELECT_HELP = {
     },
     rangeSelect: {
         '1h': 'Load the last hour.', '4h': 'Load the last four hours.', '1d': 'Load the last day.',
-        '7d': 'Load the last week.', '30d': 'Load the last month.',
+        '1w': 'Load the last week.', '1m': 'Load the last month.',
     },
     symbolSelect: {},
-    logLevel: { DEBUG: 'Everything, including per-message feed detail.', INFO: 'Normal operation.',
+    logLevel: { 'all levels': 'Everything the buffer holds, unfiltered.',
+                DEBUG: 'Everything, including per-message feed detail.', INFO: 'Normal operation.',
                 WARNING: 'Problems worth noticing.', ERROR: 'Failures only.' },
 };
 
@@ -1062,9 +1063,15 @@ function decorateSelects() {
         const sel = document.getElementById(id);
         if (!sel) return;
         if (!sel.title) sel.title = 'Choose an option — hover one to see what it does.';
+        /* F-6: a key rarely matches VALUE or label verbatim ("1H" reads '1h' in the map; a value
+           is seconds) — resolve case-insensitively before giving up. */
+        const lower = {};
+        Object.keys(map).forEach((k) => { lower[k.toLowerCase()] = map[k]; });
         Array.from(sel.options).forEach((opt) => {
             if (opt.title) return;
-            const help = map[opt.value] || map[opt.textContent.trim()];
+            const text = (opt.textContent || '').trim();
+            const help = map[opt.value] || lower[String(opt.value).toLowerCase()]
+                || map[text] || lower[text.toLowerCase()];
             if (help) opt.title = help;
         });
     });

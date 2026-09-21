@@ -168,6 +168,27 @@ check('a feed that answered nothing is empty, quoting the server\'s own reason',
     assert(st.source.indexOf('built-in') >= 0);
 });
 
+check('the Finnhub lane is named as a keyed lane, never as a built-in feed', () => {
+    const items = [{ title: 'Fed holds rates', link: 'https://finnhub.io/a', source: 'Reuters',
+                     published_ms: NOW - 60000 }];
+    const st = N.plan({ ok: true, symbol: 'BTCUSDT', news: items,
+        stats: { feeds: ['finnhub'], lane: 'finnhub', last_error: '' } }, CFG, NOW, null, 'BTCUSDT');
+    assert.strictEqual(st.state, 'ok');
+    assert.strictEqual(st.source, 'finnhub: reuters', 'the lane prefixes the sources it served');
+    assert(st.note.indexOf('Finnhub news API') >= 0, 'the lane is named');
+    assert(st.note.indexOf('Settings ▸ Feed keys') >= 0, 'and the control that unlocks it');
+    assert.strictEqual(st.note.indexOf('built-in'), -1, 'a keyed lane is never called a built-in feed');
+
+    const empty = N.plan({ ok: true, symbol: 'BTCUSDT', news: [],
+        stats: { feeds: [], lane: 'finnhub',
+                 last_error: 'no Finnhub key — add one in Settings ▸ Feed keys' } },
+        CFG, NOW, null, 'BTCUSDT');
+    assert.strictEqual(empty.state, 'empty');
+    assert.strictEqual(empty.source, 'Finnhub');
+    assert(empty.message.indexOf('no Finnhub key') >= 0, 'the server\'s own reason, verbatim');
+    assert.strictEqual(empty.message.indexOf('built-in'), -1);
+});
+
 check('context switched off and news switched off are two different sentences', () => {
     const disabled = N.plan({ ok: false, symbol: 'BTCUSDT',
         error: 'market context is disabled in settings' }, CFG, NOW, null, 'BTCUSDT');

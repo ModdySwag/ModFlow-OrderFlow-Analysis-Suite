@@ -36,7 +36,7 @@ check('a browser is offered nothing at all', () => {
 check('with nothing open, the menu offers one new window and one row per monitor', () => {
     const rows = W.model(native(), 'ofx');
     const kinds = rows.map((r) => r.kind);
-    assert.deepStrictEqual(kinds, ['open_new', 'head', 'screen', 'screen']);
+    assert.deepStrictEqual(kinds, ['open_new', 'head', 'screen', 'screen', 'dialog']);
     assert.strictEqual(rows[0].view, 'ofx');
     assert.strictEqual(rows[0].disabled, false);
     assert.deepStrictEqual(rows.filter((r) => r.kind === 'screen').map((r) => r.screen), [0, 1]);
@@ -45,7 +45,7 @@ check('with nothing open, the menu offers one new window and one row per monitor
 
 check('no focus means an instruction, never a guess', () => {
     const rows = W.model(native(), '');
-    assert.deepStrictEqual(rows.map((r) => r.kind), ['note']);
+    assert.deepStrictEqual(rows.map((r) => r.kind), ['note', 'dialog']);
     assert.ok(/focus/i.test(rows[0].label));
 });
 
@@ -96,6 +96,66 @@ check('the model never mutates the state it was given', () => {
 check('a focus given in odd case or with spaces is normalised, not refused', () => {
     const rows = W.model(native(), '  OFX  ');
     assert.strictEqual(rows[0].view, 'ofx');
+});
+
+/* ── §128: the multi-monitor half — send, snap, and the unplug rescue ───────────────────────── */
+
+check('the snap shapes are the API\'s own list, in the API\'s order', () => {
+    assert.deepStrictEqual(W.presets, ['left', 'right', 'top', 'bottom',
+        'topleft', 'topright', 'bottomleft', 'bottomright', 'fill', 'center']);
+});
+
+check('an open window row says which monitor it is on', () => {
+    const rows = W.model(native({
+        open: ['w1'], windows: [{ id: 'w1', view: 'ofx' }],
+        open_geometry: { w1: { x: 2600, y: 40, width: 1100, height: 760, screen: 1,
+            screen_label: 'Monitor 2 · 1920x1080 · 150%' } },
+    }), 'ofx');
+    const row = rows.filter((r) => r.kind === 'open')[0];
+    assert.strictEqual(row.screen, 1);
+    assert.ok(/Monitor 2/.test(row.screen_label));
+});
+
+check('expanding a window offers every monitor and every snap shape', () => {
+    const rows = W.model(native({
+        open: ['w1'], windows: [{ id: 'w1', view: 'ofx' }],
+        open_geometry: { w1: { screen: 0, screen_label: 'Monitor 1 · 2560x1440' } },
+    }), 'ofx', 'w1');
+    assert.strictEqual(rows[0].kind, 'sub_back');
+    const screens = rows.filter((r) => r.kind === 'send_screen');
+    assert.deepStrictEqual(screens.map((r) => r.screen), [0, 1]);
+    assert.strictEqual(screens[0].current, true);
+    assert.strictEqual(screens[1].current, false);
+    assert.ok(/Monitor 1/.test(rows.filter((r) => r.kind === 'head')[1].label));
+    const presets = rows.filter((r) => r.kind === 'send_preset').map((r) => r.preset);
+    assert.deepStrictEqual(presets, W.presets);
+    assert.ok(rows.some((r) => r.kind === 'dialog'), 'the dialog stays reachable from the panel');
+});
+
+check('an expand request for a window that is not open falls back to the list', () => {
+    const rows = W.model(native({ open: [], windows: [] }), 'ofx', 'wghost');
+    assert.ok(rows.some((r) => r.kind === 'open_new'));
+    assert.ok(!rows.some((r) => r.kind === 'send_preset'));
+});
+
+check('a stranded window is called out with its rescue', () => {
+    const rows = W.model(native({
+        open: ['w1'], windows: [{ id: 'w1', view: 'ofx' }], stranded: ['w1'],
+        open_geometry: { w1: { screen: -1, screen_label: '' } },
+    }), 'ofx');
+    const note = rows.filter((r) => r.kind === 'note')[0];
+    assert.ok(/monitor that is gone/.test(note.label));
+    const arrange = rows.filter((r) => r.kind === 'arrange')[0];
+    assert.ok(/home/.test(arrange.label));
+});
+
+check('a target that already has a window is pointed at the send control', () => {
+    const rows = W.model(native({
+        open: ['w1'], windows: [{ id: 'w1', view: 'ofx' }], open_geometry: { w1: { screen: 0 } },
+    }), 'ofx');
+    const note = rows.filter((r) => r.kind === 'note')[0];
+    assert.ok(/is open/.test(note.label));
+    assert.ok(!rows.some((r) => r.kind === 'open_new'), 'no second window for an open panel');
 });
 
 console.log('windows-ui selftest: ' + ok + ' ok, ' + failed + ' failed');

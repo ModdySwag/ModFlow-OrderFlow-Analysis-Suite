@@ -12,6 +12,7 @@ Mounted by the desktop launcher as part of the control router family:
     /api/atlas/frames/{symbol}/{frame}   range | renko | reversal | tick | volume
     /api/atlas/alerts                    alert log; /alert-rules CRUD
     /api/atlas/replay/*                  load / play / pause / resume / seek / status
+    /api/atlas/market-read/{symbol}      the deterministic tape/profile/radar read of one instrument
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from orderflow_system.atlas import feed_extras
 from orderflow_system.data.enums import as_value
 from orderflow_system.atlas.hub import hub as global_hub
 from orderflow_system.atlas.replay import MarketReplay
-from orderflow_system.desktop import config_store
+from orderflow_system.desktop import config_store, orders as orders_mod
 
 router = APIRouter(prefix="/api/atlas", tags=["atlas"])
 
@@ -165,12 +166,16 @@ async def heatmap_bin(symbol: str, columns: int = Query(default=300, le=900),
 
 @router.get("/heatmap/{symbol}")
 async def heatmap(symbol: str, columns: int = Query(default=300, le=900),
-                  rows: int = Query(default=220, le=400)) -> dict[str, Any]:
+                  rows: int = Query(default=220, le=400),
+                  until: int = Query(default=0, ge=0)) -> dict[str, Any]:
+    # §121: `until` (epoch ms, 0 = live edge) is the time anchor the UI's pan and
+    # zoom-at-cursor ride; the slice still spans `columns` buckets.
     h = get_hub()
     if symbol not in h.symbols:
         return {"symbol": symbol, "buckets": [], "prices": [], "values": [], "traded": [],
                 "events": [], "stats": {}, "note": "no data yet — start the engine or a replay"}
-    snap = h.snapshot_heatmap(symbol, columns=columns, max_rows=rows)
+    snap = h.snapshot_heatmap(symbol, columns=columns, max_rows=rows,
+                              until_ms=(until or None))
     return attach_wall_ages(snap, h.ensure(symbol).heatmap)
 
 
@@ -590,6 +595,19 @@ def _persist_rules(rules: list[dict[str, Any]]) -> None:
         pass
 
 
+@router.post("/alert-rules/test")
+async def test_rule(payload: dict = Body(default={})) -> dict[str, Any]:
+    """The condition builder's Test fire: rehearse one candidate rule against the live snapshot.
+
+    Nothing is saved here — the rule is evaluated against the newest real event of its kind, and
+    the answer names every gate, each condition's reading, and the exact evidence block a
+    notification would carry. When no such event has happened yet, it says so instead of guessing.
+    """
+    body = payload or {}
+    rule = body.get("rule") if isinstance(body.get("rule"), dict) else body
+    return get_hub().alerts.test_fire(rule, symbol=str(body.get("symbol") or ""))
+
+
 # ── replay ──────────────────────────────────────────────────────────────────
 
 @router.post("/replay/load")
@@ -735,14 +753,14 @@ def _paper_state() -> dict[str, Any]:
               "event_count": int(_paper.get("event_count") or 0)}
     if account is None:
         return {"running": False, "symbol": "", "tick_size": 0.0, "position": {"side": "flat", "size": 0},
-                "stats": {}, "orders": [], "fills": [], "closed": [],
+                "stats": {}, "orders": [], "fills": [], "closed": [], "plan": None,
                 "last_price": _paper["last_price"], **ledger}
     return {"running": True, "symbol": account.symbol, "tick_size": account.tick_size,
             "position": account.position(),
             "mark": account.mark(float(_paper["last_price"] or 0)),
             "stats": account.stats(), "orders": account.open_orders(),
             "fills": list(_paper["fills"]), "closed": account.closed_trades(),
-            "last_price": _paper["last_price"], "exits": account.exits(),
+            "last_price": _paper["last_price"], "exits": account.exits(), "plan": account.plan(),
             "events": ledger["events"], "event_count": ledger["event_count"]}
 
 
@@ -764,6 +782,10 @@ async def paper_start(payload: dict = Body(default={})) -> dict[str, Any]:
         tick_size, balance = 0.01, 100_000.0
     _paper["account"] = paper_mod.PaperAccount(symbol=symbol, tick_size=max(1e-8, tick_size),
                                                starting_balance=balance)
+    # §148: the session's router — every order from here runs the risk gates (max size, the day's
+    # loss cap, concurrent positions, the bridge refusal). Measured before this fix: `bind_account`
+    # had no production caller, so an order placed at this route bypassed all of them.
+    orders_mod.bind_account(_paper["account"], settings=orders_mod._stored("orders"))
     _paper["fills"] = []
     _paper["events"] = []                      # a new session starts a new ledger
     _paper["event_count"] = 0
@@ -803,17 +825,35 @@ async def paper_order(payload: dict = Body(default={})) -> dict[str, Any]:
         take_profit = _number("take_profit")
     except HTTPException:
         raise
-    order = account.submit(str(body.get("side") or "").lower(), size,
-                           kind=str(body.get("kind") or "market").lower(), price=price,
-                           stop_loss=stop_loss, take_profit=take_profit,
-                           ts_ms=int(_time.time() * 1000))
-    ok = order.get("status") != "rejected"
-    _paper_event("submit" if ok else "reject", order_id=order.get("id") or "",
-                 side=order.get("side") or "", size=order.get("size"),
-                 price=order.get("price"), order_kind=order.get("kind") or "",
-                 note=str(order.get("reason") or ""))
-    return {"ok": ok, "order": order,
-            "error": str(order.get("reason") or ""), "state": _paper_state()}
+    # §148: the order leaves by the session's router, not straight into the account — that is where
+    # the risk gates live (max size, the day's loss cap, concurrent positions, the bridge refusal).
+    # The template is passed through as it arrives: the ladder packs its plan-bar template as an
+    # OBJECT (`ladder.js`: `body.template = d.template`) and `paper._resolve_template` takes either a
+    # dict or a shipped id — `str()` here had made every planned order a rejected one.
+    bound = orders_mod.session_router()
+    if bound is None or bound.account is not account:
+        bound = orders_mod.bind_account(account, settings=orders_mod._stored("orders"))
+    receipt = bound.route(str(body.get("side") or "").lower(), size,
+                          kind=str(body.get("kind") or "market").lower(), price=price,
+                          stop_loss=stop_loss, take_profit=take_profit,
+                          template=body.get("template") or "",
+                          ts_ms=int(_time.time() * 1000))
+    order = receipt.get("order")
+    ok = bool(receipt.get("ok"))
+    if not ok and order is None:
+        # §148: a refusal still takes an id and a row, the way one the account refused itself does —
+        # the session's ledger keeps its trace of the click (and its `orders_rejected` count).
+        order = account.refuse(str(body.get("side") or "").lower(), size,
+                               receipt.get("reason") or "",
+                               kind=str(body.get("kind") or "market").lower(), price=price,
+                               ts_ms=int(_time.time() * 1000))
+    _paper_event("submit" if ok else "reject", order_id=(order or {}).get("id") or "",
+                 side=(order or {}).get("side") or str(body.get("side") or "").lower(),
+                 size=(order or {}).get("size", size), price=(order or {}).get("price", price),
+                 order_kind=(order or {}).get("kind") or str(body.get("kind") or "market").lower(),
+                 note=str(receipt.get("reason") or ""))
+    return {"ok": ok, "order": order, "error": str(receipt.get("reason") or ""),
+            "gate": receipt.get("gate") or "", "state": _paper_state()}
 
 
 @router.post("/replay/paper/cancel")
@@ -943,15 +983,29 @@ async def paper_close() -> dict[str, Any]:
             # endpoint writes the table, so it owns creating it (measured: a clean sandbox
             # 500ed here with "no such table" the first time a session ended).
             conn.execute(journal_mod.TRADE_JOURNAL_DDL)
+            # §148: CREATE TABLE IF NOT EXISTS never alters an existing table, so the writer
+            # migrates what it is about to write. profile_id came with the profiles feature and
+            # mae_ticks/mfe_ticks with the excursion writers; the data layer runs the same guarded
+            # ADD COLUMNs when it opens the file, but this path must not depend on the engine
+            # having started (measured: a legacy table without profile_id made this INSERT raise).
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(trade_journal)").fetchall()}
+            if "profile_id" not in cols:
+                conn.execute(
+                    "ALTER TABLE trade_journal ADD COLUMN profile_id TEXT NOT NULL DEFAULT ''")
+            for column in ("mae_ticks", "mfe_ticks"):
+                if column not in cols:
+                    conn.execute(f"ALTER TABLE trade_journal ADD COLUMN {column} REAL")
             for row in rows:
                 conn.execute(
                     "INSERT INTO trade_journal (instrument, direction, entry_time_ms, exit_time_ms, "
                     "entry_price, exit_price, stop_loss, take_profit, pnl_ticks, rr_ratio, "
-                    "signals_json, notes, profile_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "mae_ticks, mfe_ticks, "
+                    "signals_json, notes, profile_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (row.get("instrument") or account.symbol, row.get("direction") or "",
                      row.get("entry_time_ms"), row.get("exit_time_ms"), row.get("entry_price"),
                      row.get("exit_price"), row.get("stop_loss"), row.get("take_profit"),
-                     row.get("pnl_ticks"), row.get("rr_ratio"), '{"source": "paper"}',
+                     row.get("pnl_ticks"), row.get("rr_ratio"),
+                     row.get("mae_ticks"), row.get("mfe_ticks"), '{"source": "paper"}',
                      "simulated session",
                      (config_store.load_config().get("profiles") or {}).get("active") or ""))
                 written += 1
@@ -962,6 +1016,7 @@ async def paper_close() -> dict[str, Any]:
     _paper_event("end", note=(str(written) + " trade(s) saved to the journal"))
     _paper["account"] = None
     _paper["fills"] = []
+    orders_mod.unbind_account()          # §148: no router outlives the session it was bound to
     return {"ok": True, "saved": written, "trades": [dict(r) for r in rows],
             "note": ("saved to the Journal view" if written else "nothing was closed — the session had no completed trades")}
 
@@ -1107,16 +1162,51 @@ def _context_settings() -> dict[str, Any]:
         return {}
 
 
+def _finnhub_block() -> dict[str, Any]:
+    try:
+        return config_store.load_config().get("finnhub") or {}
+    except Exception:                                  # pragma: no cover - never break the view
+        return {}
+
+
+def _finnhub_headlines(limit: int) -> tuple[list[dict[str, Any]], str]:
+    """Finnhub headlines in the News panel's item shape — ``(items, reason when empty)``.
+
+    The key resolves exactly like the calendar lane's: the settings copy first (what the engine
+    applied, so a key saved a moment ago is already live), then the stored config block. The
+    reason is a sentence the panel prints verbatim, never a stack trace.
+    """
+    from orderflow_system.config import settings
+    from orderflow_system.data import finnhub_feed as fh
+
+    key = str(getattr(settings.FINNHUB, "api_key", "") or "").strip()
+    block = _finnhub_block()
+    if not key:
+        key = str(block.get("api_key") or "").strip()
+    if not key:
+        return [], "no Finnhub key — add one in Settings ▸ Feed keys"
+    category = str(getattr(settings.FINNHUB, "news_category", "") or "").strip() \
+        or str(block.get("news_category") or "general").strip() or "general"
+    batch = fh.FinnhubFeed(api_key=key).news(category=category)
+    if getattr(batch, "error", None):
+        return [], f"the Finnhub news API answered: {batch.error}"
+    return fh.to_news_items(batch)[: max(0, int(limit))], ""
+
+
 @router.get("/context/{symbol}")
 async def market_context(
     symbol: str,
     news_url: str = Query(default=""),
     news_limit: int = Query(default=0, ge=0, le=30),
+    news_source: str = Query(default=""),
 ) -> dict[str, Any]:
     """Funding / open interest / long-short ratio, Fear & Greed and headlines.
 
-    All three sources are public and keyless; each section degrades to
-    ``{"ok": false}`` on its own so one dead feed never blanks the card.
+    The positioning and Fear & Greed sources are public and keyless, and each section degrades to
+    ``{"ok": false}`` on its own so one dead feed never blanks the card. The headlines come from
+    one of two lanes — the built-in public feeds (``context.news_source = "feeds"``, the default)
+    or the Finnhub news API (``"finnhub"``, read with the key from Settings ▸ Feed keys); the
+    payload's ``stats.lane`` names which one answered, so the panel never calls one the other.
     """
     from orderflow_system.atlas.context import shared_context
 
@@ -1134,14 +1224,28 @@ async def market_context(
         # relay. Only the feed the user configured in Settings is fetchable through the API.
         return {"ok": False, "symbol": symbol.upper(),
                 "error": "news_url must match the feed configured in Settings"}
+    lane = str(news_source or "").strip().lower() or str(cfg.get("news_source") or "feeds").lower()
+    if lane not in ("feeds", "finnhub"):
+        lane = "feeds"
     ctx = shared_context()
+    # The Finnhub lane REPLACES the headline section rather than adding to it, so the RSS fetch
+    # is not asked for at all — one lane, one bill of work, and no half-read cache entry.
+    snapshot_include = [name for name in include
+                        if not (name == "news" and lane == "finnhub")]
     out = await ctx.snapshot(
         symbol,
-        include=include,
+        include=snapshot_include,
         news_limit=int(news_limit or cfg.get("news_limit") or 8),
         feed_url=configured,
     )
     out["stats"] = ctx.stats()
+    out["stats"]["lane"] = lane
+    if lane == "finnhub" and "news" in include:
+        items, reason = await asyncio.to_thread(
+            _finnhub_headlines, int(news_limit or cfg.get("news_limit") or 8))
+        out["news"] = items
+        out["stats"]["feeds"] = ["finnhub"] if items else []
+        out["stats"]["last_error"] = reason or ""
     return out
 
 
@@ -1266,3 +1370,147 @@ async def atlas_levels(symbol: str, tol_ticks: float = Query(default=2.0, ge=0.1
     confluence = find_confluences(refs, tol=tol, min_distinct=2) if tol > 0 else []
     return {"ok": True, "symbol": symbol, "tick": tick, "tol": tol,
             "unfinished": unfinished, "nodes": nodes, "confluence": confluence}
+
+
+# ── market read: the deterministic read of one instrument's live state ──
+
+def _radar_rows(feats: Any) -> tuple[dict[str, Any], ...]:
+    """The radar's own levels, so a read quotes the real prices it is tracking.
+
+    Only the live ones: a spent or failed level is history, and the read is about what is in front
+    of price now. A tracker that cannot answer returns an empty tuple — the read then falls back to
+    the count-anchored path inside ``extract_levels`` instead of failing.
+    """
+    try:
+        snapshot = feats.radar.snapshot()
+    except Exception:                       # noqa: BLE001 - a read must not die on one tracker
+        return ()
+    rows = snapshot.get("levels") if isinstance(snapshot, dict) else None
+    return tuple(row for row in (rows or []) if isinstance(row, dict) and row.get("live"))
+
+
+def _num_or_none(value: Any) -> Optional[float]:
+    """A finite float or None — the read's dataclasses take None, never a NaN."""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    return num if num == num and abs(num) != float("inf") else None
+
+
+@router.get("/market-read/{symbol}")
+async def atlas_market_read(symbol: str) -> dict[str, Any]:
+    """The deterministic read of one instrument: regime, conviction, levels, confluence, summary.
+
+    Every input comes from the running engine's own analyzers through the hub — the tape's stats,
+    the session profile, the radar book, the depth map's walls and the VWAP study. Nothing is
+    invented: with no live readings for the symbol the route says so rather than reading a state of
+    zeros, and ``inputs`` names which signals were actually measured (the footprint family is not
+    fed to the hub yet, so it is reported unmeasured instead of as zeroes).
+
+    Read-only, and cheap: the analyzers' own snapshots, no venue request, nothing stored.
+    """
+    from orderflow_system.atlas.market_read import (
+        HeatmapSnapshot,
+        MarketState,
+        RadarSnapshot,
+        TapeSnapshot,
+        VWAPSnapshot,
+        VolumeProfileSnapshot,
+        read_market,
+    )
+
+    h = get_hub()
+    symbols = getattr(h, "symbols", None) or {}
+    feats = symbols.get(symbol) if hasattr(symbols, "get") else None
+    if feats is None:
+        return {"ok": False, "symbol": symbol,
+                "error": ("no live readings for this instrument — the market read is a function of "
+                          "the running engine's tape, profile, radar and book state")}
+
+    try:
+        now_ms = int(time.time() * 1000)
+        tape = feats.tape.stats()
+        profile = feats.profile.snapshot()
+        radar = feats.radar.summary()
+        depth = feats.heatmap.stats()
+        vwap = feats.vwap.snapshot()
+        spot = float(getattr(feats, "last_price", 0.0) or 0.0)
+
+        delta = float(tape.get("delta") or 0.0)
+        walls = feats.heatmap.wall_prices(top=20)
+        walls_above = sum(1 for w in walls if float(w.get("price") or 0.0) > spot)
+        walls_below = sum(1 for w in walls if float(w.get("price") or 0.0) < spot and spot > 0)
+        events = depth.get("events") or {}
+
+        vwap_price = float(vwap.get("vwap") or 0.0)
+        ticks_from = vwap.get("ticks_from_vwap")
+        state = MarketState(
+            symbol=symbol, spot=spot,
+            tape=TapeSnapshot(
+                direction=("up" if delta > 0 else ("down" if delta < 0 else "neutral")),
+                delta=delta, volume=float(tape.get("volume") or 0.0),
+                big_prints=int(tape.get("big_trades") or 0), sweeps=int(tape.get("sweeps") or 0),
+                timestamp_ms=now_ms),
+            # The footprint family has no hub analyzer yet: the read reports it unmeasured in
+            # `inputs` and the absorption/imbalance signals stay at their zero input.
+            heatmap=HeatmapSnapshot(
+                walls_above=walls_above, walls_below=walls_below,
+                # The map's own events: a "stack" is liquidity added at a level, a "pull" is
+                # liquidity withdrawn near price — the two words the map already uses.
+                wall_refills=int(events.get("stack") or 0), wall_pulls=int(events.get("pull") or 0)),
+            radar=RadarSnapshot(
+                armed_levels=int(radar.get("armed") or 0),
+                approaching_levels=int(radar.get("approaching") or 0),
+                held_levels=int(radar.get("defended") or 0) + int(radar.get("confirmed") or 0),
+                spent_levels=int(radar.get("spent") or 0) + int(radar.get("failed") or 0),
+                levels=_radar_rows(feats)),
+            profile=VolumeProfileSnapshot(
+                poc=_num_or_none(profile.get("poc")), vah=_num_or_none(profile.get("vah")),
+                val=_num_or_none(profile.get("val"))),
+            vwap=VWAPSnapshot(price=vwap_price or None,
+                              deviation_ticks=_num_or_none(ticks_from)),
+            timestamp_ms=now_ms,
+        )
+        read = read_market(state)
+    except Exception as exc:                # noqa: BLE001 - a read failure is a sentence, not a 500
+        logger.exception("market read failed for %s", symbol)
+        return {"ok": False, "symbol": symbol,
+                "error": f"the market read failed: {type(exc).__name__}: {exc}"}
+
+    return {
+        "ok": True, "symbol": symbol, "spot": spot, "at": now_ms,
+        "regime": {"name": read.regime.name, "description": read.regime.description,
+                   "buyer_led": read.regime.buyer_led, "seller_led": read.regime.seller_led,
+                   "absorbing": read.regime.absorbing, "absorbing_side": read.regime.absorbing_side},
+        "conviction": read.composite_score, "scores": read.score_breakdown,
+        "levels": [{"price": lv.price, "kind": lv.kind, "source": lv.source,
+                    "strength": lv.strength, "notes": lv.notes} for lv in read.key_levels[:40]],
+        "n_levels": read.n_levels,
+        "confluence": [{"price": c.price, "signals": list(c.signals), "strength": c.strength}
+                       for c in read.confluence_points[:20]],
+        "n_confluence": read.n_confluence,
+        "summary": read.summary,
+        "inputs": {
+            "tape": {"measured": bool(tape.get("prints")), "prints": int(tape.get("prints") or 0),
+                     "sweeps": int(tape.get("sweeps") or 0), "delta": delta},
+            "profile": {"measured": profile.get("poc") is not None, "poc": profile.get("poc")},
+            "radar": {"measured": bool(radar.get("live")), "live": int(radar.get("live") or 0)},
+            "heatmap": {"measured": bool(depth.get("walls")), "walls": int(depth.get("walls") or 0)},
+            "vwap": {"measured": bool(vwap_price), "vwap": vwap_price or None},
+            "footprint": {"measured": False,
+                          "note": ("footprint imbalances are not fed to the read yet — the "
+                                   "absorption and imbalance signals read their zero input")},
+        },
+        "note": ("a pure function of the engine's live state (atlas/market_read.py), pinned by "
+                 "test_market_read.py; nothing here is a forecast"),
+    }
+
+
+def _num_or_none(value: Any) -> Optional[float]:
+    """A finite float or None — the read's dataclasses take None, never a NaN."""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    return num if num == num and abs(num) != float("inf") else None

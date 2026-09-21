@@ -17,8 +17,12 @@ What it detects
 ---------------
 * ``wall``      — level holding a top-N share of resting liquidity
 * ``pull``      — size at a level dropped ≥ pull_pct within pull_window_ms while
-                  price was within pull_near_ticks of it (spoofing candidate)
-* ``stack``     — size grew ≥ stack_pct without trades explaining it
+                  price was within pull_near_ticks of it (spoofing candidate), and
+                  larger than the size traded at that price since the previous
+                  snapshot: the pull reported is the part the tape does not explain
+* ``stack``     — size grew ≥ stack_pct within one snapshot (the growth test
+                  alone — the traded accounting below belongs to the pull path,
+                  not to this flag)
 * ``iceberg``   — executed volume at a price ≫ displayed size at that price while
                   the level keeps being replenished (MBO inference, see
                   ``atlas/tapeflow.py`` for the print-side half)
@@ -30,6 +34,7 @@ tick size so the heatmap aligns exactly with the footprint chart.
 from __future__ import annotations
 
 import math
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
@@ -126,6 +131,13 @@ class DepthHeatmap:
         self._prev: dict[float, HeatLevel] = {}
         self._events: deque[LevelEvent] = deque(maxlen=400)
         self._walls: dict[float, float] = {}          # price -> last seen size
+        #: §148 / T7-F2: traded size per price since the last snapshot — the fact that tells a pull
+        #: from consumption. The heatmap's pull card promises "size that vanished from a level
+        #: without being traded", and before this the detector never checked: a level drained by
+        #: prints counted as a pull like any other. `_traded_total` only ever rises (it is the
+        #: account of prints at that price); `_traded_seen` is its watermark at the last snapshot.
+        self._traded_total: dict[float, float] = {}
+        self._traded_seen: dict[float, float] = {}
         self._wall_seen: dict[float, int] = {}        # price -> ts_ms of that sighting
         self._wall_first: dict[float, int] = {}       # price -> ts_ms the current streak began
         self._wall_age_fired: dict[float, int] = {}   # price -> ts_ms wall_age last fired
@@ -139,6 +151,9 @@ class DepthHeatmap:
         self._version = 0
         self._snapshot_cache: Optional[tuple[tuple[int, int, int], dict[str, Any]]] = None
         self.snapshot_builds = 0
+        # §122: the colour ceiling's leash — see _stabilise_scale.
+        self._scale_hold = 0.0
+        self._scale_hold_ts = 0
 
     # ── ingest ────────────────────────────────────────────────
     def on_orderbook(self, snapshot: OrderbookSnapshot, ts_ms: Optional[int] = None) -> list[LevelEvent]:
@@ -209,7 +224,26 @@ class DepthHeatmap:
             if old_total > 0 and new_total <= old_total * (1 - self.pull_pct) and old_total >= threshold:
                 near = self._price_is_near(price)
                 if near:
-                    recorded.append(self._record("pull", price, ts, old_total, f"-{old_total - new_total:.2f} pulled near price", "bid" if old.bid >= old.ask else "ask"))
+                    # §148 / T7-F2: prints at this price since the previous snapshot are the trade
+                    # that ate the level, not liquidity being pulled. What is reported is the part
+                    # of the drop the tape does not explain, and only when that part is itself a
+                    # pull-sized move — a level drained by its own prints is consumption, and the
+                    # card's promise ("without being traded") is kept by saying nothing.
+                    dropped = old_total - new_total
+                    traded = max(0.0, self._traded_total.get(price, 0.0)
+                                 - self._traded_seen.get(price, 0.0))
+                    consumed = min(dropped, traded)
+                    pulled = dropped - consumed
+                    if pulled >= old_total * self.pull_pct:
+                        detail = f"-{pulled:.2f} pulled near price"
+                        if round(consumed, 2) > 0:     # a sub-cent traded part is not worth naming
+                            detail += f" ({consumed:.2f} of the drop traded)"
+                        recorded.append(self._record("pull", price, ts, old_total, detail,
+                                                     "bid" if old.bid >= old.ask else "ask"))
+
+        # the watermark for the next comparison: what has traded at each level up to this snapshot
+        for price in levels:
+            self._traded_seen[price] = self._traded_total.get(price, 0.0)
 
         self._prev = levels
         col.levels.update(levels)
@@ -223,9 +257,13 @@ class DepthHeatmap:
         col.traded[price] = col.traded.get(price, 0.0) + tick.size
         col.trades += 1
         self._last_tick_price = tick.price
+        # §148 / T7-F2: the same print, in the running account of what traded where — the pull
+        # detector subtracts it from a level's drop so prints are never reported as pulls.
+        self._traded_total[price] = self._traded_total.get(price, 0.0) + float(tick.size)
 
     # ── queries ───────────────────────────────────────────────
-    def snapshot(self, columns: int = 300, max_rows: int = 260) -> dict[str, Any]:
+    def snapshot(self, columns: int = 300, max_rows: int = 260,
+                 until_ms: Optional[int] = None) -> dict[str, Any]:
         """Return a render-ready matrix: prices on Y, time buckets on X.
 
         Rows are aggregated to a display step that fits the requested row count
@@ -243,25 +281,40 @@ class DepthHeatmap:
         # flipping carry-forward (or the cutoff) has to take effect immediately, and
         # with a data-only key it would wait for the next ingest to be noticed.
         key = (self._version, int(columns), int(max_rows), bool(self.carry_forward),
-               float(self.upper_cutoff_pct), float(self.upper_cutoff_abs))
+               float(self.upper_cutoff_pct), float(self.upper_cutoff_abs), int(until_ms or 0))
         cached = self._snapshot_cache
         if cached is not None and cached[0] == key:
             out = dict(cached[1])
             out["cached"] = True
             return out
         self.snapshot_builds += 1
-        payload = self._build_snapshot(int(columns), int(max_rows))
+        payload = self._build_snapshot(int(columns), int(max_rows), until_ms)
         self._snapshot_cache = (key, payload)
         out = dict(payload)
         out["cached"] = False
         return out
 
-    def _build_snapshot(self, columns: int, max_rows: int) -> dict[str, Any]:
-        cols = list(self._columns)[-columns:]
+    def _build_snapshot(self, columns: int, max_rows: int,
+                        until_ms: Optional[int] = None) -> dict[str, Any]:
+        # §121: the time anchor. Without it a snapshot could only ever end at the live edge —
+        # pan and zoom-at-cursor were impossible by construction. The slice keeps `columns`
+        # buckets but ENDS at `until_ms`, so the window's width survives the anchor.
+        all_cols = list(self._columns)
+        if until_ms:
+            all_cols = [c for c in all_cols if c.ts_ms <= int(until_ms)]
+        cols = all_cols[-columns:]
+        have_from = self._columns[0].ts_ms if self._columns else 0
+        have_to = self._columns[-1].ts_ms if self._columns else 0
         if not cols:
-            return {"symbol": self.symbol, "tick": self.tick_size, "step": self.tick_size,
-                    "buckets": [], "prices": [], "values": [], "traded": [], "events": [],
-                    "version": self._version, "stats": self.stats()}
+            out = {"symbol": self.symbol, "tick": self.tick_size, "step": self.tick_size,
+                   "buckets": [], "prices": [], "values": [], "traded": [], "events": [],
+                   "version": self._version, "stats": self.stats(),
+                   "bucket_ms": self.bucket_ms, "have_from_ms": have_from, "have_to_ms": have_to,
+                   "until_ms": int(until_ms or 0)}
+            if until_ms:
+                span_min = max(0.0, (have_to - have_from) / 60000.0)
+                out["note"] = ("no depth history at this time — the buffer holds %.0f min" % span_min)
+            return out
 
         price_min, price_max = self._visible_range(cols)
         span = max(price_max - price_min, self.tick_size)
@@ -312,27 +365,41 @@ class DepthHeatmap:
                         carried += 1
 
         flat = sorted(v for row in values for v in row if v > 0)
+        stat_cut = 0.0
+        pinned = float(self.upper_cutoff_abs) > 0
         if flat:
             cut = max(0.0, min(50.0, float(self.upper_cutoff_pct)))
             idx = min(len(flat) - 1, int(round((1.0 - cut / 100.0) * (len(flat) - 1))))
-            scale_max = flat[idx]
+            stat_cut = flat[idx]
             # B2: a pinned absolute ceiling wins over the percentile one; the flat[0] guard still
             # applies, so a pin below the smallest size saturates everything rather than zeroing.
-            if float(self.upper_cutoff_abs) > 0:
-                scale_max = float(self.upper_cutoff_abs)
-            scale_max = max(scale_max, flat[0])
+            if pinned:
+                stat_cut = float(self.upper_cutoff_abs)
+            stat_cut = max(stat_cut, flat[0])
+        # §122: the ceiling must not re-grade itself under the user's eyes. Measured before this:
+        # "top share of the visible window" climbed x1.84 in four minutes as the window filled, so
+        # every cell slid from bright to dull (the owner's report: "initially bright then dulls").
+        # The percentile stays the TARGET; the APPLIED ceiling is leashed — except an explicit pin,
+        # which is the user's own number and applies at once.
+        if pinned and flat:
+            scale_max = stat_cut
         else:
-            scale_max = 0.0
+            scale_max = self._stabilise_scale(stat_cut, int(time.time() * 1000))
 
         return {
             "symbol": self.symbol,
             "tick": self.tick_size,
             "step": step,
             "version": self._version,
+            "bucket_ms": self.bucket_ms,
+            "have_from_ms": have_from,
+            "have_to_ms": have_to,
+            "until_ms": int(until_ms or 0),
             "upper_cutoff_pct": self.upper_cutoff_pct,
             "carry_forward": bool(self.carry_forward),
             "carried_cells": carried,
             "scale_max": round(scale_max, 6),
+            "scale_target": round(stat_cut, 6),   # §122: the raw percentile (diagnostics)
             "buckets": [c.ts_ms for c in cols],
             "prices": prices,
             "values": values,
@@ -387,6 +454,8 @@ class DepthHeatmap:
 
     def clear(self) -> None:
         self._columns.clear()
+        self._scale_hold = 0.0        # §122: a fresh buffer is a fresh regime
+        self._scale_hold_ts = 0
         self._prev.clear()
         self._events.clear()
         self._walls.clear()
@@ -413,6 +482,38 @@ class DepthHeatmap:
         if self._first_ts is None:
             self._first_ts = bucket
         return self._columns[-1]
+
+    #: §122: the ceiling's leash — move a share of the gap, never faster than a share per minute.
+    SCALE_GAP = 0.25                       # toward the fresh percentile per build
+    SCALE_PER_S = 0.05 / 60.0              # …capped at 5% of itself per minute of wall time
+
+    def _stabilise_scale(self, target: float, now_ms: int) -> float:
+        """Leash the colour ceiling so the map cannot re-grade itself in seconds.
+
+        The ceiling is "the top share of the visible window", and while a window fills that
+        statistic drifts hard (x1.84 in four measured minutes) — the same cells render bright at
+        minute one and dull at minute four. Here the statistic is only the TARGET: the applied
+        value walks toward it by SCALE_GAP of the gap, capped at SCALE_PER_S of itself per second
+        of wall time (a heap-light, like a level meter). A cleared store forgets the hold.
+        """
+        if target <= 0:
+            return 0.0
+        prev = self._scale_hold
+        if prev <= 0:
+            self._scale_hold = target
+            self._scale_hold_ts = now_ms
+            return target
+        dt = max(0, now_ms - self._scale_hold_ts)
+        cap = prev * self.SCALE_PER_S * (dt / 1000.0)
+        step = (target - prev) * self.SCALE_GAP
+        if step > cap:
+            step = cap
+        elif step < -cap:
+            step = -cap
+        out = max(0.0, prev + step)
+        self._scale_hold = out
+        self._scale_hold_ts = now_ms
+        return out
 
     def _wall_threshold(self, levels: dict[float, HeatLevel]) -> float:
         sizes = sorted((lv.total for lv in levels.values()), reverse=True)

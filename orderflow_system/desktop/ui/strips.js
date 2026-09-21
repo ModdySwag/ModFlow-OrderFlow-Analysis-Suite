@@ -379,8 +379,10 @@
         sweep();                                   // C-03
         const view = document.querySelector('.view.active');
         if (view !== scannedFor) { scannedFor = view; scannedRoots.clear(); }
+        /* §148 T5-F-17: this read the stale id `logBody` — the logs view's scroller is `logList`
+           (the widened id scan is what surfaced it). */
         const roots = [view, document.getElementById('tapeContainer'),
-                       document.getElementById('alertTable'), document.getElementById('logBody')];
+                       document.getElementById('alertTable'), document.getElementById('logList')];
         const seen = new Set();
         roots.forEach((root) => {
             if (!root || seen.has(root)) return;

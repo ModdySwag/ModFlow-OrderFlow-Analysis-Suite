@@ -462,6 +462,34 @@ def test_heatmap_upper_cutoff_reports_scale_max():
     assert snap["scale_max"] < 20.0
 
 
+def test_a_heat_pull_reports_only_what_the_tape_does_not_explain():
+    """§148 / T7-F2: the pull card promises "without being traded" — the detector now keeps it.
+
+    Measured before the fix: a level drained by its own prints recorded the same `pull` event as a
+    level withdrawn by hand, so the pull count (and the alert the event feeds) counted consumption
+    as pulling. Prints at that price are now subtracted from the drop: a drop the tape explains
+    says nothing at all, and a partly-traded drop is reported as its unexplained part, with the
+    traded share named in the note.
+    """
+    def pulls(*, traded: float):
+        hm = DepthHeatmap("T", tick_size=1.0, bucket_ms=1000, pull_pct=0.5, pull_near_ticks=50.0,
+                          wall_quantile=0.0)
+        hm.on_orderbook(book(T0, [(100.0, 1.0), (99.0, 1.0), (98.0, 30.0)],
+                             [(101.0, 1.0), (102.0, 1.0)]))
+        hm.on_tick(tick(T0 + 100, 100.0, 0.1, "sell"))         # price arrives near the level
+        for i in range(int(traded / 6.0)):
+            hm.on_tick(tick(T0 + 200 + i * 10, 98.0, 6.0, "sell"))      # prints at that level
+        out = hm.on_orderbook(book(T0 + 500, [(100.0, 1.0), (99.0, 1.0), (98.0, 1.0)],
+                                   [(101.0, 1.0), (102.0, 1.0)]))
+        return [e for e in out if e.kind == "pull"]
+
+    quiet = pulls(traded=0.0)          # 29 contracts leave and nothing traded: a pull, as promised
+    assert quiet and quiet[0].detail == "-29.00 pulled near price"
+    assert not pulls(traded=30.0), "size that traded is not a pull"
+    mixed = pulls(traded=12.0)         # 12 of the 29 traded: the pull is the 17 the tape can't explain
+    assert mixed and mixed[0].detail == "-17.00 pulled near price (12.00 of the drop traded)"
+
+
 def _book(ts_ms: int, levels_bid, levels_ask=None):
     """Small helper: build an OrderbookSnapshot from (price, size) pairs."""
     from orderflow_system.data.models import OrderbookLevel, OrderbookSnapshot

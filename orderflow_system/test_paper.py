@@ -451,8 +451,88 @@ def test_a_closed_trade_is_a_journal_row():
         "take_profit": 5004.0,
         "pnl_ticks": 32.0,
         "rr_ratio": 2.0,
+        "mae_ticks": 0.0,          # the entry print opened the path; nothing went against it
+        "mfe_ticks": 16.0,         # 5000 -> 5004 is the whole favourable excursion of that trade
     }
     json.dumps(row)                                                   # journal-ready as it stands
+
+
+def test_the_row_keeps_the_risk_the_trade_was_taken_with():
+    """§148: the row carried the stop AT CLOSE — a break-even move inflated R or ate it entirely.
+
+    Measured before the fix: `_apply` wrote `self._stop_loss` as the leg closed, and break-even /
+    the trail move that very attribute — a winner whose stop had been pulled to entry recorded
+    stop_loss == entry, so the journal's prices path divided by ~0 (the 20x inflation) or found no
+    risk at all and the panel reported "no trade records a stop". The row now carries the stop the
+    position was OPENED with, which is the basis R is measured against.
+    """
+    journal = pytest.importorskip("orderflow_system.desktop.journal")
+    account = make()
+    # a bracket with a break-even step 6 ticks in: stop 8 ticks away, target 20 ticks away
+    fill(account, "buy", 1, 5000.0, ts_ms=1_000,
+         template={"size": 1.0, "stop_ticks": 8, "target_ticks": 20, "breakeven_ticks": 6})
+    assert account.position()["side"] == "long"
+
+    account.on_trade(5001.75, 0.5, "sell", ts_ms=1_500)               # 7 ticks up: break-even arms
+    assert account._stop_loss == 5000.0 and account._stop_loss != 4998.0
+
+    account.on_trade(5005.0, 1.0, "sell", ts_ms=2_000)                # 20 ticks up: the target goes
+    row = account.closed_trades()[0]
+    assert row["stop_loss"] == 4998.0, "the row must carry the entry-time stop, not the moved one"
+    assert row["exit_price"] == 5005.0
+    assert journal.r_of(row) == {"r": 2.5, "source": "prices"}        # 5.00 won / 2.00 risked
+
+
+def test_a_shorts_excursions_are_not_mirrored():
+    """§148: excursions are direction-aware — for a short the adverse side is the HIGHER price.
+
+    Measured before the fix (in a live replay session and in the probe): a short that walked 100
+    ticks in favour recorded mfe_ticks 0.0 and mae_ticks 0.0 — the note kept long-perspective
+    worst/best and the ticks helper then applied the direction again, so both sides clamped to
+    zero. A short's numbers are not a mirror of a long's; they are its own.
+    """
+    account = make()
+    fill(account, "sell", 1, 5000.0, ts_ms=1_000, stop_loss=5010.0)
+    account.on_trade(5001.5, 1, "buy", ts_ms=1_500)                   # 6 ticks against the short
+    account.on_trade(4998.0, 1, "buy", ts_ms=1_800)                   # 8 ticks with it
+
+    account.flatten(4999.0, ts_ms=2_000)
+    row = account.closed_trades()[0]
+    assert row["direction"] == "short"
+    assert (row["mae_ticks"], row["mfe_ticks"]) == (6.0, 8.0)
+
+
+def test_the_row_records_the_excursions_the_position_actually_took():
+    """§148, the MAE/MFE writers: the analytics read these keys and nothing in the app wrote them.
+
+    The path: entry 5000, a dip to 4997 (12 ticks against), a run to 5002 (8 with it), exit at
+    5001. The row must say 12 and 8 — the exits' own move (4 ticks), not the excursion.
+    """
+    account = make()
+    fill(account, "buy", 1, 5000.0, ts_ms=1_000, stop_loss=4990.0)
+    account.on_trade(4997.0, 1.0, "buy", ts_ms=1_500)                  # 12 ticks adverse
+    account.on_trade(5002.0, 1.0, "buy", ts_ms=1_800)                  # 8 ticks favourable
+
+    account.flatten(5001.0, ts_ms=2_000)
+    row = account.closed_trades()[0]
+    assert (row["mae_ticks"], row["mfe_ticks"]) == (12.0, 8.0)
+    assert row["pnl_ticks"] == 4.0
+
+
+def test_the_excursions_reach_the_journals_own_mae_mfe():
+    """The other half of the write: a session's rows answer the journal's excursion analytics."""
+    journal = pytest.importorskip("orderflow_system.desktop.journal")
+    account = make()
+    fill(account, "buy", 1, 5000.0, ts_ms=1_000, stop_loss=4990.0)
+    account.on_trade(4997.0, 1.0, "buy", ts_ms=1_500)
+    account.on_trade(5002.0, 1.0, "buy", ts_ms=1_800)
+    account.flatten(5001.0, ts_ms=2_000)
+
+    traded = journal.normalise_trades(account.closed_trades())
+    block = journal.stats(traded)["mae_mfe"]
+    assert block["count"] == 1 and block["mae_count"] == 1 and block["mfe_count"] == 1
+    assert block["avg_mae"] == 12.0 and block["best_mfe"] == 8.0
+    assert block["capture"] == 0.5                   # 4 ticks kept of the 8 the winner offered
 
 
 def test_a_position_without_exits_journals_zero_levels():
@@ -560,3 +640,333 @@ def test_from_dict_is_tolerant_of_junk():
     assert account.tick_size == 0.01 and account.open_orders() == []
     assert account.position()["side"] == "flat"
     assert PaperAccount.from_dict({}).to_dict() == PaperAccount(starting_balance=0.0).to_dict()
+
+
+# ══════════════════════════════════════════════════════════════
+# The plan: a template's bracket, armed by the fill (§V1, atm.py)
+# ══════════════════════════════════════════════════════════════
+
+def test_a_template_rides_an_entry_and_becomes_the_bracket_at_the_fill():
+    account = make()
+    order = account.submit("buy", 2, template="runner", ts_ms=1_000)
+    assert order["status"] == "working" and order["plan_template"]["id"] == "runner"
+    # nothing is on the position yet: the levels are only true once a price has traded
+    assert account.plan() is None and account.exits() == {"stop_loss": None, "take_profit": None}
+
+    fills = account.on_trade(5000.0, 3, "sell", 2_000)
+    assert [f["reason"] for f in fills] == ["market"]
+    assert order["plan"] == "oc1"
+    plan = account.plan()
+    assert plan["status"] == "live" and plan["group"] == "oc1" and plan["entry"] == 5000.0
+    assert (plan["stop_loss"], plan["take_profit"]) == (4998.0, 5008.0)
+    assert plan["partial"] == {"size": 1.0, "ticks": 8, "price": 5002.0, "pct": 50}
+    assert plan["text"].startswith("Runner — 2 contracts, stop 8t, target 32t")
+    assert account.exits() == {"stop_loss": 4998.0, "take_profit": 5008.0}
+    # the partial is a real resting order, so the tape decides when it is taken
+    resting = account.open_orders()
+    assert [(o["id"], o["side"], o["kind"], o["price"], o["plan_leg"], o["group"]) for o in resting] == \
+        [("o2", "sell", "limit", 5002.0, "partial", "oc1")]
+    assert account.on_trade(5001.5, 1, "buy", 2_500) == []
+    assert [f["reason"] for f in account.on_trade(5002.0, 5, "buy", 3_000)] == ["limit"]
+    assert account.position()["size"] == 1.0
+    assert account.plan()["partial_done"] is True
+    assert account.closed_trades()[0]["pnl_ticks"] == 8.0
+    assert account.plan()["breakeven_done"] is True                # the same print reached 8 ticks
+
+
+def test_break_even_arms_under_the_tape_and_the_stop_is_what_fires():
+    account = make()
+    account.submit("buy", 2, template="intraday", ts_ms=1_000)     # break-even at 6 ticks, no trail
+    account.on_trade(5000.0, 2, "sell", 2_000)
+    assert account.exits()["stop_loss"] == 4998.0
+    assert account.on_trade(5001.0, 1, "buy", 2_500) == []          # 4 ticks: not there yet
+    assert account.exits()["stop_loss"] == 4998.0
+    assert account.on_trade(5001.5, 1, "buy", 2_600) == []          # 6 ticks: the stop arms at entry
+    assert account.exits()["stop_loss"] == 5000.0 and account.plan()["breakeven_done"] is True
+
+    fills = account.on_trade(5000.0, 1, "sell", 2_700)              # straight back to entry
+    assert [(f["reason"], f["price"]) for f in fills] == [("stop_loss", 5000.0)]
+    assert account.closed_trades()[0]["pnl_ticks"] == 0.0           # the free roll, exactly
+    assert (account.plan()["status"], account.plan()["outcome"]) == ("done", "stop_loss")
+    assert account.open_orders() == []                              # and its sibling went with it
+
+
+def test_a_trailing_stop_follows_the_best_price_the_position_saw():
+    # A trail with no partial in the way, so each print is only about the stop.
+    account = make()
+    trail = {"id": "trail", "name": "Trail", "size": 2, "stop_ticks": 8, "target_ticks": 32,
+             "trail_ticks": 10, "trail_step_ticks": 2}
+    account.submit("buy", 2, template=trail, ts_ms=1_000)
+    account.on_trade(5000.0, 2, "sell", 2_000)
+    assert account.on_trade(5004.0, 1, "buy", 2_500) == []           # 16 ticks: trail to 5001.5
+    assert account.exits()["stop_loss"] == 5001.5
+    assert account.plan()["trail_stop"] == 5001.5 and account.plan()["peak"] == 5004.0
+    assert account.on_trade(5004.5, 1, "buy", 2_600) == []           # a 2-tick step pulls it up again
+    assert account.exits()["stop_loss"] == 5002.0
+    fills = account.on_trade(5002.0, 1, "sell", 2_700)               # the trail is the exit
+    assert [(f["reason"], f["price"]) for f in fills] == [("stop_loss", 5002.0)]
+    assert account.closed_trades()[0]["pnl_ticks"] == 16.0           # 8 ticks × 2
+
+
+def test_the_time_stop_closes_the_position_at_the_print_its_clock_runs_out_on():
+    account = make()
+    clock = {"id": "clock", "name": "Clock", "size": 1, "stop_ticks": 8, "target_ticks": 8,
+             "time_stop_min": 5}
+    account.submit("sell", 1, template=clock, ts_ms=1_000_000)
+    account.on_trade(5000.0, 1, "buy", 1_000_000)
+    assert account.plan()["time_stop_at_ms"] == 1_000_000 + 5 * 60_000
+    assert account.on_trade(4999.0, 1, "sell", 1_000_000 + 4 * 60_000) == []
+    fills = account.on_trade(4998.5, 1, "sell", 1_000_000 + 5 * 60_000)
+    assert [(f["reason"], f["price"], f["kind"]) for f in fills] == [("time_stop", 4998.5, "time_stop")]
+    assert account.position()["side"] == "flat" and account.exits() == {"stop_loss": None, "take_profit": None}
+    assert (account.plan()["status"], account.plan()["outcome"]) == ("done", "time_stop")
+    assert account.plan()["closed_ms"] == 1_300_000
+    assert account.closed_trades()[0]["pnl_ticks"] == 6.0            # 1.5 of price on a 0.25 tick
+
+
+def test_a_plans_legs_are_one_oco_group_and_the_siblings_go_when_one_fires():
+    account = make()
+    account.submit("buy", 2, template="intraday", ts_ms=1_000)
+    account.on_trade(5000.0, 2, "sell", 2_000)
+    partial_id = account.open_orders()[0]["id"]
+    assert account.plan()["group"] == "oc1"
+
+    fills = account.on_trade(4997.0, 3, "sell", 3_000)               # the stop, before the partial
+    assert [(f["reason"], f["price"]) for f in fills] == [("stop_loss", 4998.0)]
+    assert account.open_orders() == []                               # the sibling went with it
+    plan = account.plan()
+    assert plan["cancelled"] == [partial_id] and plan["outcome"] == "stop_loss"
+    assert account.exits() == {"stop_loss": None, "take_profit": None}
+
+    # the other way round: the partial fills first, so the position is still open and the stop and
+    # the target still stand — a scale-out is not an exit
+    other = make()
+    other.submit("sell", 2, template="intraday", ts_ms=1_000)
+    other.on_trade(5000.0, 2, "buy", 2_000)
+    assert [f["reason"] for f in other.on_trade(4998.0, 5, "sell", 3_000)] == ["limit"]
+    assert other.position()["size"] == 1.0
+    assert other.exits() == {"stop_loss": 5000.0, "take_profit": 4995.0}   # the stop moved to entry
+    assert other.plan()["partial_done"] is True and other.open_orders() == []
+
+
+def test_flatten_settles_the_plan_and_takes_its_legs_with_it():
+    account = make()
+    account.submit("buy", 2, template="intraday", ts_ms=1_000)
+    account.on_trade(5000.0, 2, "sell", 2_000)
+    partial_id = account.open_orders()[0]["id"]
+    assert [f["reason"] for f in account.flatten(5001.0, 3_000)] == ["flatten"]
+    assert account.open_orders() == []
+    plan = account.plan()
+    assert (plan["status"], plan["outcome"]) == ("done", "flatten")
+    assert plan["cancelled"] == [partial_id]
+
+
+def test_editing_the_exits_by_hand_releases_the_plan_from_managing_them():
+    account = make()
+    account.submit("buy", 2, template="intraday", ts_ms=1_000)
+    account.on_trade(5000.0, 2, "sell", 2_000)
+    released = account.set_exits(stop_loss=4990.0, take_profit=5050.0, ts_ms=2_100)
+    assert released["ok"] is True and released["plan_released"] is True
+    plan = account.plan()
+    assert plan["managed"] is False
+    assert (plan["stop_loss"], plan["take_profit"]) == (4990.0, 5050.0)
+    # a print that would have armed the break-even move leaves a typed stop alone
+    assert account.on_trade(5001.5, 1, "buy", 2_200) == []
+    assert account.exits() == {"stop_loss": 4990.0, "take_profit": 5050.0}
+    assert account.plan()["breakeven_done"] is False
+    # and the typed stop is the one the tape fires
+    assert account.on_trade(4990.0, 1, "sell", 2_300)[0]["reason"] == "stop_loss"
+    assert account.plan()["outcome"] == "stop_loss"
+    # a bracket with no plan behind it says so rather than claiming a release
+    plain = make()
+    fill(plain, "buy", 1, 5000.0, ts_ms=1_000)
+    assert plain.set_exits(stop_loss=4999.0)["plan_released"] is False
+
+
+def test_set_plan_attaches_a_bracket_to_a_position_that_is_already_open():
+    account = make()
+    refused = account.set_plan("intraday")
+    assert refused["ok"] is False and "no open position" in refused["reason"]
+
+    fill(account, "buy", 2, 5000.0, ts_ms=1_000)
+    assert account.exits() == {"stop_loss": None, "take_profit": None}
+    attached = account.set_plan("intraday", ts_ms=1_100)
+    assert attached["ok"] is True and attached["changed"] is True
+    assert attached["text"].startswith("Intraday — 2 contracts")
+    assert (attached["stop_loss"], attached["take_profit"]) == (4998.0, 5005.0)
+    assert account.exits() == {"stop_loss": 4998.0, "take_profit": 5005.0}
+    assert account.plan()["group"] == "oc1"
+    older = account.open_orders()[0]
+    assert older["plan_leg"] == "partial" and older["group"] == "oc1"
+
+    # a plan replaces a plan, and the old one's resting leg goes with it
+    replaced = account.set_plan({"id": "tight", "name": "Tight", "size": 2, "stop_ticks": 4,
+                                 "target_ticks": 8}, price=5000.0, ts_ms=1_200)
+    assert replaced["ok"] is True and account.plan()["group"] == "oc2"
+    assert account.exits() == {"stop_loss": 4999.0, "take_profit": 5002.0}
+    assert account.open_orders() == []                    # the tight template takes no partial
+
+    junk = account.set_plan("moon")
+    assert junk["ok"] is False and "not a template this build ships" in junk["reason"]
+    empty = account.set_plan({"id": "x", "name": "x"})
+    assert empty["ok"] is False and "no plan in it" in empty["reason"]
+    assert account.plan()["group"] == "oc2"               # a refusal never disturbs the live plan
+
+
+def test_submit_refuses_a_plan_mixed_with_a_typed_stop_or_a_template_it_does_not_know():
+    account = make()
+    mixed = account.submit("buy", 1, template="scalp", stop_loss=4999.0, ts_ms=1)
+    assert mixed["status"] == "rejected" and mixed["reason"] == (
+        "a plan and a typed stop or target are two exits for one position — send one or the other")
+    unknown = account.submit("buy", 1, template="moon", ts_ms=2)
+    assert unknown["status"] == "rejected" and unknown["reason"] == (
+        "'moon' is not a template this build ships — pick one from the ladder")
+    empty = account.submit("buy", 1, template={"id": "x", "name": "x"}, ts_ms=3)
+    assert empty["status"] == "rejected" and "no plan in it" in empty["reason"]
+    assert "plan_template" not in empty
+
+    assert account.open_orders() == [] and account.stats()["orders_rejected"] == 3
+    # ...and a template is optional: the same order without one leaves the book as usual
+    assert account.submit("buy", 1, template=None, ts_ms=4)["status"] == "working"
+    assert account.submit("buy", 1, template={}, ts_ms=5)["status"] == "working"
+    assert account.submit("buy", 1, template="", ts_ms=6)["status"] == "working"
+
+
+def test_a_partial_the_tape_has_already_passed_is_dropped_with_its_reason():
+    account = make()
+    fill(account, "buy", 2, 5000.0, ts_ms=1_000)
+    account.on_trade(5010.0, 1, "buy", 1_500)             # well past the 1R level
+    attached = account.set_plan("intraday", ts_ms=1_600)
+    assert attached["ok"] is True                          # the bracket still stands
+    plan = account.plan()
+    assert plan["partial"] is None and plan["partial_done"] is False
+    assert "would fill the moment it is placed" in plan["partial_note"]
+    assert account.open_orders() == []
+    assert account.exits() == {"stop_loss": 4998.0, "take_profit": 5005.0}
+
+
+def test_cancelling_the_plans_partial_drops_it_from_the_plan():
+    """§148 T1-D5: the plan kept describing the scale-out it had resting, so the ladder went on
+    saying "half resting" over a book with nothing on it. A cancel that is not the plan's leg leaves
+    the plan alone, and the plan says what happened in ``partial_note``."""
+    account = make()
+    account.submit("buy", 2, template="runner", ts_ms=1_000)
+    account.on_trade(5000.0, 2, "sell", 2_000)
+    partial = [o for o in account.open_orders() if o.get("plan_leg") == "partial"][0]
+    assert account.plan()["partial"]["size"] == 1.0
+
+    assert account.cancel(partial["id"]) is True
+    assert account.open_orders() == []
+    plan = account.plan()
+    assert plan["partial"] is None and plan["partial_done"] is False
+    assert "cancelled" in plan["partial_note"]
+
+    other = make()
+    other.submit("buy", 2, template="runner", ts_ms=1_000)
+    other.on_trade(5000.0, 2, "sell", 2_000)
+    resting = other.submit("sell", 1, kind="limit", price=5010.0, ts_ms=2_100)
+    assert other.cancel(resting["id"]) is True
+    assert other.plan()["partial"] is not None and "partial_note" not in other.plan()
+
+
+def test_a_nudged_stop_does_not_cancel_the_plans_clock():
+    """§148 T1-D7: editing the exits by hand releases the levels — the break-even move and the trail
+    — but the clock is a rule, not a level. The whole plan step used to be skipped from that moment,
+    so a nudge to the stop silently cancelled the plan's own time exit."""
+    account = make()
+    clock = {"id": "clock", "name": "Clock", "size": 1, "stop_ticks": 8, "target_ticks": 8,
+             "time_stop_min": 5}
+    account.submit("sell", 1, template=clock, ts_ms=1_000_000)
+    account.on_trade(5000.0, 1, "buy", 1_000_000)
+    released = account.set_exits(stop_loss=5005.0, take_profit=None, ts_ms=1_100_000)
+    assert released["ok"] is True and released["plan_released"] is True
+
+    assert account.on_trade(4999.0, 1, "sell", 1_000_000 + 4 * 60_000) == []
+    fills = account.on_trade(4998.5, 1, "sell", 1_000_000 + 5 * 60_000)
+    assert [(f["reason"], f["price"]) for f in fills] == [("time_stop", 4998.5)]
+    # the user's own level is untouched — the clock going does not move it either
+    assert account.plan()["stop_loss"] == 5005.0 and account.plan()["managed"] is False
+
+
+def test_a_position_opened_without_a_template_has_no_plan_dead_or_alive():
+    """§148 T1-D8: the settled plan of the position before used to linger, so ``plan()`` described a
+    closed trade while a new position ran — and the ladder drew its levels over the new trade."""
+    account = make()
+    fill(account, "buy", 2, 5000.0, ts_ms=1_000, template="runner")
+    assert [f["reason"] for f in account.flatten(5001.0, 2_000)] == ["flatten"]
+    assert account.plan()["status"] == "done"            # the finished plan is still readable
+
+    fill(account, "sell", 1, 5000.0, ts_ms=3_000)        # a new position, no template
+    assert account.position()["side"] == "short"
+    assert account.plan() is None
+
+
+def test_a_template_on_an_adding_order_is_refused_at_submit():
+    """§148 T1-D4: a template is armed by the order that OPENS a position, so an order that would ADD
+    to one already open has its template refused at the click. The old build stored it, never built a
+    plan from it, and left the row advertising a bracket that did not exist."""
+    account = make()
+    account.submit("buy", 2, template="runner", ts_ms=1_000)
+    assert [f["reason"] for f in account.on_trade(5000.0, 2, "sell", 2_000)] == ["market"]
+    opening_plan = account.plan()["group"]
+
+    add = account.submit("buy", 1, template="scalp", ts_ms=3_000)
+    assert add["status"] == "rejected"
+    assert "would add to a position that is already open" in add["reason"]
+    assert "plan_template" not in add                        # nothing was even stored
+    assert account.position()["size"] == 2.0                 # and the add never hit the book
+    assert account.plan()["group"] == opening_plan            # the position kept the plan it had
+
+    # the same add without a template is the trader's to make
+    plain = account.submit("buy", 1, template="", ts_ms=3_100)
+    assert plain["status"] == "working"
+    assert [f["reason"] for f in account.on_trade(5000.5, 1, "sell", 3_200)] == ["market"]
+    assert account.position()["size"] == 3.0 and account.plan()["group"] == opening_plan
+
+    # and an EXIT is never refused because of a template: a sell that reduces the long goes through,
+    # with the row recording that its template was not armed
+    exit_order = account.submit("sell", 1, template="scalp", ts_ms=4_000)
+    assert exit_order["status"] == "working"
+    assert [f["reason"] for f in account.on_trade(5000.5, 1, "buy", 4_100)] == ["market"]
+    assert exit_order["status"] == "filled" and account.position()["size"] == 2.0
+    assert exit_order["plan_template_note"].startswith("not armed")
+
+
+def test_the_order_that_opens_the_position_still_arms_its_template():
+    """Two entries posted while flat: the one that fills first opens the position and arms its
+    plan; the one that then fills as an add cannot, and says so instead of advertising a bracket
+    (§148 T1-D4 — the race the `fresh` guard leaves open once the cap is lifted)."""
+    account = make()
+    first = account.submit("buy", 1, template="runner", ts_ms=1_000)
+    second = account.submit("buy", 1, template="scalp", ts_ms=1_001)
+    assert [f["reason"] for f in account.on_trade(5000.0, 2, "sell", 2_000)] == ["market", "market"]
+
+    assert "plan" in first and "plan_template_note" not in first        # it opened: armed
+    assert second["plan_template"]["id"] == "scalp" and "plan" not in second
+    assert "not armed" in second["plan_template_note"]                  # it added: said so
+    assert account.plan()["group"] == first["plan"]                     # one plan, the opening one's
+
+
+def test_a_plan_round_trips_through_a_stored_session():
+    account = make()
+    account.submit("buy", 2, template="runner", ts_ms=1_000)
+    account.on_trade(5000.0, 2, "sell", 2_000)
+    account.on_trade(5002.0, 1, "buy", 2_500)              # the partial fills on the way up
+    snapshot = json.loads(json.dumps(account.to_dict()))
+    restored = PaperAccount.from_dict(snapshot)
+
+    assert restored.to_dict() == snapshot
+    assert restored.plan() == account.plan()
+    assert restored.plan()["partial_done"] is True and restored.plan()["breakeven_done"] is True
+    assert restored.exits() == account.exits() == {"stop_loss": 5000.0, "take_profit": 5008.0}
+    assert restored.stats() == account.stats()
+
+    # a flip brackets the new position with the group id that follows
+    restored.submit("sell", 3, template="scalp", ts_ms=3_000)
+    assert [f["reason"] for f in restored.on_trade(5001.0, 5, "buy", 3_100)] == ["market"]
+    assert restored.position() == {"side": "short", "size": 2.0,
+                                   "entry_price": 5001.0, "entry_ms": 3_100}
+    assert restored.plan()["group"] == "oc2" and restored.plan()["side"] == "sell"
+    assert restored.exits() == {"stop_loss": 5003.0, "take_profit": 4998.0}
+    assert account.on_trade(5001.0, 5, "buy", 3_100) == []            # two separate accounts
+    assert account.plan()["group"] == "oc1"

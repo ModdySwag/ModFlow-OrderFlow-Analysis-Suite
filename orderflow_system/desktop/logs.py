@@ -60,6 +60,18 @@ class RedactingFilter(logging.Filter):
         return True
 
 
+class AbortedSocketFilter(logging.Filter):
+    """Drops a client-abort traceback at the door (audit F-05).
+
+    A connection reset mid-response is the client leaving; uvicorn logs it as an ASGI error
+    whose whole payload is the disconnect. Real exceptions are untouched.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exc = record.exc_info[1] if record.exc_info else None
+        return not isinstance(exc, (ConnectionResetError, ConnectionAbortedError))
+
+
 class BufferHandler(logging.Handler):
     """Keeps the last N records in memory for the GUI's live log view."""
 
@@ -113,6 +125,11 @@ def install(level: str = "INFO") -> None:
         sh = logging.StreamHandler(console)
         sh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", "%H:%M:%S"))
         root.addHandler(sh)
+
+    # F-05: aborted-socket tracebacks are dropped for every sink (one filter, all handlers).
+    for handler in root.handlers:
+        if not any(isinstance(f, AbortedSocketFilter) for f in handler.filters):
+            handler.addFilter(AbortedSocketFilter())
 
 
 def tail(lines: int = 200, min_level: str = "") -> list[dict]:

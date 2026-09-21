@@ -412,21 +412,35 @@ def test_the_listing_gate_skips_a_delisted_an_unlisted_and_a_duplicate_coin(capl
     assert "delisted" in said and "not in the venue listing" in said and "both coin BTC" in said, said
 
 
-def test_the_listing_does_not_stop_the_mapping_when_the_rest_call_fails(caplog):
-    caplog.set_level(logging.INFO)
+def test_the_listing_does_not_stop_the_mapping_when_the_rest_call_fails():
+    """FG-08 (§135 fix pass): the second assertion used `caplog.records`, which depends on global
+    logging state — one full-suite run in ten failed here while the same test passed six times
+    alone. The capture now hangs off the FEED's own logger with its level pinned for the
+    duration, so the test measures the feed rather than whatever a previous test did to the root
+    logger. The assertion itself is unchanged (never widen one to chase a flake)."""
+    feed_logger = logging.getLogger("orderflow_system.data.hyperliquid_feed")
+    records: list = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    previous_level = feed_logger.level
+    feed_logger.addHandler(handler)
+    feed_logger.setLevel(logging.INFO)
+    try:
+        def offline():
+            raise OSError("offline")
 
-    def offline():
-        raise OSError("offline")
+        async def main():
+            feed, ws, _ticks, _books, session = await _run_feed([], meta=offline)
+            await session.stop()
+            return feed, ws
 
-    async def main():
-        feed, ws, _ticks, _books, session = await _run_feed([], meta=offline)
-        await session.stop()
-        return feed, ws
-
-    _feed, ws = asyncio.run(main())
+        _feed, ws = asyncio.run(main())
+    finally:
+        feed_logger.removeHandler(handler)
+        feed_logger.setLevel(previous_level)
     assert [json.loads(payload)["subscription"]["coin"] for payload in ws.sent] == ["BTC", "BTC"], \
         "a REST hiccup must not silence a feed whose mapping is unambiguous"
-    assert any("meta fetch failed" in r.getMessage() for r in caplog.records)
+    assert any("meta fetch failed" in r.getMessage() for r in records)
 
 
 def test_validate_symbols_reads_the_venue_listing(monkeypatch):

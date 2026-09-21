@@ -30,7 +30,12 @@ JS_FILES = ["ui.js", "atlas.js", "atlas-v2.js", "guide.js",
             "links.js", "bus.js", "watchlist.js", "news.js", "options.js", "fundamentals.js",
             "theme.js", "cursor-link.js", "strips.js", "alert-format.js", "expression.js",
             "keys.js", "freshness.js", "help.js", "help-data.js", "help-search.js", "instrument.js",
-            "hint.js", "systems.js", "ramp.js", "paper.js", "ladder.js"]
+            "hint.js", "systems.js", "ramp.js", "paper.js", "ladder.js", "navreturn.js", "heatview.js",
+            "presets.js", "tips.js", "feedkeys.js",
+            # §147 (upgrade package): the new panels, the condition builder, the companion page and
+            # the explainability layer — they call the API and own element ids like every module above.
+            "orderflow.js", "alert-builder.js", "depth-history.js", "data-quality.js",
+            "sessions.js", "derivatives.js", "synthetic.js", "monitor.js", "why.js"]
 
 
 def routes_from(py_file: Path, prefix: str) -> set[str]:
@@ -115,6 +120,14 @@ def main() -> int:
     routes |= routes_from(ROOT / "orderflow_system" / "atlas" / "api.py", "/api/atlas")
     routes |= routes_from(ROOT / "orderflow_system" / "desktop" / "api.py", "/api/control")
     routes |= routes_from(ROOT / "orderflow_system" / "desktop" / "edgar.py", "/api/fundamentals")
+    # §147: the feature routers the launcher mounts beside the original api modules.
+    routes |= routes_from(ROOT / "orderflow_system" / "atlas" / "footprint_config.py", "/api/atlas")
+    routes |= routes_from(ROOT / "orderflow_system" / "atlas" / "depth_history.py", "/api/atlas")
+    routes |= routes_from(ROOT / "orderflow_system" / "atlas" / "dataquality.py", "/api/atlas")
+    routes |= routes_from(ROOT / "orderflow_system" / "atlas" / "sessions.py", "/api/atlas")
+    routes |= routes_from(ROOT / "orderflow_system" / "atlas" / "derivatives.py", "/api/atlas")
+    routes |= routes_from(ROOT / "orderflow_system" / "atlas" / "synthetic.py", "/api/atlas")
+    routes |= routes_from(ROOT / "orderflow_system" / "desktop" / "orders.py", "/api/control")
     routes |= routes_from(ROOT / "orderflow_system" / "dashboard" / "app.py", "")
     known = {normalise(r) for r in routes}
 
@@ -134,11 +147,13 @@ def main() -> int:
                 continue
             problems.append(f"   MISSING ROUTE  {name}: {call}")
 
-    # 2. element ids
+    # 2. element ids — every page the UI serves (§148 T5-F-17: monitor.js styles `monStatus`,
+    # which lives in monitor.html; scanning only index.html never saw it).
     html_ids = set()
     index = UI / "index.html"
-    if index.is_file():
-        html_ids = set(re.findall(r'id="([A-Za-z0-9_-]+)"', index.read_text(encoding="utf-8", errors="replace")))
+    for page in sorted(UI.glob("*.html")):
+        html_ids |= set(re.findall(r'id="([A-Za-z0-9_-]+)"',
+                                   page.read_text(encoding="utf-8", errors="replace")))
     created_ids: set[str] = set()
     for name in JS_FILES:
         path = UI / name
@@ -150,7 +165,10 @@ def main() -> int:
     all_ids = html_ids | created_ids
 
     used_ids: set[str] = set()
-    for name in ["atlas.js", "atlas-v2.js", "guide.js"]:
+    # §148 T5-F-17: every module in JS_FILES owns element ids (§147's new panels among them) and
+    # none of them was ever checked against the pages — walk the same list the created-ids pass
+    # does. The widened scan is what surfaced `logBody`, `inCard` and `monStatus`.
+    for name in JS_FILES:
         path = UI / name
         if not path.is_file():
             continue

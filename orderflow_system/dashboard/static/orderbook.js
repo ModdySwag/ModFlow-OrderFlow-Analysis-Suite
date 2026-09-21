@@ -9,7 +9,7 @@ class OrderbookLadder {
         this.container = document.getElementById(containerId);
         this.options = {
             levels: 20,              // Number of price levels to show
-            priceStep: 0.5,          // Tick size
+            priceStep: 0.5,          // Fallback only — the drawn grid follows the book's own step (_step)
             updateThrottle: 100,     // ms between renders
             colors: {
                 background: '#1c2128',
@@ -63,15 +63,15 @@ class OrderbookLadder {
                     <div class="ob-stats">
                         <span class="ob-stat">
                             <span class="ob-stat-label">Bid Total:</span>
-                            <span class="ob-stat-value ob-bid" id="obBidTotal">--</span>
+                            <span class="ob-stat-value ob-bid" id="obBidTotal">—</span>
                         </span>
                         <span class="ob-stat">
                             <span class="ob-stat-label">Ask Total:</span>
-                            <span class="ob-stat-value ob-ask" id="obAskTotal">--</span>
+                            <span class="ob-stat-value ob-ask" id="obAskTotal">—</span>
                         </span>
                         <span class="ob-stat">
                             <span class="ob-stat-label">Ratio:</span>
-                            <span class="ob-stat-value" id="obRatio">--</span>
+                            <span class="ob-stat-value" id="obRatio">—</span>
                         </span>
                     </div>
                 </div>
@@ -206,6 +206,53 @@ class OrderbookLadder {
         this.maxSize = Math.max(...allSizes, 1);
     }
 
+    /* ── The price grid ───────────────────────────────────────────────────────────────────────
+     * Rows sit on the instrument's OWN price step, never a constant. The old hardcoded 0.5 was a
+     * BTC-scale grid: an XRP book (tick 0.0001) drew rows from 5.00 down to −2.00 with every cell
+     * empty and the footer reading 0.0/0.0, and even a BTC book (0.1 rungs) only matched every
+     * fifth row. The step is read from the book itself — the venue's own pricing — and the
+     * configured priceStep is only the fallback while no book has arrived. Prices are compared
+     * and keyed through the same rounding, so a float that re-serialises as 1.4109000000000002
+     * still finds its 1.4109 rung.
+     */
+
+    _bookStep() {
+        const prices = [...new Set(
+            this.bids.map(l => Number(l.price)).concat(this.asks.map(l => Number(l.price)))
+        )].filter(Number.isFinite).sort((a, b) => a - b);
+        let step = 0;
+        for (let i = 1; i < prices.length; i++) {
+            const d = prices[i] - prices[i - 1];
+            if (d > 1e-12 && (!step || d < step)) step = d;
+        }
+        return step;
+    }
+
+    _step() {
+        return this._bookStep() || this.options.priceStep || 0.5;
+    }
+
+    /** Decimals a price needs at this step: 0.1 → 1, 0.01 → 2, 0.0001 → 4. */
+    _digits() {
+        const step = this._step();
+        return Math.min(8, Math.max(0, Math.ceil(-Math.log10(step) - 1e-9)));
+    }
+
+    /** The one price identity used by the maps, the rows and the thin-level marks. */
+    _key(price) {
+        return Number(price).toFixed(this._digits());
+    }
+
+    /** Sizes by price key — two raw levels that normalise together are summed, not dropped. */
+    _sizeMap(list) {
+        const map = new Map();
+        (list || []).forEach((l) => {
+            const k = this._key(l.price);
+            map.set(k, (map.get(k) || 0) + Number(l.size || 0));
+        });
+        return map;
+    }
+
     _detectThinLevels() {
         // Find levels with significantly lower liquidity (sweep targets)
         const allLevels = [
@@ -220,7 +267,7 @@ class OrderbookLadder {
         
         this.thinLevels = allLevels
             .filter(l => l.size < thinThreshold)
-            .map(l => l.price);
+            .map(l => this._key(l.price));
     }
 
     _scheduleRender() {
@@ -262,8 +309,9 @@ class OrderbookLadder {
         // Generate HTML
         let html = '';
         levels.forEach(level => {
-            const isCurrent = level.price === this.currentPrice;
-            const isThin = this.thinLevels.includes(level.price);
+            const isCurrent = this.currentPrice !== null && isFinite(this.currentPrice)
+                && this._key(level.price) === this._key(this.currentPrice);
+            const isThin = this.thinLevels.includes(this._key(level.price));
             const bidPct = level.bidSize ? (level.bidSize / this.maxSize) * 100 : 0;
             const askPct = level.askSize ? (level.askSize / this.maxSize) * 100 : 0;
             
@@ -300,7 +348,7 @@ class OrderbookLadder {
         this.bodyEl.innerHTML = html;
         
         // Update stats
-        this._updateStats();
+        this._updateStats(levels);
         
         // Scroll to center on current price
         this._scrollToCurrentPrice();
@@ -309,12 +357,11 @@ class OrderbookLadder {
     _buildLadder() {
         const levels = [];
         const numLevels = this.options.levels;
-        const step = this.options.priceStep;
-        
-        // Get all prices we have data for
-        const bidMap = new Map(this.bids.map(b => [b.price, b.size]));
-        const askMap = new Map(this.asks.map(a => [a.price, a.size]));
-        
+        const step = this._step();
+
+        const bidMap = this._sizeMap(this.bids);
+        const askMap = this._sizeMap(this.asks);
+
         // Determine center price
         const centerPrice = this.currentPrice || 
             (this.bids.length > 0 && this.asks.length > 0 
@@ -323,15 +370,17 @@ class OrderbookLadder {
         
         if (centerPrice === 0) return levels;
         
-        // Build ladder around center price
+        // Build ladder around center price, on the book's own step
         const halfLevels = Math.floor(numLevels / 2);
-        
+        const base = Math.round(centerPrice / step);
+
         for (let i = halfLevels; i >= -halfLevels; i--) {
-            const price = this._roundPrice(centerPrice + i * step);
+            const price = Number(((base + i) * step).toFixed(this._digits()));
+            const key = this._key(price);
             levels.push({
                 price,
-                bidSize: bidMap.get(price) || 0,
-                askSize: askMap.get(price) || 0
+                bidSize: bidMap.get(key) || 0,
+                askSize: askMap.get(key) || 0
             });
         }
         
@@ -339,13 +388,17 @@ class OrderbookLadder {
     }
 
     _roundPrice(price) {
-        const step = this.options.priceStep;
-        return Math.round(price / step) * step;
+        const step = this._step();
+        return Number((Math.round(price / step) * step).toFixed(this._digits()));
     }
 
-    _updateStats() {
-        const bidTotal = this.bids.slice(0, this.options.levels).reduce((s, l) => s + l.size, 0);
-        const askTotal = this.asks.slice(0, this.options.levels).reduce((s, l) => s + l.size, 0);
+    /** The footer totals the rows the ladder is DRAWING — the numbers on screen are the sum of
+     *  the cells on screen. It used to total the raw top-N lists, which disagreed with the rows
+     *  whenever the grid and the book did not line up (every instrument, before the step fix). */
+    _updateStats(levels) {
+        const drawn = levels || this._buildLadder();
+        const bidTotal = drawn.reduce((s, l) => s + (l.bidSize || 0), 0);
+        const askTotal = drawn.reduce((s, l) => s + (l.askSize || 0), 0);
         const ratio = askTotal > 0 ? bidTotal / askTotal : 0;
         
         this.bidTotalEl.textContent = this._formatSize(bidTotal);
@@ -374,10 +427,10 @@ class OrderbookLadder {
         }
     }
 
+    /** Price labels carry the instrument's own granularity — the step's decimals, not a
+     *  magnitude guess (the old >=1 → 2 dp printed every XRP rung as "1.41"). */
     _formatPrice(price) {
-        if (price >= 1000) return price.toFixed(1);
-        if (price >= 1) return price.toFixed(2);
-        return price.toFixed(4);
+        return Number(price).toFixed(this._digits());
     }
 
     _formatSize(size) {

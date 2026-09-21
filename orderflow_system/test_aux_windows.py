@@ -41,6 +41,8 @@ class FakeHost(windows_mod.WindowHost):
         self.closed: list[str] = []
         self.focused: list[str] = []
         self.pinned: dict[str, bool] = {}
+        self.moved: list[tuple] = []
+        self.refuse_move = False
 
     def screens(self) -> list[dict]:
         return [dict(s) for s in self._screens]
@@ -53,6 +55,19 @@ class FakeHost(windows_mod.WindowHost):
     def close(self, wid: str) -> bool:
         self.closed.append(wid)
         return self.opened.pop(wid, None) is not None
+
+    def move(self, wid: str, x: int, y: int, width: int, height: int) -> bool:
+        if self.refuse_move or wid not in self.opened:
+            return False
+        self.moved.append((wid, int(x), int(y), int(width), int(height)))
+        self.opened[wid].update({"x": int(x), "y": int(y), "width": int(width), "height": int(height)})
+        return True
+
+    def geometry(self, wid: str):
+        row = self.opened.get(wid)
+        if row is None:
+            return None
+        return {"x": row["x"], "y": row["y"], "width": row["width"], "height": row["height"]}
 
     def focus(self, wid: str) -> bool:
         self.focused.append(wid)
@@ -360,3 +375,253 @@ def test_resetting_a_window_brings_it_home_and_keeps_it_in_the_set(store, host):
 def test_resetting_an_unknown_window_is_refused_with_its_reason(store, host):
     res = asyncio.run(api.windows_post({"action": "reset", "id": "wnope"}))
     assert res["ok"] is False and "no window" in res["error"]
+
+
+# ── §128: sending an open (or stored) window to a monitor, and the snap shapes ──────────────────
+
+BIG = {"x": 0, "y": 0, "width": 2560, "height": 1440}
+LEFT_OF_PRIMARY = {"x": -1920, "y": 0, "width": 1920, "height": 1080}
+AREA = (BIG["width"], BIG["height"] - windows_mod.CHROME_H)
+
+
+@pytest.mark.parametrize("preset", windows_mod.PRESETS)
+def test_every_preset_fits_inside_the_work_area(preset):
+    """A shape the menu offers must never be a rectangle that covers the taskbar or leaves the screen."""
+    out = windows_mod.preset_rect(BIG, preset, want_w=1100, want_h=760)
+    area = windows_mod.work_area(BIG)
+    assert out["x"] >= BIG["x"] and out["y"] >= BIG["y"]
+    assert out["x"] + out["width"] <= BIG["x"] + BIG["width"]
+    assert out["y"] + out["height"] <= BIG["y"] + area["height"]
+    assert out["width"] >= min(config_store.AUX_MIN_W, BIG["width"])
+    assert out["height"] >= min(config_store.AUX_MIN_H, area["height"])
+
+
+def test_the_half_shapes_tile_the_work_area_exactly():
+    left = windows_mod.preset_rect(BIG, "left", want_w=1100, want_h=760)
+    right = windows_mod.preset_rect(BIG, "right", want_w=1100, want_h=760)
+    top = windows_mod.preset_rect(BIG, "top", want_w=1100, want_h=760)
+    bottom = windows_mod.preset_rect(BIG, "bottom", want_w=1100, want_h=760)
+    assert left["x"] + left["width"] == right["x"]
+    assert left["width"] + right["width"] == BIG["width"]
+    assert top["y"] + top["height"] == bottom["y"]
+    assert top["height"] + bottom["height"] == AREA[1]
+
+
+def test_fill_is_the_whole_work_area_and_centre_keeps_the_size():
+    fill = windows_mod.preset_rect(BIG, "fill", want_w=1100, want_h=760)
+    assert (fill["x"], fill["y"], fill["width"], fill["height"]) == (0, 0, BIG["width"], AREA[1])
+    centre = windows_mod.preset_rect(BIG, "center", want_w=1100, want_h=760)
+    assert (centre["width"], centre["height"]) == (1100, 760)
+    assert centre["x"] == (BIG["width"] - 1100) // 2
+
+
+def test_a_junk_preset_falls_back_to_centre_and_a_small_screen_still_answers():
+    assert windows_mod.preset_rect(BIG, "diagonal") == windows_mod.preset_rect(BIG, "center")
+    tiny = windows_mod.preset_rect(SMALL, "right", want_w=1500, want_h=940)
+    assert tiny["x"] >= 0 and tiny["y"] >= 0
+    assert tiny["x"] + tiny["width"] <= SMALL["width"]
+
+
+def test_a_preset_on_a_monitor_left_of_the_primary_keeps_its_negative_origin():
+    out = windows_mod.preset_rect(LEFT_OF_PRIMARY, "left", want_w=1100, want_h=760)
+    assert out["x"] == -1920
+    assert out["width"] == 1920 // 2
+
+
+def test_screen_index_of_finds_the_screen_and_refuses_junk():
+    screens = [PRIMARY, SECOND]
+    assert windows_mod.screen_index_of(screens, 100, 100) == 0
+    assert windows_mod.screen_index_of(screens, 2600, 40) == 1
+    assert windows_mod.screen_index_of(screens, 9999, 40) is None
+    assert windows_mod.screen_index_of(screens, None, 40) is None
+    assert windows_mod.screen_index_of(screens, True, 40) is None
+
+
+def test_move_placement_steps_to_the_next_monitor_cyclically():
+    here = {"id": "w1", "view": "ofx", "x": 2600, "y": 40, "width": 1100, "height": 760}
+    forward = windows_mod.move_placement(here, [PRIMARY, SECOND], step=1)
+    back = windows_mod.move_placement(here, [PRIMARY, SECOND], step=-1)
+    assert (forward["screen"], back["screen"]) == (0, 0)         # 1+1 → 0 ; 1-1 → 0
+    three = [PRIMARY, SECOND, {"x": 5120, "y": 0, "width": 1920, "height": 1080}]
+    assert windows_mod.move_placement(here, three, step=1)["screen"] == 2
+    assert windows_mod.move_placement(here, three, step=2)["screen"] == 0
+
+
+def test_move_placement_keeps_the_size_and_resolves_a_real_position():
+    out = windows_mod.move_placement({"id": "w1", "view": "ofx", "x": 40, "y": 40,
+                                      "width": 1100, "height": 760}, [PRIMARY, SECOND], screen_index=1)
+    assert out["screen"] == 1 and out["screen_label"].startswith("Monitor 2")
+    assert (out["width"], out["height"]) == (1100, 760)
+    assert SECOND["x"] <= out["x"] <= SECOND["x"] + SECOND["width"] - 1100
+
+
+def test_stranded_names_only_positions_off_every_screen():
+    rows = [{"id": "wa", "x": 9000, "y": 40}, {"id": "wb", "x": 100, "y": 40},
+            {"id": "wc", "x": None, "y": None}]
+    assert windows_mod.stranded(rows, [PRIMARY, SECOND]) == ["wa"]
+    assert windows_mod.stranded(rows, []) == []            # nothing to judge against: no claim
+    assert windows_mod.stranded([{"id": "wa", "x": 2600, "y": 40}], [PRIMARY, SECOND]) == []
+
+
+def test_stranded_sees_a_live_window_the_store_still_thinks_is_placed():
+    """Measured live: a window pushed to (9000, 40) kept a record saying (100, 100) — the store
+    lagged the window, and only the live rect knew the window needed rescuing."""
+    rows = [{"id": "wa", "x": 100, "y": 100}]
+    live = {"wa": {"x": 9000, "y": 40, "width": 900, "height": 700, "screen": -1}}
+    assert windows_mod.stranded(rows, [PRIMARY, SECOND], live=live) == ["wa"]
+    assert windows_mod.stranded(rows, [PRIMARY, SECOND]) == [], "without the live rect there is no claim"
+    both = windows_mod.stranded(rows + [{"id": "wb", "x": 9000, "y": 40}], [PRIMARY, SECOND], live=live)
+    assert both == ["wb", "wa"], "store-side ids first, then live ones, each named once"
+
+
+def test_move_sends_an_open_window_to_the_other_monitor(store, host):
+    asyncio.run(api.windows_post({"action": "open", "view": "ofx", "id": "wgo", "screen": 0}))
+    out = asyncio.run(api.windows_post({"action": "move", "id": "wgo", "screen": 1}))
+    assert out["ok"] is True and out["action"] == "move" and out["moved"] == "wgo"
+    assert out["screen_label"].startswith("Monitor 2")
+    assert host.moved[0][0] == "wgo"
+    assert host.opened["wgo"]["x"] >= SECOND["x"], "the real window did not move"
+    on_disk = json.loads(store.config_path().read_text(encoding="utf-8"))
+    stored = on_disk["ui"]["windows"][0]
+    assert stored["x"] >= SECOND["x"] and "screen" not in stored and "screen_label" not in stored
+
+
+def test_move_by_step_sends_it_to_the_next_monitor(store, host):
+    asyncio.run(api.windows_post({"action": "open", "view": "tape", "id": "wstep", "screen": 1}))
+    out = asyncio.run(api.windows_post({"action": "move", "id": "wstep", "step": 1}))
+    assert out["ok"] is True
+    assert host.opened["wstep"]["x"] < SECOND["x"], "step +1 from Monitor 2 must land on Monitor 1"
+
+
+def test_a_step_with_nowhere_to_go_moves_nothing(store):
+    """One monitor, "send it to the next monitor": the honest answer is a no-op. The first cut
+    resolved the step cyclically to the SAME screen and re-centred the window — measured live on a
+    single-display host, where the key moved a window the user had placed by hand."""
+    single = FakeHost(screens=[PRIMARY])
+    windows_mod.set_host(single)
+    try:
+        asyncio.run(api.windows_post({"action": "open", "view": "ofx", "id": "wone", "preset": "left"}))
+        before = dict(single.opened["wone"])
+        assert before["x"] == 0 and before["width"] == PRIMARY["width"] // 2
+        out = asyncio.run(api.windows_post({"action": "move", "id": "wone", "step": 1}))
+        assert out["ok"] is True and out["moved"] == "" and "already on that monitor" in out["note"]
+        assert single.moved == [], "nothing may move when there is no other monitor"
+        assert single.opened["wone"] == before, "the hand-placed window must survive the key"
+    finally:
+        windows_mod.set_host(None)
+
+
+def test_an_explicit_centre_still_centres_on_one_screen(store):
+    """The no-op rule is about `step`, not about `center`: asking for the centre explicitly is a
+    real request and must still be honoured."""
+    single = FakeHost(screens=[PRIMARY])
+    windows_mod.set_host(single)
+    try:
+        asyncio.run(api.windows_post({"action": "open", "view": "tape", "id": "wc1", "preset": "left"}))
+        out = asyncio.run(api.windows_post({"action": "move", "id": "wc1", "preset": "center"}))
+        assert out["ok"] is True and out["moved"] == "wc1"
+        assert single.opened["wc1"]["x"] == (PRIMARY["width"] - single.opened["wc1"]["width"]) // 2
+    finally:
+        windows_mod.set_host(None)
+
+
+def test_move_with_a_preset_snaps_where_it_already_is(store, host):
+    asyncio.run(api.windows_post({"action": "open", "view": "cvd", "id": "wsnap", "screen": 1}))
+    out = asyncio.run(api.windows_post({"action": "move", "id": "wsnap", "preset": "left"}))
+    assert out["ok"] is True and out["screen_label"].startswith("Monitor 2")
+    placed = host.opened["wsnap"]
+    assert placed["x"] == SECOND["x"] and placed["width"] == SECOND["width"] // 2
+    assert placed["height"] == SECOND["height"] - windows_mod.CHROME_H
+
+
+def test_move_of_a_stored_window_only_replaces_its_record(store, host):
+    """A safe start leaves records in the set with no window open (§73's restore=False): sending
+    one to a monitor must re-place the record so it OPENS there — the host stays out of it."""
+    store.save_config({"ui": {"windows": [
+        {"id": "wshut", "view": "ofx", "x": 100, "y": 100, "width": 1100, "height": 760},
+    ]}})
+    out = asyncio.run(api.windows_post({"action": "move", "id": "wshut", "screen": 1, "preset": "right"}))
+    assert out["ok"] is True
+    assert host.moved == [] and host.opened == {}
+    stored = out["windows"][0]
+    assert stored["x"] == SECOND["x"] + SECOND["width"] // 2
+    assert stored["width"] == SECOND["width"] - SECOND["width"] // 2
+
+
+def test_a_refused_move_leaves_everything_where_it_was(store, host):
+    asyncio.run(api.windows_post({"action": "open", "view": "ofx", "id": "wstay", "screen": 0}))
+    before = dict(host.opened["wstay"])
+    host.refuse_move = True
+    out = asyncio.run(api.windows_post({"action": "move", "id": "wstay", "screen": 1}))
+    assert out["ok"] is False and "could not move" in out["error"]
+    assert host.opened["wstay"]["x"] == before["x"], "a refused move must not have moved anything"
+    stored = out["windows"][0]
+    assert stored["x"] == before["x"], "the store must keep saying where the window really is"
+
+
+def test_move_of_an_unknown_window_is_refused(host):
+    out = asyncio.run(api.windows_post({"action": "move", "id": "wghost", "screen": 1}))
+    assert out["ok"] is False and "no window" in out["error"]
+
+
+def test_open_with_a_preset_lands_already_snapped(store, host):
+    out = asyncio.run(api.windows_post({"action": "open", "view": "depth", "id": "wopen",
+                                        "screen": 1, "preset": "right"}))
+    assert out["ok"] is True and out["screen_label"].startswith("Monitor 2")
+    placed = out["opened"]
+    assert placed["x"] == SECOND["x"] + SECOND["width"] // 2
+    assert placed["width"] == SECOND["width"] - SECOND["width"] // 2
+    assert host.opened["wopen"]["x"] == placed["x"]
+
+
+def test_the_state_says_where_every_open_window_is(store, host):
+    asyncio.run(api.windows_post({"action": "open", "view": "ofx", "id": "won1", "screen": 0}))
+    asyncio.run(api.windows_post({"action": "open", "view": "tape", "id": "won2", "screen": 1}))
+    state = asyncio.run(api.windows_get())
+    assert state["open_geometry"]["won1"]["screen"] == 0
+    assert state["open_geometry"]["won2"]["screen_label"].startswith("Monitor 2")
+    assert state["stranded"] == []
+
+
+def test_arrange_brings_home_only_the_windows_whose_monitor_is_gone(store, host):
+    """The unplug rescue: a window whose position is on a monitor that no longer exists comes home;
+    a window that still has its screen is left exactly alone. The window here is open where its
+    record says (the host is the truth about that) — the state must call that out as stranded."""
+    store.save_config({"ui": {"windows": [
+        {"id": "wgohome", "view": "ofx", "x": 9000, "y": 40, "width": 1100, "height": 760},
+        {"id": "wstay2", "view": "tape", "x": 100, "y": 100, "width": 900, "height": 700},
+    ]}})
+    host.open({"id": "wgohome", "view": "ofx", "x": 9000, "y": 40, "width": 1100, "height": 760})
+    state = asyncio.run(api.windows_get())
+    assert state["stranded"] == ["wgohome"]
+    assert state["open_geometry"]["wgohome"]["screen"] == -1
+    out = asyncio.run(api.windows_post({"action": "arrange"}))
+    assert out["ok"] is True and out["moved"] == ["wgohome"]
+    assert [m[0] for m in host.moved] == ["wgohome"]
+    assert host.opened["wgohome"]["x"] < PRIMARY["width"]
+    stored = {r["id"]: r for r in out["windows"]}
+    assert stored["wstay2"]["x"] == 100, "a window with a live screen must not be touched"
+    assert stored["wgohome"]["x"] is not None and stored["wgohome"]["screen_key"] == ""
+
+
+def test_arrange_with_nothing_stranded_says_so(store, host):
+    asyncio.run(api.windows_post({"action": "open", "view": "ofx", "id": "wfine", "screen": 0}))
+    out = asyncio.run(api.windows_post({"action": "arrange"}))
+    assert out["ok"] is True and out["moved"] == [] and "nothing was stranded" in out["note"]
+
+
+def test_arrange_rescues_a_live_window_the_store_still_lists_as_placed(store, host):
+    """Measured live: an aux window pushed to (9000, 40) kept a record that said (100, 100) — the
+    store lagged the window, and only the live rect knew it needed rescuing."""
+    store.save_config({"ui": {"windows": [
+        {"id": "wdrift", "view": "ofx", "x": 100, "y": 100, "width": 900, "height": 700},
+    ]}})
+    host.open({"id": "wdrift", "view": "ofx", "x": 9000, "y": 40, "width": 900, "height": 700})
+    state = asyncio.run(api.windows_get())
+    assert state["stranded"] == ["wdrift"]
+    assert state["open_geometry"]["wdrift"]["screen"] == -1
+    out = asyncio.run(api.windows_post({"action": "arrange"}))
+    assert out["ok"] is True and out["moved"] == ["wdrift"]
+    assert host.moved and host.moved[0][0] == "wdrift"
+    assert host.opened["wdrift"]["x"] < PRIMARY["width"]
+    assert out["stranded"] == [], "after the rescue there is nothing left to rescue"
