@@ -1,13 +1,46 @@
 # Session handoff — ModFlow OrderFlow Analysis Suite
 
-**Date:** 2026-09-21 · **Tree:** `C:\Users\<you>\OrderFlow-Analysis-Pro` · **HEAD:** `0eedc0d`
-**Committed:** the §119–§149b wave is committed as `0eedc0d` (219 files, +55,210/−1,026 lines vs `797eea0`); working tree clean, 81 commits ahead of `origin/master`, nothing pushed. Everything after this line was written before that commit and is kept as the record.
+**Date:** 2026-09-21 · **Tree:** `C:\Users\<you>\OrderFlow-Analysis-Pro` · **HEAD:** `49382c7`
+**Committed and pushed:** the §119–§149b wave as `0eedc0d`; the CI-red fix as `50f871a`; the §150 record as `85130d7`; the SignPath-conditions wave as `49382c7`. Public `master` is in step, working tree clean. Public runs: `35571830367` ✓ · `35572466682` ✓ · `35573159341` ✓ (2,493 passed / 6 skipped on 3.11 + 3.12; `build` + `churn` green; `soak`/`sign` skipped by design). The download page (`ModFlow-beta-builds` README) carries the same code-signing-policy section (commit `9cd03bb2e750`).
 
 **Run it:** `orderflow_system.desktop` (the owner's shortcut: `.venv\Scripts\pythonw.exe -m
 orderflow_system.desktop`, binds 127.0.0.1:8080). Frozen build: `dist/ModFlowOrderFlowAnalysisSuite/ModFlowOrderFlowAnalysisSuite.exe`
 (`scripts/build_exe.py`). Scratch scripts belong in `$LOCALAPPDATA/Temp`, not the repo.
 
 ---
+
+## §151 (2026-09-21) — the SignPath conditions, met in-repo (pushed as `49382c7`)
+
+Route 1 (SignPath Foundation) was wired but not yet *eligible on paper*: reading the Foundation's own
+conditions page (<https://signpath.org/terms.html>) in full turned up three requirements the
+repository did not satisfy. All three are closed, and nothing on the machine side waits any more.
+
+- **Code signing policy on the home page** — the README gained `## Code signing policy` (the
+  required attribution line, the team roles mapped onto the one maintainer, the privacy sentence)
+  with its Table of Contents entry; the download page (`ModFlow-beta-builds` README) carries the
+  same section, so both pages the terms name are covered.
+- **Metadata attributes set and enforced** — `.signpath/artifact-configurations/default.xml` now
+  declares a required `version` parameter and restricts `product-name` / `product-version` /
+  `file-version` / `company-name` on the signed files; the `sign` job reads the version from
+  `pyproject.toml` — the same source as the exe's version resource — and passes it, so the signed
+  metadata cannot drift from the build.
+- **The metadata itself** — `installer/modflow.iss` gained explicit `VersionInfo*` directives: the
+  certified Setup's `FileVersion` was **blank** (measured), which the new restriction would have
+  caught. A scratch ISCC build after the change shows all four fields set; Inno pads them to fixed
+  widths (recorded in the config comment, with the exact-match adjustment if the organization asks
+  for it).
+- **The rest of their list** (free of charge, OSI licence, no proprietary components, released,
+  documented, uninstaller, announced system changes) was already true; `docs/SIGNPATH_APPLICATION.md`
+  §D records every condition with its evidence. The one owner-side item: **MFA on the GitHub and
+  SignPath accounts** — no repository can attest to it.
+
+Gates on the change: pytest **2,496 passed / 3 skipped / 0 failed** · `ci.yml` parses as YAML ·
+`default.xml` parses as XML · the patched `.iss` compiles with ISCC into a scratch directory. The
+dist Setup and this release's certified artifacts are untouched — sha256 still `abd78b3e…6f52`
+(Setup) and `ec50468f…015dcc156` (zip). Public CI run **`35573159341`** on `49382c7`: **green**
+(2,493 passed / 6 skipped on both interpreters; `build` + `churn` green; `soak`/`sign` skipped by
+design). The frozen build stays as it is on purpose — the change lands in the next build, which is
+the build that gets signed.
 
 ## §150 (2026-09-21) — competitive reanalysis v3 (the owner's brief; report only, nothing changed)
 
