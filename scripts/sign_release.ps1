@@ -22,6 +22,7 @@ param(
     [string]$PfxPath = $env:OFAP_SIGN_PFX,
     [string]$PfxPassword = $env:OFAP_SIGN_PFX_PASSWORD,
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
+    [switch]$AllowSelfSigned,
     [switch]$SkipFetch
 )
 
@@ -91,7 +92,19 @@ if (-not $signtool) { throw "signtool.exe not found and -SkipFetch was given. In
 Write-Host "signtool: $signtool"
 
 $signArgs = @('sign', '/fd', 'sha256', '/tr', $TimestampUrl, '/td', 'sha256')
-if ($Thumbprint) { $signArgs += @('/sha1', $Thumbprint, '/sm') ; Write-Host "certificate: store thumbprint $Thumbprint" }
+if ($Thumbprint) {
+    # Where the certificate actually lives decides the store flag: the user store needs no /sm,
+    # the machine store does. (The old code always passed /sm, so a user-store thumbprint - the
+    # one this script's own instructions tell you to use - could never be found.)
+    $inUser = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert -ErrorAction SilentlyContinue |
+        Where-Object { $_.Thumbprint -eq $Thumbprint }
+    $inMachine = Get-ChildItem Cert:\LocalMachine\My -CodeSigningCert -ErrorAction SilentlyContinue |
+        Where-Object { $_.Thumbprint -eq $Thumbprint }
+    if ($inUser) { Write-Host "certificate: user store thumbprint $Thumbprint" }
+    elseif ($inMachine) { $signArgs += '/sm'; Write-Host "certificate: machine store thumbprint $Thumbprint" }
+    else { throw "no code-signing certificate with thumbprint $Thumbprint in Cert:\CurrentUser\My or Cert:\LocalMachine\My" }
+    $signArgs += @('/sha1', $Thumbprint)
+}
 else {
     $signArgs += @('/f', $PfxPath)
     if ($PfxPassword) { $signArgs += @('/p', $PfxPassword) }
@@ -104,8 +117,16 @@ foreach ($p in $Path) {
     & $signtool @signArgs $p
     if ($LASTEXITCODE -ne 0) { $failed += $p; continue }
     & $signtool verify /pa /v $p | Out-Null
-    if ($LASTEXITCODE -ne 0) { $failed += $p; continue }
-    Write-Host "  signed + verified: $p"
+    if ($LASTEXITCODE -eq 0) { Write-Host "  signed + verified: $p"; continue }
+    # A self-signed certificate's signature can never pass /pa on an untrusted machine - that is the
+    # root-store gap, not a signing failure. With -AllowSelfSigned, accept "signature present, from
+    # our own certificate" and say so plainly; without it, the file counts as failed.
+    $s = Get-AuthenticodeSignature $p
+    if ($AllowSelfSigned -and $s.SignerCertificate -and $s.Status -eq 'UnknownError') {
+        Write-Host ("  signed; untrusted on this machine (self-signed root): " + $s.SignerCertificate.Subject)
+        continue
+    }
+    $failed += $p
 }
 
 if ($failed.Count) { throw ("signature failed for: " + ($failed -join ', ')) }

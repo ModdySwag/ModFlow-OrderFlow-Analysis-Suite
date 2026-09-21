@@ -1,13 +1,73 @@
 # Session handoff — ModFlow OrderFlow Analysis Suite
 
-**Date:** 2026-09-21 · **Tree:** `C:\Users\<you>\OrderFlow-Analysis-Pro` · **HEAD:** `797eea0`
-**Committed:** nothing. The working tree is dirty on purpose; every change from this session is on disk.
+**Date:** 2026-09-21 · **Tree:** `C:\Users\<you>\OrderFlow-Analysis-Pro` · **HEAD:** `0eedc0d`
+**Committed:** the §119–§149b wave is committed as `0eedc0d` (219 files, +55,210/−1,026 lines vs `797eea0`); working tree clean, 81 commits ahead of `origin/master`, nothing pushed. Everything after this line was written before that commit and is kept as the record.
 
 **Run it:** `orderflow_system.desktop` (the owner's shortcut: `.venv\Scripts\pythonw.exe -m
 orderflow_system.desktop`, binds 127.0.0.1:8080). Frozen build: `dist/ModFlowOrderFlowAnalysisSuite/ModFlowOrderFlowAnalysisSuite.exe`
 (`scripts/build_exe.py`). Scratch scripts belong in `$LOCALAPPDATA/Temp`, not the repo.
 
 ---
+
+## §150 (2026-09-21) — competitive reanalysis v3 (the owner's brief; report only, nothing changed)
+
+Ran the owner's brief (`Desktop\now are you able to reanalyse all t.txt`) against HEAD `0eedc0d`
+(clean tree, 81 ahead): re-derived ModFlow from the tree, re-read the six vendors' own pricing and
+feature pages the same day, and re-scored the market-norms model against the build that came out of
+§147/§148/§149b. Deliverable: **`docs/COMPETITIVE_REANALYSIS_v3_2026-09-21.md`** — §0 maps every
+item of the 20 Sep analysis to its current status, §5 re-scores **49 industry norms (36 Met — 4 of
+them leaders — 8 Mostly/Partial, 3 deliberate gaps, 2 intentional divergences)**, §7 ranks what
+remains. No code, no artifacts, nothing committed.
+
+**Gates re-run on the final bytes.** pytest **2,494 passed / 3 skipped / 0 failed** (90.01 s) ·
+**ruff 0.16.7 — all checks passed** · `audit_ui_refs` **CLEAN** (346 ids; 686 html + 380 created;
+0 missing; 0 duplicate; 154 modules parse) · `audit_metric_hygiene` **CLEAN** · **57/57 selftests** · live sandbox (scratch APPDATA, ports 8097/8098, stopped after): 13 of 15 probe
+paths read 200 (the two 404s were wrong path guesses, both resolved after), **192 API paths** in the live OpenAPI schema, and live reads of the trading status/templates
+(refusals verbatim), footprint config (21 controls), depth-history (retention 30 min / 1,800
+columns), data-quality, sessions (crypto-247 + 20-root roll table), synthetic, alert-rules, storage
+usage and the monitor page — plus a **four-venue funding/OI/basis read for BTCUSDT** (Bybit
+0.00772%/8h → 8.45% APR, basis −4.31 bps, OI 56,552 BTC).
+
+**Headline findings.** The §146 gap list is closed or deliberately refused: P0-2/P0-3 and P1-1…P1-3,
+P1-5…P1-10, P2-2/P2-3 are shipped and were re-verified in the tree; P0-1 is now a shipped
+*structure* (drivers, risk gates bound to the session router, refusal sentences) with routing kept
+out by policy; still open: chart tabs/2×2 grid + per-pane linking (P1-4), options×flow confluence
+(P2-1), study-pack gallery + scripting (P2-4), layout packs + first-run checklist (P2-5's remainder).
+New remainder ranked in §7: chart tabs · footprint-region export · render-side FPS harness · mobile
+host policy · study/layout packs · paper-grammar parity (stop-limit/MIT, held modifier + pre-fire
+tooltip, drag-amend) · Show-Original-Values diff · continuous-futures splice note · status-bar active
+profile. The two gates stand: **live routing and MBO stay out until each can ship whole.**
+**Recommendation: ship the analytics layer with the practice loop as shipped; the next wave is the
+cheap closes in §7 Priority 1.**
+
+**The final build (record corrected).** The frozen rebuild is **not** owed — it ran at **14:34:39 today**, from the pass's final bytes (last source edit 14:26; the 14:56:53 commit `0eedc0d` captured that same tree; no source file was touched after the build; payload parity spot-checked byte-identical on `ui.js` / `menubar.js` / `tips.js` / `why.js` / `help-data.js`). Artifacts, hashed on read-back 2026-09-21: **Setup `dist\ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe` — 38,201,838 B, sha256 `ABD78B3E3E9F283AD60217D678A73012B7379C9EB341B3644ECD5629F6986F52`** (the `.sha256` sidecar matches) · zip `…-win64.zip` — 43,599,366 B, `ec50468f1799ef78d36ab66ae349945f80c2565d1390e66ffa9e59c015dcc156` · SBOM `…win64.sbom.cdx.json` — 448,822 B, `3d13b50ddb25d350cbc5c253a31703c9960450d669a44ef8434d08fdb6906f71` · dist exe — 16,484,958 B, `bfd3d603cf258a30f7fd263786ac63e0c13a79a0b432e4e1ac97ff5a15b1aaf8` (matches `BUILD_INFO.json`). **Install journey re-run this hour on that exact Setup: 11/11 PASS** (receipt: `runtime/ofap_s150/final_build_journey_2026-09-21.log`; the dated journey paragraph is now in `installer/README.md`). Two wrinkles, stated plainly: `BUILD_INFO.json` still stamps `797eea0` / `worktree dirty` (the build predates the commit; a clean re-stamp is the only rebuild-shaped work left, and only matters if the release copy names `0eedc0d`), and the frozen smoke/features batteries were not re-run for this build.
+
+**Owed (owner's word).** Commit/push of this pass's docs, the optional clean re-stamp over `0eedc0d`, and the physical multi-monitor pass. Nothing in this pass changed code; nothing committed — the standing rule.
+
+**§150 supplement (same day) — the signing route, made real.** Asked "how do I sign this package?", the local half was exercised end-to-end on **copies** (the upload artifact untouched — sha256 still `abd78b3e…6f52`). Two defects/limits in `scripts/sign_release.ps1` were found and fixed: (1) the `-Thumbprint` path **always passed `/sm`** (machine store) while the script's own instructions say *user* store — a user-store certificate could never be found; it now detects which store holds the certificate and passes `/sm` only for `Cert:\LocalMachine\My`, with a clear error when it is in neither. (2) Added **`-AllowSelfSigned`**: a self-signed signature can never pass `/pa` on an untrusted machine (that is the root-store gap, not a signing failure), so with the switch the script accepts "signature present, from our own certificate" and says so — without it the file still counts as failed. A self-signed code-signing certificate was created for the beta lane: `CN=ModFlow OrderFlow Analysis Suite (self-signed beta), O=Moddy, C=AU`, thumbprint `B03BB7D895832B73D0717AA62F986BEC01D63407` (CurrentUser\My, 3 years, exportable); its public half was exported to `C:\Users\Moddy\keystores\modflow-selfsigned.cer`. Proof (copies of the Setup and the app exe): `signtool` → *Successfully signed*, Authenticode type, DigiCert timestamp present, signer as above; `sign_release.ps1` exit 0. The routes stay as `docs/RELEASE_CHECKLIST.md` §6 records — **SignPath Foundation** (free; the application and the two repo settings are the only blockers), an **OV certificate** (~AU$300–400/yr), or this self-signed lane for a private beta. Order of operations for a *signed* release: sign the dist exe → re-zip → rebuild the Setup → sign the Setup → re-take every hash (signing changes the bytes; `BUILD_INFO.json`'s `exe_sha256` then describes the pre-sign exe).
+
+**Route 1 (SignPath Foundation) — readiness verified, application pack written.** Chosen route: the free Foundation lane, no purchase. Re-verified against the live public copy today: repo `ModdySwag/ModFlow-OrderFlow-Analysis-Suite` public + MIT (public `master` = `797eea0`, one commit behind local `0eedc0d`), last CI runs green (2026-09-19), the artifact configuration is committed and public (blob `53824a40122b…`), and the `sign` job already carries the exact slugs the organization must use (`ModFlow-OrderFlow-Analysis-Suite` / `release-signing` / `default`). Every input the job passes was checked against the action's own v3 schema (`signpath/github-action-submit-signing-request`) — they match; nothing in the workflow needs changing. The only blockers are outside the repo: the Foundation application (owner's identity and consent) and then repository variable `SIGNPATH_ORGANIZATION_ID` + secret `SIGNPATH_API_TOKEN`. Application pack with paste-ready answers, readiness evidence and the post-approval steps: **`docs/SIGNPATH_APPLICATION.md`**. Once the two values exist, the sign job stops being skipped and signs both binaries on the next `master` push / tag / dispatch, failing the run unless every file verifies `Valid`.
+
+**§150 supplement — the public push and the CI red, root-caused and fixed.** On the owner's word local `master` went public (`797eea0..0eedc0d`, 219 files, +55,210/−1,026; pre-flight: no secret-looking filenames or strings in the delta). CI run `35570525622` came back **red**: `test (3.11)` and `test (3.12)` failed — 4 × `test_the_python_and_javascript_readings_agree` on an em dash plus 1 × `test_extras_start_one_connection_for_many_symbols` (`RuntimeError: Event loop is closed`); `build` and `churn` green, `soak`/`sign` skipped as designed. Two root causes, each reproduced or receipted:
+
+1. **Encoding — a whole class.** The runner uses Python's locale default (cp1252); this machine sets `PYTHONUTF8=1`, which hid it. A process call in text mode with no explicit encoding decodes node's UTF-8 output as cp1252, so the em dashes in the refusal strings became mojibake and the parity tests disagreed with the JS side. Reproduced here with `PYTHONUTF8=0` — the same 4 failures. Fixed: **13 process-text call sites across 8 files** gained `encoding="utf-8"` (`test_footprint_config` 2, `test_dataquality` 2, `test_depth_history` 2, `test_legacy_widgets`, `test_why`, `test_windowing_ui`, `audit_ui_refs`, `build_exe` 3), plus `scripts/soak.py:57` (found by the new pin). Checked and clean: no runtime `open()` in `orderflow_system` lacks an encoding (AST-precise scan, 0 findings).
+2. **A cross-loop gather in a test.** `test_atlas_integration.py` ran `start_feeds` and `stop_feeds` through two separate `asyncio.run` calls; `start_feeds` creates the feed tasks with `asyncio.create_task` (`hub.py:625`) and `stop_feeds` gathers them (`hub.py:652`) — on Python 3.11.9 the second loop is already closed and the gather raises. Fixed **test-side** (one loop for both calls, as the app runs the hub) with a new assertion that the tasks actually unwound (`h._feed_tasks == []` — the A-06 guarantee). Production code untouched; the app's shipped bytes are unaffected.
+3. **A pin so the class cannot come back**: `orderflow_system/test_encoding_hygiene.py` — scans the suite and the scripts for process calls in text mode and textual `open()` calls without an explicit encoding, and plants the exact shapes it must catch (a pin that cannot fail is decoration).
+
+Verified on the final bytes: full suite **2,496 passed / 3 skipped / 0 failed** both with UTF-8 off (CI-equivalent, 87.5 s) and UTF-8 on (88.0 s); ruff clean. **Nothing committed or pushed** — the fix pass awaits the owner's word; the public HEAD carries the red run until it does.
+
+**Fact-refresh fold-in (same day).** The four delegated vendor digests landed and are folded into §2
+of the report, receipts filed at **`docs/ux-study/digests-2026-09-21/`** (bookmap-atas ·
+quantower-sierra · ninjatrader-mt5 · adjacent-tier-and-defunct-case). Material changes: **Bookmap is
+now majority-owned by Nelogica (Oct 2024)** and its deepest order-flow set (Footprint, DOM Pro,
+Execution Pro, Multibrackets) is Global+-only; **ATAS warns the Ultra MBO bundle "may become paid for
+all subscription types later this year"**; **Kraken completed the NinjaTrader acquisition 2025-05-01**
+— and the previous pass's "TradingView owns Tradovate" line was **wrong** (NinjaTrader bought
+Tradovate in 2022; TradingView is a broker *partner*) and is corrected; **Sierra Chart's Base packages
+cannot connect to any external service**, and MBO transmits only orders ≥3 lots; the defunct case is
+**MarketDelta (Chapter 7, 2018)** whose "Footprint" survives as the trademark every competitor renames
+around; the MT5 ">100 novelty tips" claim could not be re-verified and is now marked unverified.
+Research scratch files (`batch*.json`) were removed from the repo root at close-out.
 
 ## §148 (2026-09-21) — the final audit, closed
 

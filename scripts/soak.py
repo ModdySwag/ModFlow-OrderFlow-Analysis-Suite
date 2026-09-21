@@ -54,7 +54,7 @@ def rss_bytes(pid: int) -> int:
         return int(counters.WorkingSetSize)
     try:                                             # POSIX
         import resource
-        with open(f"/proc/{pid}/statm") as fh:
+        with open(f"/proc/{pid}/statm", encoding="utf-8") as fh:
             pages = int(fh.read().split()[1])
         return pages * resource.getpagesize()
     except Exception:

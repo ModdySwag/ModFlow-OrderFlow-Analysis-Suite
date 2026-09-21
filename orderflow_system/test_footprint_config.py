@@ -477,7 +477,7 @@ def _node(script: str, *args: str) -> subprocess.CompletedProcess:
     node = shutil.which("node")
     if not node:                                     # pragma: no cover - node ships with the build
         pytest.skip("node is not on PATH")
-    return subprocess.run([node, "-e", script, *args], capture_output=True, text=True, timeout=120)
+    return subprocess.run([node, "-e", script, *args], capture_output=True, text=True, encoding="utf-8", timeout=120)
 
 
 def _js_annotate(fixture: dict) -> dict:
@@ -604,7 +604,7 @@ def test_the_selftest_runs_green_under_node():
     node = shutil.which("node")
     if not node:                                     # pragma: no cover
         pytest.skip("node is not on PATH")
-    proc = subprocess.run([node, str(SELFTEST)], capture_output=True, text=True, timeout=180)
+    proc = subprocess.run([node, str(SELFTEST)], capture_output=True, text=True, encoding="utf-8", timeout=180)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "failed" in proc.stdout and "0 failed" in proc.stdout, proc.stdout
 

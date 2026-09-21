@@ -86,7 +86,12 @@ The binaries are **unsigned**. The route is decided (see `docs\RELEASE_CHECKLIST
 - **Local signing** with a certificate you own: `scripts\sign_release.ps1 -Thumbprint <sha1>`
   (or `-PfxPath` with `OFAP_SIGN_PFX_PASSWORD`) signs, timestamps and verifies the exe and the
   setup; it fetches signtool from the Windows SDK build tools when absent, and with no certificate
-  it exits 3 and prints what is missing.
+  it exits 3 and prints what is missing. The script finds the certificate in either store (user or
+  machine) and passes `/sm` only when it lives in the machine store; `-AllowSelfSigned` accepts a
+  self-signed signature as "present, from our own certificate" instead of counting it failed. A
+  self-signed beta certificate exists locally (public half: `C:\Users\Moddy\keystores\modflow-selfsigned.cer`)
+  — testers who install it into their trusted root see a named publisher instead of "Unknown"; it
+  does not give SmartScreen relief to strangers, so it is a private-beta lane, not the public one.
 - Azure Artifact Signing is **not** available to individual developers outside the USA/Canada, so
   it was ruled out for this project.
 
@@ -186,3 +191,14 @@ InstallShield.
 - **Frozen payload markers** (this pass's own additions, served from the artifact): `/desktop/index.html` carries the instrument selector's tooltip, `/desktop/ui.js` carries `CHART_RETRY_MAX` + `refreshLiveChip(payload)`, `/desktop/help-data.js` carries the pick-starts-engine sentence.
 - **Frozen guard probe** (the release audit's battery, re-run on this artifact): **23/23** — docs 404 ×3, served==packaged for 8 shell files, CSP meta, hostile Host / cross-origin / cross-site 403, loopback 200, WS 101/403, export-traversal name stays inside `exports\`, `app.frozen=true`.
 - **Silent install / uninstall** (`scripts/verify_installer.ps1`): **11/11 PASS** — install exit 0, 899 files, ARP entry + Start Menu entry created, the installed app booted headless (`/healthz` 200, `/desktop` 200, `/docs` 404), port released, uninstall exit 0, install dir + ARP + Start Menu gone, `%APPDATA%\OrderFlowAnalysisPro` untouched, the dev desktop shortcut left as found.
+
+## Verified journey (Inno pipeline, the §119–§149b wave — the `0eedc0d` final build) - measured 2026-09-21
+
+- **Build**: the §119–§149b tree frozen at the final bytes (last source edit 14:26; the same tree committed at 14:56:53 as `0eedc0d`; no source file touched after the build). `dist/BUILD_INFO.json` still stamps commit `797eea0`, `worktree_state: dirty`, built **2026-09-21T14:34:39+0930** — the stamp predates the commit; payload parity on sampled shell files is byte-identical to the tree. Setup `ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe`, **38,201,838 bytes** (36.43 MB), sha256
+  `ABD78B3E3E9F283AD60217D678A73012B7379C9EB341B3644ECD5629F6986F52`. The payload it wraps: zip 43,599,366 bytes, sha256
+  `ec50468f1799ef78d36ab66ae349945f80c2565d1390e66ffa9e59c015dcc156`; CycloneDX SBOM, sha256
+  `3d13b50ddb25d350cbc5c253a31703c9960450d669a44ef8434d08fdb6906f71`. dist exe: 16,484,958 bytes, sha256
+  `bfd3d603cf258a30f7fd263786ac63e0c13a79a0b432e4e1ac97ff5a15b1aaf8` (matches `BUILD_INFO.json`).
+- **Payload parity spot-check (this date)**: `ui.js`, `menubar.js`, `tips.js`, `why.js`, `help-data.js` byte-identical between the tree and `_internal/`.
+- **Silent install / uninstall** (`scripts/verify_installer.ps1`, re-run 2026-09-21 on this exact Setup): **11/11 PASS** — install exit 0, **914 files**, Add/Remove + Start Menu entries created, the installed app booted headless (`/healthz` 200, `/desktop` 200, `/docs` 404), port released, uninstall exit 0, install dir + ARP + Start Menu gone, `%APPDATA%\OrderFlowAnalysisPro` untouched. Receipt: `runtime/ofap_s150/final_build_journey_2026-09-21.log`.
+- **Not re-run for this build**: the frozen smoke / frozen features / guard-probe batteries (their most recent runs are the §129b and §135 entries above).

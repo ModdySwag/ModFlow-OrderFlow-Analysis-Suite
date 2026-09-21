@@ -36,7 +36,7 @@ def test_the_registry_selftest_passes():
         [_node(), str(SELFTEST)],
         cwd=str(SELFTEST.parent),
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8",
         timeout=60,
     )
     output = (proc.stdout or "") + (proc.stderr or "")

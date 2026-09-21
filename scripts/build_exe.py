@@ -249,9 +249,9 @@ def write_build_stamp(target: Path) -> Path:
     dirty = ""
     try:
         sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(ROOT), capture_output=True,
-                             text=True, timeout=20).stdout.strip()
+                             text=True, encoding="utf-8", timeout=20).stdout.strip()
         dirty = subprocess.run(["git", "status", "--porcelain"], cwd=str(ROOT), capture_output=True,
-                               text=True, timeout=20).stdout.strip()
+                               text=True, encoding="utf-8", timeout=20).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         pass
     exe_sha = ""
@@ -285,7 +285,7 @@ def main() -> int:
         dirty = ""
         try:
             dirty = subprocess.run(["git", "status", "--porcelain"], cwd=str(ROOT),
-                                   capture_output=True, text=True, timeout=20).stdout.strip()
+                                   capture_output=True, text=True, encoding="utf-8", timeout=20).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             dirty = ""
         if dirty:

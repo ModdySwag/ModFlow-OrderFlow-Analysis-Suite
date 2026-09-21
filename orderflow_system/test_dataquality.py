@@ -725,7 +725,7 @@ def test_the_panel_paints_a_real_payload_from_this_module(tmp_path):
 
     for label, path in (("a scorecard", good), ("a refusal", empty)):
         proc = subprocess.run([node, str(SELFTEST), "--payload", str(path)],
-                              cwd=str(SELFTEST.parent), capture_output=True, text=True, timeout=60)
+                              cwd=str(SELFTEST.parent), capture_output=True, text=True, encoding="utf-8", timeout=60)
         output = (proc.stdout or "") + (proc.stderr or "")
         match = re.search(r"data-quality selftest:\s*(\d+)\s*ok,\s*(\d+)\s*failed", output)
         assert match, f"the selftest printed no summary for {label}:\n{output}"
@@ -744,7 +744,7 @@ def test_the_selftest_passes_on_its_own():
     if not node:                                               # pragma: no cover - CI without node
         pytest.skip("node is not on PATH")
     proc = subprocess.run([node, str(SELFTEST)], cwd=str(SELFTEST.parent),
-                          capture_output=True, text=True, timeout=60)
+                          capture_output=True, text=True, encoding="utf-8", timeout=60)
     output = (proc.stdout or "") + (proc.stderr or "")
     match = _re.search(r"data-quality selftest:\s*(\d+)\s*ok,\s*(\d+)\s*failed", output)
     assert match, f"the selftest printed no summary:\n{output}"

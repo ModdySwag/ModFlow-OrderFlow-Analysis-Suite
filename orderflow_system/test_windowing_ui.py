@@ -30,7 +30,7 @@ def test_the_module_exists_and_parses():
     node = shutil.which("node")
     assert node, "node is required for the UI gates"
     proc = subprocess.run([node, "--check", str(UI / "windowing.js")],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 0, proc.stderr
 
 

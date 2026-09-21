@@ -103,7 +103,7 @@ def js_syntax_check() -> list[str]:
         return ["(node not found — JS syntax check skipped)"]
     bad = []
     for f in files:
-        proc = subprocess.run([node, "--check", str(f)], capture_output=True, text=True)
+        proc = subprocess.run([node, "--check", str(f)], capture_output=True, text=True, encoding="utf-8")
         if proc.returncode != 0:
             first = (proc.stderr or "").strip().splitlines()
             detail = next((ln for ln in first if "SyntaxError" in ln), first[0] if first else "unknown")

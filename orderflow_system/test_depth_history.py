@@ -740,7 +740,7 @@ def _panel_marker_cells(payload: dict, cap: int | None = None) -> list[dict]:
         "console.log(JSON.stringify(win.OFAPDEPTHH.markerCells(fixture, cap)));"
     )
     proc = subprocess.run([node, "-e", script, json.dumps(payload), str(cap if cap is not None else "")],
-                          capture_output=True, text=True, timeout=120)
+                          capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert proc.returncode == 0, proc.stderr
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
@@ -841,6 +841,6 @@ def test_the_depth_history_selftest_runs_green_under_node():
     if not node:
         pytest.skip("node is not on PATH")
     selftest = Path(__file__).parent / "desktop" / "ui" / "depth-history.selftest.js"
-    proc = subprocess.run([node, str(selftest)], capture_output=True, text=True, timeout=180)
+    proc = subprocess.run([node, str(selftest)], capture_output=True, text=True, encoding="utf-8", timeout=180)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "failed" in proc.stdout and "0 failed" in proc.stdout, proc.stdout

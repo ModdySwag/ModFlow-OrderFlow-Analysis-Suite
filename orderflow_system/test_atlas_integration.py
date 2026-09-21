@@ -599,11 +599,20 @@ def test_extras_start_one_connection_for_many_symbols(monkeypatch):
     h = FeatureHub()
     h.extras_enabled = True
 
-    result = _asyncio.run(h.start_feeds({"BTCUSDT": 0.1, "ETHUSDT": 0.01, "SOLUSDT": 0.001}))
+    # One event loop for both calls, as the app runs the hub: start_feeds creates the feed tasks
+    # with asyncio.create_task, and a task belongs to the loop that made it — gathering it from a
+    # second asyncio.run touches a closed loop (CI, Python 3.11.9: "Event loop is closed").
+    async def _start_then_stop():
+        started = await h.start_feeds({"BTCUSDT": 0.1, "ETHUSDT": 0.01, "SOLUSDT": 0.001})
+        stopped = await h.stop_feeds()
+        return started, stopped
+
+    result, stopped = _asyncio.run(_start_then_stop())
     assert len(made) == 1, "five instruments used to mean five sockets; one connection carries them all"
     assert made[0] == ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
     assert result["feeds"] == 1 and result["symbols"] == ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-    assert _asyncio.run(h.stop_feeds())["ok"] is True
+    assert stopped["ok"] is True
+    assert h._feed_tasks == [], "stop_feeds returns only once the feed tasks have actually unwound (A-06)"
 
 
 def test_liquidation_routes_into_hub_and_tracker():

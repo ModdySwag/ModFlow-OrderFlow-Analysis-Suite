@@ -21,7 +21,7 @@ def test_the_legacy_widgets_selftest_passes():
     if node is None:
         pytest.skip("node is not installed")
     assert SELFTEST.is_file(), SELFTEST
-    proc = subprocess.run([node, str(SELFTEST)], capture_output=True, text=True, timeout=120,
+    proc = subprocess.run([node, str(SELFTEST)], capture_output=True, text=True, encoding="utf-8", timeout=120,
                           cwd=str(Path(__file__).resolve().parents[1]))
     tail = (proc.stdout or "").strip().splitlines()[-1:] or [""]
     assert proc.returncode == 0, f"{tail[0]}\n{proc.stdout}\n{proc.stderr}"
