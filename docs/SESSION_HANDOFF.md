@@ -1,13 +1,49 @@
 # Session handoff — ModFlow OrderFlow Analysis Suite
 
-**Date:** 2026-09-21 · **Tree:** `C:\Users\<you>\OrderFlow-Analysis-Pro` · **HEAD:** `49382c7`
-**Committed and pushed:** the §119–§149b wave as `0eedc0d`; the CI-red fix as `50f871a`; the §150 record as `85130d7`; the SignPath-conditions wave as `49382c7`. Public `master` is in step, working tree clean. Public runs: `35571830367` ✓ · `35572466682` ✓ · `35573159341` ✓ (2,493 passed / 6 skipped on 3.11 + 3.12; `build` + `churn` green; `soak`/`sign` skipped by design). The download page (`ModFlow-beta-builds` README) carries the same code-signing-policy section (commit `9cd03bb2e750`).
+**Date:** 2026-09-21 · **Tree:** `C:\Users\<you>\OrderFlow-Analysis-Pro` · **HEAD:** `a39330b`
+**Committed and pushed:** the §119–§149b wave as `0eedc0d`; the CI-red fix as `50f871a`; the §150 record as `85130d7`; the SignPath-conditions wave as `49382c7`; the README's wrong-interpreter guidance as `6798382`; the venue-harness + port-gate fix pass as `a39330b`; the release refresh (evidence, journey, provenance, §152) as this commit. Public `master` is in step, working tree clean. Public runs: `35571830367` ✓ · `35572466682` ✓ · `35573159341` ✓ · `35577490792` ✓ (2,496 passed / 6 skipped on both interpreters; `build` + `churn` green; `soak`/`sign` skipped by design). The download page (`ModFlow-beta-builds` README) carries the same code-signing-policy section (commit `9cd03bb2e750`).
 
 **Run it:** `orderflow_system.desktop` (the owner's shortcut: `.venv\Scripts\pythonw.exe -m
 orderflow_system.desktop`, binds 127.0.0.1:8080). Frozen build: `dist/ModFlowOrderFlowAnalysisSuite/ModFlowOrderFlowAnalysisSuite.exe`
 (`scripts/build_exe.py`). Scratch scripts belong in `$LOCALAPPDATA/Temp`, not the repo.
 
 ---
+
+## §152 (2026-09-21) — the release refresh: the beta lane now carries the `a39330b` build
+
+The owner's word — "the most recent final complete build we just finished not an hour ago" on the
+download page — closed today's chain after §151: the two commits the lane had not seen (`6798382`,
+the README's Start-the-System / `ModuleNotFoundError` guidance; `a39330b`, the venue-harness +
+port-gate fix pass), then a clean rebuild, the full batteries, and the asset replacement on
+`v0.1.0-beta`.
+
+- **The build**: `scripts/build_exe.py --release` on `a39330b`, worktree clean — the first release
+  stamp with no dirty suffix (`BUILD_INFO.json`: commit `a39330b75a06…`, `worktree_state "clean"`,
+  built 2026-09-21T18:06:42+0930). Setup **38,202,259 B** sha256 `1fd6a9db…`, zip **43,597,931 B**
+  `670f014f…` (912 entries, all under the app folder, `testzip` OK), SBOM **448,822 B**
+  `80c6dae6…` (45 components), dist exe **16,484,958 B** `e13db46a…` (matches the stamp). 248
+  developer files pruned; licence texts 62 files / 19 distributions; WebView2 bootstrapper embedded,
+  unchanged (`83004A28…`).
+- **The batteries**: gates on the tree — pytest **2,499 / 3 / 0** (87.0 s), node selftests **57/57**,
+  AUDIT CLEAN (154 modules, 346 ids), ruff 0.16.7 clean. Frozen smoke **18/18** (asset parity now
+  **93 shell refs** + 11 help PNGs), frozen features **20/20**, `/docs` `/redoc` `/openapi.json`
+  **404**, port released. Installer journey **11/11** — 914 files, installed-app boot, uninstall no
+  trace, `%APPDATA%` untouched; the installed exe's hash was checked separately (equal to the dist
+  exe) because `verify_installer.ps1` hashes only the Setup.
+- **The lane**: the three assets replaced in place on `v0.1.0-beta` (uploaded 2026-09-21T08:43Z;
+  the API digests equal the local sha256), and the notes rewritten for this set (914 files, smoke
+  18/18, features 20/20, journey 11/11, the three hashes, `commit a39330b`). **The drift is closed**:
+  the notes had been carrying `76f53ead… / f11450d7… / 8c3c0683…` — matching neither the assets
+  actually up (`8ee41af5… / e6051d42… / 317b19a8…`, uploaded 2026-09-18T12:12Z) nor anything on disk.
+- **Provenance and records**: `docs/BINARY_PROVENANCE.md`'s `ModFlowBridge.dll` row had been stale
+  since `42ec6a2` (the bridge rebuild left the old hash in place) — now `a2bdb248…`, matching the
+  file, the tree and the payload the zip ships. `installer/README.md` gained the `a39330b` journey
+  section; `docs/RELEASE_EVIDENCE_v0.1.0-beta.md`'s artefact tables and gate figures were
+  re-measured for this build. These refreshes and this record ride the docs commit on top of
+  `a39330b`.
+- **Still owed** (unchanged): the SignPath Foundation application + the MFA confirmation (then the
+  repository variable + secret switch the CI `sign` job live) — the next build is the one that gets
+  signed; the physical multi-monitor pass.
 
 ## §151 (2026-09-21) — the SignPath conditions, met in-repo (pushed as `49382c7`)
 
