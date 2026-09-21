@@ -202,3 +202,18 @@ InstallShield.
 - **Payload parity spot-check (this date)**: `ui.js`, `menubar.js`, `tips.js`, `why.js`, `help-data.js` byte-identical between the tree and `_internal/`.
 - **Silent install / uninstall** (`scripts/verify_installer.ps1`, re-run 2026-09-21 on this exact Setup): **11/11 PASS** — install exit 0, **914 files**, Add/Remove + Start Menu entries created, the installed app booted headless (`/healthz` 200, `/desktop` 200, `/docs` 404), port released, uninstall exit 0, install dir + ARP + Start Menu gone, `%APPDATA%\OrderFlowAnalysisPro` untouched. Receipt: `runtime/ofap_s150/final_build_journey_2026-09-21.log`.
 - **Not re-run for this build**: the frozen smoke / frozen features / guard-probe batteries (their most recent runs are the §129b and §135 entries above).
+
+## Verified journey (Inno pipeline, the `a39330b` release build) - measured 2026-09-21
+
+- **Build**: HEAD `a39330b`, worktree clean (`dist/BUILD_INFO.json` records commit + state, built 2026-09-21T18:06:42+0930). Setup `ModFlowOrderFlowAnalysisSuite-Setup-0.1.0.exe`, **38,202,259 bytes** (36.43 MB), sha256
+  `1fd6a9db80fe475f9eaad1abe1a754fced8eb0e36d6d1afe2dee6e098182f4f9`; the WebView2 bootstrapper embedded in it is 1.76 MB, sha256
+  `83004A28553BCF2F932BF03564FBAB407B8E1F59CD265F8DC99CC53D028E459C` (unchanged).
+  The payload it wraps: 912 files (248 developer files pruned); zip 43,597,931 bytes, sha256
+  `670f014f8692f3dcd0ecb5a938654c14e710114e7ce0664a139ae08ca3c62991`; CycloneDX SBOM (45 components), sha256
+  `80c6dae6fced0e390b569003fe05dc9dc6aedb9462b7cee8549d82b3d5a6b239`. dist exe: 16,484,958 bytes, sha256
+  `e13db46a4a88ae11fdb5b0e40c5fb82439cf01c11f1bc34e1258be55975c3d55` (matches `BUILD_INFO.json`).
+- **Frozen smoke** (dist exe, port 8098, scratch APPDATA): **18/18** — healthz + BTCUSDT candles (1,440 rows), unknown-symbol `[]` on footprint/tape, hostile-Host 403, `/api/control/sources` (7 venues), radar endpoint + education corpus present, **asset parity 93 shell refs + 11 help PNGs + help-data/help-search/help served byte-identical to the tree**, help payload `frozen=true`, WS 101/403, 0 client errors.
+- **Frozen features** (same exe, port 8097): **20/20** — payload parity for `menubar.js` / `windows-ui.js` / `windowing.js` / `help-data.js`; the §129 versions row + auto-cull switch and the §129b scroll guard present in the payload AND in the file the page actually requests; `/api/control/layouts` answers keep=5 max=10 and the switch writes through; `/api/control/windows` answers `stranded` + `open_geometry`; 0 client errors; port released.
+- **Docs endpoints** (same exe): `/healthz` 200, `/desktop` 200, `/docs` 404, `/redoc` 404, `/openapi.json` 404; port 8097 released after stop.
+- **Silent install / uninstall** (`scripts/verify_installer.ps1`): **11/11 PASS** — install exit 0, **914 files** (the 912-file payload + `unins000.exe`/`.dat`), Add/Remove + Start Menu entries created, the installed app booted headless (`/healthz` 200, `/desktop` 200, `/docs` 404), port released, uninstall exit 0, install dir + ARP + Start Menu gone, `%APPDATA%\OrderFlowAnalysisPro` untouched.
+- **Gates on this tree** (before the build): pytest **2499 passed / 3 skipped / 0 failed** (87.1 s); node `*.selftest.js` **57/57**; `scripts/audit_ui_refs.py` **AUDIT CLEAN** (154 modules parse, 346 ids, 0 missing); ruff 0.16.7 clean.
