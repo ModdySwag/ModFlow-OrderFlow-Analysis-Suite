@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- SignPath artifact configuration - what gets signed, and how.
+<!-- SignPath artifact configuration - what gets signed, how, and with which metadata.
 
      The CI build job assembles ONE artifact named "dist-sign" containing two files:
        ModFlowOrderFlowAnalysisSuite.exe               (the frozen application)
@@ -7,15 +7,36 @@
      Both are Authenticode-signed in a single signing request. The signing policy
      ("release-signing") lives in the SignPath organization, not here.
 
+     Metadata restrictions: SignPath Foundation's conditions require the signed binaries to carry
+     the same product metadata, enforced here. product-name is the project name; the versions come
+     from the "version" parameter, which CI fills from pyproject.toml (single source). Both files
+     are built with that metadata set: installer/modflow.iss VersionInfo directives and
+     scripts/build_exe.py's version resource.
+
+     Note on Inno Setup: it writes version-info strings padded to fixed field widths ("0.1.0"
+     followed by spaces). That padding is Inno's behaviour, not ours. If the organization's
+     metadata check proves to be exact-match against the padding, drop the product-version
+     attribute here and keep product-name + company-name - or align the check in the organization.
+
      Until the project is accepted by SignPath Foundation and the repository has
      SIGNPATH_ORGANIZATION_ID (variable) + SIGNPATH_API_TOKEN (secret), the CI job that uses this
      file is skipped and the release stays unsigned - see docs/RELEASE_CHECKLIST.md section 6. -->
 <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
   <zip-file>
-    <pe-file path="ModFlowOrderFlowAnalysisSuite.exe">
+    <pe-file path="ModFlowOrderFlowAnalysisSuite.exe"
+             product-name="ModFlow OrderFlow Analysis Suite"
+             product-version="${version}"
+             file-version="${version}"
+             company-name="ModdySwag">
       <authenticode-sign/>
     </pe-file>
-    <pe-file path="ModFlowOrderFlowAnalysisSuite-Setup.exe">
+    <pe-file path="ModFlowOrderFlowAnalysisSuite-Setup.exe"
+             product-name="ModFlow OrderFlow Analysis Suite"
+             product-version="${version}"
+             company-name="ModdySwag">
       <authenticode-sign/>
     </pe-file>
   </zip-file>

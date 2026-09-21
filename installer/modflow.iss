@@ -30,6 +30,17 @@ AppId={#AppId}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
+; Explicit version-info, so every signed binary carries the same metadata (a SignPath
+; Foundation condition: product name = the project name, versions = the pyproject version).
+; Inno writes these fields padded to fixed widths - that padding is Inno's own, not ours.
+VersionInfoVersion={#AppVersion}
+VersionInfoProductVersion={#AppVersion}
+VersionInfoProductName={#AppName}
+VersionInfoCompany={#AppPublisher}
+VersionInfoDescription={#AppName} Setup
+VersionInfoTextVersion={#AppVersion}
+VersionInfoProductTextVersion={#AppVersion}
+VersionInfoCopyright=MIT License - ModdySwag
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}/issues
@@ -49,8 +60,8 @@ WizardStyle=modern
 UninstallDisplayIcon={app}\{#AppExeName}
 CloseApplications=yes
 SetupLogging=yes
-; The binaries are unsigned until a code-signing certificate is bought - see
-; scripts\sign_release.ps1 and docs\RELEASE_CHECKLIST.md ?6.
+; Signing: releases are signed through SignPath Foundation (docs\SIGNPATH_APPLICATION.md);
+; local builds can be signed with scripts\sign_release.ps1 - see docs\RELEASE_CHECKLIST.md section 6.
 SignedUninstaller=no
 
 [Languages]

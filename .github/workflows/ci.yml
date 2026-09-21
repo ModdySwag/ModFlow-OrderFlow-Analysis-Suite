@@ -217,6 +217,22 @@ jobs:
           name: dist-sign
           path: dist-sign
 
+      # The artifact configuration declares a required parameter "version" - it is read from the
+      # single source (pyproject.toml), never typed here, so the signed metadata cannot drift from
+      # the build.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+        with:
+          sparse-checkout: pyproject.toml
+
+      - name: Read the release version (pyproject.toml)
+        id: version
+        shell: pwsh
+        run: |
+          $m = Select-String -Path pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
+          if (-not $m) { throw 'pyproject.toml has no version line' }
+          Write-Host "version: $($m.Matches[0].Groups[1].Value)"
+          "version=$($m.Matches[0].Groups[1].Value)" >> $env:GITHUB_OUTPUT
+
       - name: Sign the binaries (SignPath Foundation)
         uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092   # v3
         with:
@@ -225,6 +241,8 @@ jobs:
           project-slug: ModFlow-OrderFlow-Analysis-Suite
           signing-policy-slug: release-signing
           artifact-configuration-slug: default
+          parameters: |
+            version: "${{ steps.version.outputs.version }}"
           github-artifact-id: ${{ needs.build.outputs.sign_artifact_id }}
           wait-for-completion: true
           output-artifact-directory: dist-signed

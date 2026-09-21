@@ -130,10 +130,39 @@ tagged **`v0.1.0-beta`** — the label used in this README and in `SECURITY.md`.
 
 ---
 
+## Code signing policy
+
+**Free code signing provided by [SignPath.io](https://signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/).**
+
+Releases are built by this repository's own CI, and the pipeline that signs them is the same one
+that builds them: the frozen application and the installer go to SignPath in one signing request,
+and every signed file is downloaded and re-verified as `Valid` before a release is published.
+Nothing is signed by hand. Releases published before the Foundation onboarding completes ship
+unsigned and their release notes say so; [docs/SIGNPATH_APPLICATION.md](docs/SIGNPATH_APPLICATION.md)
+tracks the application.
+
+**Team roles.** One maintainer holds every role; the mapping to the repository's permission
+groups:
+
+| Foundation role | Member | Rights |
+| --- | --- | --- |
+| Committers and reviewers | [@ModdySwag](https://github.com/ModdySwag) | write access to [the source repository](https://github.com/ModdySwag/ModFlow-OrderFlow-Analysis-Suite) — every change lands through its commit history |
+| Approvers | [@ModdySwag](https://github.com/ModdySwag) | approves signing requests in the SignPath organization |
+
+**Privacy policy.** This program will not transfer any information to other networked systems
+unless specifically requested by the user or the person installing or operating it. The complete
+list of outbound calls is the one in the section above: the market-data feeds you configure, the
+SEC/CoinGecko look-ups the fundamentals panel makes on demand, and the release check — a keyless
+GitHub API call. No telemetry, no analytics, no crash reporting.
+
+---
+
 ## Table of Contents
 
 - [See It Running](#see-it-running)
 - [Status, limitations & privacy](#status-limitations--privacy)
+- [Code signing policy](#code-signing-policy)
 - [Golden Features](#golden-features)
 - [Multiple monitors](#multiple-monitors)
 - [Credit & Lineage](#credit--lineage)
