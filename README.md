@@ -7,7 +7,7 @@
 [![Instruments](https://img.shields.io/badge/instruments-49-blue?style=for-the-badge)](.)
 [![Code](https://img.shields.io/badge/code-~129k%20lines-brightgreen?style=for-the-badge)](.)
 [![API](https://img.shields.io/badge/API-190%20routes-orange?style=for-the-badge)](.)
-[![Tests](https://img.shields.io/badge/tests-2497%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+[![Tests](https://img.shields.io/badge/tests-2499%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
 
 **Where it sits:** ModFlow is an analytics layer, not a broker terminal — it reads the market in
 depth and sits beside whatever you execute in. No order tickets, no positions, no sign-up; your
@@ -1121,7 +1121,7 @@ orderflow_system/
 | Orchestrator (`main.py` + package init) | 2 | 1,387 | — | 1,387 |
 | **Total (excluding tests)** | **296** | **56,679** | **72,945** | **129,624** |
 
-Measured with a line count over `orderflow_system/**` and `scripts/*.py` (the two PowerShell release scripts — 271 lines — are not counted); the pytest suite is another 181 files / 42,544 lines. The NinjaTrader bridge add-on ships as C# (`orderflow_system/data/ninjatrader_bridge/` — 1,666 lines across four files, plus the built DLL) and is not counted in the columns above; the desktop UI count also excludes its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the eleven Help Centre screenshots (`orderflow_system/desktop/ui/help/`).
+Measured with a line count over `orderflow_system/**` and `scripts/*.py` (the two PowerShell release scripts — 271 lines — are not counted); the pytest suite is another 181 files / 42,647 lines. The NinjaTrader bridge add-on ships as C# (`orderflow_system/data/ninjatrader_bridge/` — 1,666 lines across four files, plus the built DLL) and is not counted in the columns above; the desktop UI count also excludes its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the eleven Help Centre screenshots (`orderflow_system/desktop/ui/help/`).
 
 ---
 

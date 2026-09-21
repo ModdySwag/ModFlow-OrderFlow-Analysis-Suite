@@ -252,6 +252,7 @@ async def _run_feed(frames, *, symbols=("BTCUSDT",), resync_cooldown_s=0.0):
     ws.push(*frames)
 
     async def connect():
+        feed._conn = ws              # production's _connect parks the live connection here too
         return ws
 
     async def on_tick(symbol, tick):
@@ -267,18 +268,32 @@ async def _run_feed(frames, *, symbols=("BTCUSDT",), resync_cooldown_s=0.0):
 
 
 async def feed_start(feed, connect):
-    """Drive the session for a moment without waiting on real sockets."""
+    """Drive the session for a moment without waiting on real sockets.
+
+    The session owns the connection and the subscription — one owner, as production's
+    OkxFeed.start() has it; the harness must not call on_connected beside it (the second, manual
+    subscribe cycle raced the session's own — the Hyperliquid harness shipped the same shape and a
+    whole-list assertion read whichever cycle won). The wait is the subscription itself, not a
+    wall-clock guess.
+    """
     import orderflow_system.data.feed_session as fs
 
+    connected = asyncio.Event()
+
+    async def on_connected(conn):
+        await feed._on_connected(conn)
+        connected.set()
+
     session = fs.FeedSession("okx", connect, feed._on_frame,
-                             on_connected=feed._on_connected,
+                             on_connected=on_connected,
                              on_disconnected=feed._on_disconnected,
                              policy=VENUE_POLICIES["okx"], heartbeat_tick_s=0.05)
     feed._session = session
-    feed._conn = await connect()
-    await feed._on_connected(feed._conn)
-    asyncio.create_task(session.run())
-    await asyncio.sleep(0.02)                           # let the reader reach the first frame
+    task = asyncio.create_task(session.run())
+    for _ in range(200):
+        await asyncio.sleep(0.01)
+        if not task.done() and connected.is_set():
+            break
     return session
 
 

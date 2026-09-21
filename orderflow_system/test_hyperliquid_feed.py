@@ -156,6 +156,7 @@ async def _run_feed(frames, *, meta=None, symbols=("BTCUSDT",), stale_after_s=10
     ws = FakeWS()
 
     async def connect():
+        feed._conn = ws      # production's _connect parks the live connection here too
         return ws
 
     async def on_tick(symbol, tick):
@@ -177,22 +178,33 @@ async def _run_feed(frames, *, meta=None, symbols=("BTCUSDT",), stale_after_s=10
 
 
 async def feed_start(feed, connect, frames):
-    """Drive the session for a moment without waiting on real sockets."""
+    """Drive the session for a moment without waiting on real sockets.
+
+    The session owns the connection and the subscription — one owner, exactly as production's
+    HyperliquidFeed.start() has it (connect → on_connected → read loop). The harness must not
+    call on_connected beside it: a second, manual subscribe cycle raced the session's own, and
+    whole-list `ws.sent` assertions then read whichever cycle finished first — 4 payloads where
+    a stop a millisecond sooner read 2 (the CI test (3.11) red on a docs-only push).
+    """
     import orderflow_system.data.feed_session as fs
 
+    connected = asyncio.Event()
+
+    async def on_connected(conn):
+        await feed._on_connected(conn)
+        connected.set()
+
     session = fs.FeedSession("hyperliquid", connect, feed._on_frame,
-                             on_connected=feed._on_connected,
+                             on_connected=on_connected,
                              on_disconnected=feed._on_disconnected,
                              policy=VENUE_POLICIES["hyperliquid"],
                              ping_payload=json.dumps({"method": "ping"}),
                              heartbeat_tick_s=0.05)
     feed._session = session
-    feed._conn = await connect()
-    await feed._on_connected(feed._conn)
     task = asyncio.create_task(session.run())
     for _ in range(200):
         await asyncio.sleep(0.01)
-        if not task.done() and not frames:
+        if not task.done() and connected.is_set() and not frames:
             break
     return session
 
@@ -441,6 +453,23 @@ def test_the_listing_does_not_stop_the_mapping_when_the_rest_call_fails():
     assert [json.loads(payload)["subscription"]["coin"] for payload in ws.sent] == ["BTC", "BTC"], \
         "a REST hiccup must not silence a feed whose mapping is unambiguous"
     assert any("meta fetch failed" in r.getMessage() for r in records)
+
+
+def test_a_session_that_lives_longer_still_reads_as_one_subscription_cycle():
+    """The harness used to subscribe beside the session, so a stop that arrived a millisecond late
+    read 4 payloads where a prompt one read 2 — that race is what went red on a CI test (3.11) run
+    (measured: doubling the delay flipped 2 → 4, every time). The session is the single subscribe
+    owner now; letting it live beyond its first iteration must not change what the assertion sees.
+    """
+    async def main():
+        feed, ws, _ticks, _books, session = await _run_feed([])
+        await asyncio.sleep(0.05)          # several session iterations' worth of slack
+        await session.stop()
+        return feed, ws
+
+    _feed, ws = asyncio.run(main())
+    assert [json.loads(payload)["subscription"]["coin"] for payload in ws.sent] == ["BTC", "BTC"], \
+        "one subscribe per topic — a second cycle appeared only when stop() lost the race"
 
 
 def test_validate_symbols_reads_the_venue_listing(monkeypatch):
