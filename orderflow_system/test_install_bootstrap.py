@@ -9,7 +9,9 @@ pinned here:
    python.exe by full path), so the failing step does not exist on the documented happy path.
 2. The README gives a per-shell activation table for anyone doing it by hand — cmd.exe gets the
    backslash path, PowerShell gets its policy note, bash gets the POSIX source line.
-3. The README names the exact error and both fixes, so a search for the message lands on it.
+3. The README names the exact errors and their fixes — the activation one and the wrong-interpreter
+   one (`ModuleNotFoundError: No module named 'orderflow_system'`) — so a search for either message
+   lands on it.
 """
 
 from __future__ import annotations
@@ -57,6 +59,18 @@ def test_the_readme_explains_the_classic_activation_error() -> None:
     assert "\n.venv/Scripts/activate\n" not in readme, (
         "the bare POSIX activation line must never appear as a Windows instruction again")
     assert "Set-ExecutionPolicy -Scope Process Bypass" in readme, "the PowerShell policy note"
+
+
+def test_the_readme_names_the_wrong_interpreter_error_and_its_fix() -> None:
+    readme = README.read_text(encoding="utf-8")
+    assert "ModuleNotFoundError: No module named 'orderflow_system'" in readme, (
+        "the second error users report must be findable in the README")
+    assert ".venv\\Scripts\\python.exe -m orderflow_system.main" in readme, (
+        "the fix must be the venv interpreter by full path — a bare python has neither the package "
+        "nor its dependencies")
+    assert "headless CLI pipeline" in readme, (
+        "Start the System must say which entry point it starts, so the desktop app is not confused "
+        "for it")
 
 
 def test_the_readme_puts_the_installer_first_and_keeps_the_paths_honest() -> None:

@@ -7,7 +7,7 @@
 [![Instruments](https://img.shields.io/badge/instruments-49-blue?style=for-the-badge)](.)
 [![Code](https://img.shields.io/badge/code-~129k%20lines-brightgreen?style=for-the-badge)](.)
 [![API](https://img.shields.io/badge/API-190%20routes-orange?style=for-the-badge)](.)
-[![Tests](https://img.shields.io/badge/tests-2496%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+[![Tests](https://img.shields.io/badge/tests-2497%20passing-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
 
 **Where it sits:** ModFlow is an analytics layer, not a broker terminal — it reads the market in
 depth and sits beside whatever you execute in. No order tickets, no positions, no sign-up; your
@@ -898,6 +898,13 @@ Python is not on your PATH. Install Python 3.11+ from <https://www.python.org/do
 tick **Add python.exe to PATH** in the installer — or skip Python entirely and use the ready-built
 installer at the top of this section.
 
+#### `ModuleNotFoundError: No module named 'orderflow_system'`
+
+The command ran on an interpreter that cannot see the app — almost always the system Python from
+your PATH instead of the `.venv` that `install.cmd` created, and often from a directory that is not
+the repository root. Run it from the repository root with the venv active, or call the venv's
+interpreter directly: `.venv\Scripts\python.exe -m orderflow_system.main`.
+
 That's the whole path from zero to a running app. The rest of this section covers prerequisites and optional build steps.
 
 ### Prerequisites
@@ -995,6 +1002,13 @@ InitiativeConfig(
 ```bash
 python -m orderflow_system.main
 ```
+
+Run it from the repository root with the environment `install.cmd` created — the venv active, or
+by calling its interpreter directly: `.venv\Scripts\python.exe -m orderflow_system.main`. A bare
+system `python` has neither the package nor its dependencies and fails with
+`ModuleNotFoundError: No module named 'orderflow_system'` (see the FAQ under Installation). This is
+the headless CLI pipeline; for the desktop app itself, `run.cmd` — or
+`python -m orderflow_system.desktop`.
 
 The system will:
 1. Connect to configured data source(s)
@@ -1107,7 +1121,7 @@ orderflow_system/
 | Orchestrator (`main.py` + package init) | 2 | 1,387 | — | 1,387 |
 | **Total (excluding tests)** | **296** | **56,679** | **72,945** | **129,624** |
 
-Measured with a line count over `orderflow_system/**` and `scripts/*.py` (the two PowerShell release scripts — 271 lines — are not counted); the pytest suite is another 181 files / 42,530 lines. The NinjaTrader bridge add-on ships as C# (`orderflow_system/data/ninjatrader_bridge/` — 1,666 lines across four files, plus the built DLL) and is not counted in the columns above; the desktop UI count also excludes its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the eleven Help Centre screenshots (`orderflow_system/desktop/ui/help/`).
+Measured with a line count over `orderflow_system/**` and `scripts/*.py` (the two PowerShell release scripts — 271 lines — are not counted); the pytest suite is another 181 files / 42,544 lines. The NinjaTrader bridge add-on ships as C# (`orderflow_system/data/ninjatrader_bridge/` — 1,666 lines across four files, plus the built DLL) and is not counted in the columns above; the desktop UI count also excludes its icon assets, the four generated alert WAVs (`orderflow_system/desktop/ui/audio/`) and the eleven Help Centre screenshots (`orderflow_system/desktop/ui/help/`).
 
 ---
 
